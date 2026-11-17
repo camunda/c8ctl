@@ -54,6 +54,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"resolve",
 		"publish",
 		"correlate",
+		"setup",
 		"deploy",
 		"run",
 		"watch",
@@ -531,6 +532,7 @@ describe("mutating flag correctness", () => {
 		"resolve",
 		"publish",
 		"correlate",
+		"setup",
 		"deploy",
 		"run",
 		"assign",
@@ -538,7 +540,6 @@ describe("mutating flag correctness", () => {
 		"completion",
 		"mcp",
 	];
-
 	const NON_MUTATING_VERBS = [
 		"list",
 		"search",

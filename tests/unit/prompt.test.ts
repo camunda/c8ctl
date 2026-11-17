@@ -17,6 +17,7 @@ import {
 	confirm,
 	createPromptSession,
 	isInteractive,
+	multiSelect,
 	PromptCancelledError,
 	type PromptIO,
 	PromptNotInteractiveError,
@@ -25,6 +26,7 @@ import {
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const ENTER = "\r";
+const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const ESCAPE = "\x1b";
 
@@ -292,6 +294,200 @@ describe("confirm()", () => {
 	});
 });
 
+describe("multiSelect()", () => {
+	const CHECKED_OPTIONS = [
+		{ label: "Alpha", value: "a", checked: true },
+		{ label: "Bravo", value: "b" },
+		{ label: "Charlie", value: "c", checked: true },
+	];
+
+	test("Enter keeps the pre-checked options", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "c"]);
+	});
+
+	test("Space toggles the highlighted option off", async () => {
+		const io = fakeTTY();
+		type(io, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["c"]);
+	});
+
+	test("Space on an unchecked option adds it", async () => {
+		const io = fakeTTY();
+		type(io, DOWN, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b", "c"]);
+	});
+
+	test("values come back in option order, not toggle order", async () => {
+		const io = fakeTTY();
+		// Toggle Charlie off first, then Bravo on.
+		type(io, UP, " ", DOWN, DOWN, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b"]);
+	});
+
+	test("'a' checks every option, a second 'a' clears all", async () => {
+		const io = fakeTTY();
+		type(io, "a", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b", "c"]);
+
+		const io2 = fakeTTY();
+		type(io2, "a", "a", ENTER);
+		const result2 = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io: io2,
+		});
+		assert.ok(result2.interactive && !result2.cancelled);
+		assert.deepStrictEqual(result2.values, []);
+	});
+
+	test("an empty selection is allowed", async () => {
+		const io = fakeTTY();
+		// Alpha and Charlie start checked; toggle both off.
+		type(io, " ", DOWN, DOWN, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, []);
+	});
+
+	test("arrow keys wrap around at the ends", async () => {
+		const io = fakeTTY();
+		// Up from the first option lands on the last (Charlie, checked).
+		type(io, UP, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a"]);
+	});
+
+	test("a number key toggles the matching option", async () => {
+		const io = fakeTTY();
+		type(io, "2", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b", "c"]);
+	});
+
+	test("renders checked and unchecked markers per option", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /\[x\] Alpha/);
+		assert.match(plain, /\[ \] Bravo/);
+		assert.match(plain, /\[x\] Charlie/);
+	});
+
+	test("renders the key hint below the message", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /space/);
+		assert.match(plain, /enter/);
+	});
+
+	test("the summary line lists the chosen labels", async () => {
+		const io = fakeTTY();
+		type(io, DOWN, " ", ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /Alpha, Bravo, Charlie/);
+	});
+
+	test("the summary line reports an empty selection", async () => {
+		const io = fakeTTY();
+		type(io, "a", "a", ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /none selected/i);
+	});
+
+	test("Escape cancels", async () => {
+		const io = fakeTTY();
+		type(io, ESCAPE);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.deepStrictEqual(result, { interactive: true, cancelled: true });
+	});
+
+	for (const [name, keys] of [
+		["Enter", [ENTER]],
+		["Escape", [ESCAPE]],
+	] as const) {
+		test(`restores raw mode and the cursor after ${name}`, async () => {
+			const io = fakeTTY();
+			type(io, ...keys);
+			await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+			assertTerminalRestored(io);
+			assert.ok(io.text().includes(SHOW_CURSOR), "cursor left hidden");
+		});
+	}
+
+	test("non-TTY returns the pre-checked values with a hint", async () => {
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io: fakePipe(),
+		});
+		assert.ok(!result.interactive);
+		assert.deepStrictEqual(result.values, ["a", "c"]);
+		assert.match(result.hint, /non-interactive/);
+	});
+
+	test("requires at least one option", async () => {
+		await assert.rejects(
+			multiSelect({ message: "Pick", options: [], io: fakeTTY() }),
+			/at least one option/,
+		);
+	});
+});
+
 describe("createPromptSession()", () => {
 	describe("with yes: true", () => {
 		test("confirm returns the default without reading input", async () => {
@@ -431,7 +627,7 @@ describe("Ctrl+C", () => {
 		[
 			`import { writeSync } from "node:fs";`,
 			`import { PassThrough, Writable } from "node:stream";`,
-			`import { confirm, select } from ${JSON.stringify(FRAMEWORK)};`,
+			`import { confirm, multiSelect, select } from ${JSON.stringify(FRAMEWORK)};`,
 			`const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: (m) => { writeSync(1, "raw:" + m + ";"); return true; } });`,
 			`const output = Object.assign(new Writable({ write(chunk, _enc, cb) { if (String(chunk).includes("\\x1b[?25h")) writeSync(1, "cursor:shown;"); cb(); } }), { isTTY: true, columns: 80 });`,
 			`const io = { input, output };`,
@@ -481,5 +677,15 @@ describe("Ctrl+C", () => {
 		const result = await run(`confirm({ message: "OK?", io })`);
 		assert.strictEqual(result.signal, "SIGINT", result.stderr);
 		assert.match(result.stdout, /^raw:true;.*raw:false;$/);
+	});
+
+	test("multiSelect restores the terminal and re-raises SIGINT", {
+		skip,
+	}, async () => {
+		const result = await run(
+			`multiSelect({ message: "Pick", options: [{ label: "A", value: "a" }], io })`,
+		);
+		assert.strictEqual(result.signal, "SIGINT", result.stderr);
+		assert.strictEqual(result.stdout, "raw:true;raw:false;cursor:shown;");
 	});
 });

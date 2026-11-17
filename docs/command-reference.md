@@ -1036,6 +1036,19 @@ c8ctl unassign role admin --from-user=john                  # Unassign role from
 
 ---
 
+### `setup`
+
+Guided first-run setup: install a local cluster, a starter blueprint project, and AI assistant tooling — prints the plan before anything runs.
+
+**Examples:**
+
+```bash
+c8ctl setup                                                 # Run the guided setup wizard
+c8ctl setup --yes                                           # Plan with the defaults, without prompting
+```
+
+---
+
 ### `watch`
 
 Watch files for changes and auto-deploy
