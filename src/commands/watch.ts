@@ -39,6 +39,12 @@ import {
 
 export { DEPLOY_COOLDOWN };
 
+/**
+ * The descriptor no longer matches the mode this watch started in, so the
+ * watcher cannot keep going — not even with `--force`.
+ */
+class RestartRequiredError extends Error {}
+
 const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
@@ -182,7 +188,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		const state = readDeployResourcesState(root);
 		if (state.kind === "no-descriptor") return null;
 		if (state.kind === "no-field") {
-			throw new Error(
+			throw new RestartRequiredError(
 				'"deployResources" was removed from camunda.json. ' +
 					"Restart `c8 watch --project` to watch the default resource scan.",
 			);
@@ -310,7 +316,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		} catch (error) {
 			const err = normalizeToError(error, "Invalid resource selection");
 			logger.error("Invalid resource selection", err);
-			if (flags.force) {
+			// --force keeps watching after errors, but not after the mode
+			// itself is gone: continuing would redeploy a stale selection.
+			if (flags.force && !(error instanceof RestartRequiredError)) {
 				logger.info("Continuing to watch (--force).");
 				return;
 			}

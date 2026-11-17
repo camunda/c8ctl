@@ -120,8 +120,6 @@ class McpProxy {
 
 			// Connect server to STDIO transport
 			await this.mcpServer.connect(this.serverTransport);
-
-			this.logger.info("MCP proxy started successfully");
 		} catch (error) {
 			this.logger.error(
 				`Failed to start MCP proxy: ${error instanceof Error ? error.message : String(error)}`,
@@ -261,6 +259,8 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 			};
 			process.once("SIGINT", () => shutdown("SIGINT"));
 			process.once("SIGTERM", () => shutdown("SIGTERM"));
+			// Publish readiness only after graceful-shutdown signals are registered.
+			logger.info("MCP proxy started successfully");
 		});
 	} catch (error) {
 		const normalizedError = normalizeToError(error, "MCP proxy failed");

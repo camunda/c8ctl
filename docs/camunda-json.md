@@ -53,7 +53,9 @@ Validation:
 
 - A field that is not an array of strings, or an invalid pattern (empty, a bare `!`, a `#` comment, a drive-letter, UNC or backslash-rooted path, or one containing `..`), is an error. Nothing is deployed.
 - An empty final selection is an error. Nothing is deployed.
+- A `camunda.json` that isn't valid JSON, or whose top level isn't an object, is an `invalid-config` error, like an invalid field. Nothing is deployed.
 - A `camunda.json` that exists but can't be read (for example a folder with that name, a file without read permission, or a dangling symlink) is an error when you deploy or watch the project. `c8ctl` never falls back to the default scan in that case. Each command reads the descriptor once, so an edit that lands while it runs can't switch the project to the default scan either.
+- While `c8 watch --project` is running, removing `deployResources` from `camunda.json` stops the watcher, even with `--force`, and asks you to restart it to watch the default scan. Restart it also after adding the field to a project that was started without it.
 - A file or folder that a pattern can select but that can't be read (no permission, a dangling symlink, a file removed during the deployment) is an error that names the path. Nothing is deployed: `c8ctl` never deploys the selection without it. Paths that no pattern can reach are not read, so their errors don't matter. Brace groups (`{a,b}/**`), extglobs (`+(a|b)/**`) and character classes are checked exactly; only an extglob group that contains a `/` makes `c8ctl` look into every folder. To skip an unreadable folder that a broad pattern can reach, exclude it after that pattern, for example `"!vendor/"`.
 - A pattern that matches no file is silently ignored.
 

@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import {
 	CAMUNDA_PROJECT_FILE,
+	DeployResourcesError,
 	parseCamundaJson,
 	readCamundaProject,
 } from "../../src/utils/index.ts";
@@ -75,6 +76,18 @@ describe("parseCamundaJson", () => {
 		);
 	});
 
+	test("classifies invalid JSON and a non-object top level as invalid-config", () => {
+		for (const content of ["{ not json", '"just a string"', "[1, 2]"]) {
+			assert.throws(
+				() => parseCamundaJson(content),
+				(error: unknown) =>
+					error instanceof DeployResourcesError &&
+					error.code === "invalid-config",
+				content,
+			);
+		}
+	});
+
 	test("throws on non-object top level", () => {
 		assert.throws(() => parseCamundaJson('"just a string"'), /object/i);
 		assert.throws(() => parseCamundaJson("[1, 2]"), /object/i);
@@ -123,7 +136,10 @@ describe("readCamundaProject", () => {
 		writeFileSync(file, "{ broken");
 		assert.throws(
 			() => readCamundaProject(tempDir),
-			/invalid JSON.*camunda\.json/is,
+			(error: unknown) =>
+				error instanceof DeployResourcesError &&
+				error.code === "invalid-config" &&
+				/invalid JSON.*camunda\.json/is.test(error.message),
 		);
 	});
 });
