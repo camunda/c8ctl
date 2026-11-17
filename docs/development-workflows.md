@@ -345,6 +345,53 @@ c8 output text    # human-readable tables (default)
 c8 output         # show current output mode
 ```
 
+## Configure MCP connections
+
+Install Camunda MCP connections into your AI tools without editing their configuration files:
+
+```bash
+c8ctl mcp install
+c8ctl mcp install --docs
+c8ctl mcp install claude-code cursor --docs --orchestration
+c8ctl mcp install github-copilot --profile staging --alias camunda-staging
+c8ctl mcp install vscode --docs --dry-run
+c8ctl mcp uninstall claude-code --docs
+```
+
+With no target flag, `install` and `uninstall` select **orchestration**. `--docs` selects **only documentation**; combine `--docs --orchestration` to select both. The entries are independent: removing docs does not remove orchestration.
+
+Without harness names, c8ctl targets every supported harness detected through its executable on `PATH` or its user configuration. Specify one or more names to target only those harnesses, even if they have no configuration file yet. `claude`, `copilot`, and `code` are aliases for `claude-code`, `github-copilot`, and `vscode`.
+
+| Harness | User configuration | Server key |
+| --- | --- | --- |
+| `claude-code` | `~/.claude.json`; with `CLAUDE_CONFIG_DIR`, `<directory>/.claude.json` | `mcpServers` |
+| `github-copilot` | `~/.copilot/mcp-config.json`; honors `COPILOT_HOME` | `mcpServers` |
+| `cursor` | `~/.cursor/mcp.json` | `mcpServers` |
+| `vscode` | `Code/User/mcp.json` under the OS application-data directory | `servers` |
+| `claude-desktop` | `Claude/claude_desktop_config.json` under the OS application-data directory; macOS and Windows only | `mcpServers` |
+
+The application-data directory is `~/Library/Application Support` on macOS, `%APPDATA%` on Windows, and `$XDG_CONFIG_HOME` (default `~/.config`) on Linux. `vscode` targets the editor-managed MCP configuration. For the newer VS Code Copilot harness, select `github-copilot`, which uses the native Copilot configuration shared with Copilot CLI.
+
+### Orchestration
+
+The `camunda` entry launches the existing `mcp-proxy` with the Node.js and c8ctl installation running the installer. It references the profile selected by `--profile`, then the active saved profile, then the default `local` profile. The profile name and data-directory path are recorded, **not the credentials**. Later profile switches do not retarget this connection; credential updates to the saved profile take effect when the proxy next starts.
+
+If you connect using environment variables without a saved profile, save them with `c8ctl add profile <name> --from-env` and install with `--profile <name>`. Use `--alias <name>` to configure another cluster alongside an existing entry. `--alias` applies only to orchestration; `camunda-docs` is reserved for documentation.
+
+The installer does not start or contact the cluster. The cluster must expose `/mcp/cluster` when the harness starts the proxy. If you move or remove the recorded Node.js or c8ctl installation, uninstall and reinstall the entry. Profile names and recorded paths must not contain `${...}` placeholders, which harnesses could expand and redirect to another connection.
+
+### Documentation
+
+The `camunda-docs` entry connects to the [Camunda Docs MCP server](/reference/mcp-docs/mcp-docs.md) at `https://camunda-docs.mcp.kapa.ai`. No cluster profile or credentials are required. Claude Desktop uses `npx -y mcp-remote` as an OAuth-capable STDIO bridge, which downloads the bridge package on first use; other supported harnesses use their native HTTP transport.
+
+Restart or reload your harness after installation. Complete the docs server's Google or GitHub sign-in when prompted on first use. Configuration does not grant tool permissions or bypass the harness's approval prompts.
+
+### Safe updates and removal
+
+Existing unrelated entries and settings are preserved, including VS Code JSONC comments and client-added tool restrictions. Matching installations and removal of already-absent entries are no-ops. A conflicting entry or malformed configuration produces an error instead of being overwritten. Uninstall removes only the selected recognized Camunda entry and does not require the profile to still exist.
+
+`--dry-run` previews the selected entries without writing configuration or displaying unrelated configuration values. Writes use a private temporary file and atomic replacement per configuration file; a multi-harness operation is not a transaction across all files. If a write fails, earlier successful files are reported and remain updated.
+
 ## MCP proxy
 
 The `mcp-proxy` command starts a local STDIO-to-HTTP proxy that bridges MCP clients (such as VS Code with GitHub Copilot, or Claude Code) to the [Orchestration Cluster MCP Server](/apis-tools/orchestration-cluster-api-mcp/orchestration-cluster-api-mcp-overview.md). It handles OAuth 2.0 authentication transparently, so MCP clients that do not support the client credentials flow can connect to authenticated clusters.

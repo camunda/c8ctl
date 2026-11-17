@@ -75,7 +75,7 @@ function harnessConfigDirectories({
 	return [];
 }
 
-function executableIsOnPath({
+export function executableIsOnPath({
 	name,
 	env,
 	platform,

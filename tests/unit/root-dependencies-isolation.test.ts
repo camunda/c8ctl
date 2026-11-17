@@ -25,6 +25,8 @@ const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CORE_DEPENDENCIES = [
 	"@camunda8/orchestration-cluster-api",
 	"@modelcontextprotocol/sdk",
+	// Core MCP configuration editing preserves user comments and formatting.
+	"jsonc-parser",
 	// Range evaluation for a plugin's declared `engines.c8ctl` (#523) —
 	// src/framework/plugins/plugin-compat.ts imports it directly.
 	"semver",

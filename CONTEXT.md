@@ -89,6 +89,17 @@ The JSON help structure contains: `commands`, `globalFlags`, `searchFlags`,
 
 ## MCP Proxy
 
+Configure user-scoped client connections before starting an AI harness:
+
+```sh
+c8ctl mcp install                         # orchestration, all detected harnesses
+c8ctl mcp install --docs                  # docs only, no cluster profile needed
+c8ctl mcp install cursor --docs --orchestration
+c8ctl mcp uninstall cursor --docs         # leaves orchestration untouched
+```
+
+Orchestration references the selected saved profile and does not copy credentials. Use `--profile` and `--alias` for another cluster. `--dry-run` previews the selected entries without writing. See `c8ctl help mcp` for supported harnesses.
+
 An MCP (Model Context Protocol) proxy is available:
 
 ```sh

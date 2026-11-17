@@ -1363,6 +1363,33 @@ c8ctl completion install --shell zsh                        # Install completion
 
 ---
 
+### `mcp`
+
+Configure user-scoped Camunda orchestration and docs MCP servers
+
+**Usage:** `c8ctl mcp install|uninstall [harness...]`
+
+**Resources:** install, uninstall
+
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--orchestration` | boolean |  | Select the orchestration MCP server (default when --docs is absent) |
+| `--docs` | boolean |  | Select the Camunda docs MCP server; combine with --orchestration for both |
+| `--alias` | string |  | Orchestration server entry name (default: camunda) |
+
+**Examples:**
+
+```bash
+c8ctl mcp install                                           # Install orchestration MCP for detected harnesses
+c8ctl mcp install --docs                                    # Install only docs MCP for detected harnesses
+c8ctl mcp install claude-code cursor --docs --orchestration  # Install both MCP servers for selected harnesses
+c8ctl mcp uninstall claude-code --docs                      # Remove only the docs MCP entry
+```
+
+---
+
 ### `mcp-proxy`
 
 Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
