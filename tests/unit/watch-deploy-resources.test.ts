@@ -560,8 +560,13 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 	// (project-root detection) or the second read (the check made once the
 	// watcher is armed). A deployResources project must never start in
 	// default-scan mode, and the change must be picked up.
-	const startupWatch = (root: string, after: number, action: string) =>
-		startWatch(root, [], {
+	const startupWatch = (
+		root: string,
+		after: number,
+		action: string,
+		extraArgs: string[] = [],
+	) =>
+		startWatch(root, extraArgs, {
 			settled: false,
 			mutateAfterReads: `${join(root, "camunda.json")}|${after}|${action}`,
 		});
@@ -588,15 +593,30 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		});
 	}
 
-	test("startup race: deployResources removed after the first read is reported, never the default scan", async () => {
-		const root = racyProject("startup-field-removed");
-		const { w } = await startupWatch(root, 1, "{}");
-		const code = await w.waitForExit(SAFETY_NET_MS);
-		// `null` would mean the watcher had to be killed: it must exit on its own.
-		assert.strictEqual(code, 1, w.getOutput());
-		assert.match(w.getOutput(), /"deployResources" was removed/);
-		noFallback();
-	});
+	for (const [forceLabel, forceArgs] of [
+		["without --force", []],
+		["with --force", ["--force"]],
+	] as const) {
+		test(`startup race: deployResources removed after the first read ${forceLabel} reports the restart requirement and stops watching`, async () => {
+			const root = racyProject("startup-field-removed");
+			const { w, baseline } = await startupWatch(root, 1, "{}", [...forceArgs]);
+			const code = await w.waitForExit(SAFETY_NET_MS);
+			// `null` would mean the watcher had to be killed: it must exit on its own.
+			const output = w.getOutput();
+			assert.strictEqual(code, 1, output);
+			assert.match(
+				output,
+				/"deployResources" was removed from camunda\.json\. Restart `c8 watch --project`/,
+			);
+			assert.doesNotMatch(output, /Continuing to watch/);
+			assert.strictEqual(
+				mock.deployments.length,
+				baseline,
+				"no further deployment should run after the descriptor mode is removed",
+			);
+			noFallback();
+		});
+	}
 
 	// Descriptor read discipline: reads at startup (project root, check
 	// after arming) and at re-resolution. Whatever the read index and the
