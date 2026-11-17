@@ -147,7 +147,7 @@ describe("CLI behavioural: SDK env vars", () => {
 			stderr += chunk.toString();
 		});
 		const exited = new Promise<number | null>((res) => {
-			child.once("exit", (code) => res(code));
+			child.once("close", (code) => res(code));
 		});
 		let exitCode: number | null | undefined;
 		void exited.then((code) => {
@@ -157,8 +157,9 @@ describe("CLI behavioural: SDK env vars", () => {
 		try {
 			// The deterministic readiness signal is the proxy's own
 			// "started successfully" log line, emitted only after the
-			// remote handshake completed. The deadline is a failure safety
-			// net for a loaded runner, not a correctness signal.
+			// remote handshake and shutdown-handler registration complete.
+			// The deadline is a failure safety net for a loaded runner, not
+			// a correctness signal.
 			const started = await pollUntil(
 				async () =>
 					stderr.includes("MCP proxy started successfully") ||
@@ -171,13 +172,19 @@ describe("CLI behavioural: SDK env vars", () => {
 				`expected the proxy to report a completed startup, exit=${exitCode} stderr: ${stderr}`,
 			);
 		} finally {
-			// Close stdin as well: on Windows `kill()` cannot deliver a
-			// catchable signal, and EOF lets the proxy wind down either way.
-			child.stdin.end();
-			child.kill("SIGTERM");
+			if (process.platform === "win32") {
+				child.stdin.end();
+			} else {
+				child.kill("SIGTERM");
+			}
 		}
 		const code = await exited;
 		if (process.platform !== "win32") {
+			assert.match(
+				stderr,
+				/Received SIGTERM, shutting down gracefully/,
+				"expected the SIGTERM handler to run",
+			);
 			assert.strictEqual(
 				code,
 				0,
