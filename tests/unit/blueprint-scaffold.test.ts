@@ -316,6 +316,120 @@ describe("scaffoldSetupBlueprint()", () => {
 		}
 	});
 
+	test("keeps a stalled response body inside the request timeout", async () => {
+		const root = tempDir("c8ctl-blueprint-stalled-body-");
+		const fetch: BlueprintFetch = async (_url, { signal }) => ({
+			ok: true,
+			status: 200,
+			statusText: "OK",
+			json: () =>
+				new Promise((_, reject) => {
+					// Safety net only: the assertion still fails if the request timeout
+					// does not abort the body read.
+					const fallback = setTimeout(
+						() => reject(new Error("body read without timeout")),
+						200,
+					);
+					signal.addEventListener(
+						"abort",
+						() => {
+							clearTimeout(fallback);
+							reject(new Error("aborted"));
+						},
+						{ once: true },
+					);
+				}),
+			arrayBuffer: async () => new ArrayBuffer(0),
+		});
+
+		try {
+			await assert.rejects(
+				scaffoldSetupBlueprint({
+					id: "rocket-launch",
+					destinationDir: join(root, "project"),
+					fetch,
+					timeoutMs: 10,
+				}),
+				(error: unknown) => {
+					assert.ok(error instanceof BlueprintScaffoldError);
+					assert.match(error.message, /after 0\.01s/);
+					assert.match(error.hint ?? "", /Check your network connection/);
+					return true;
+				},
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("wraps response body read failures in an actionable error", async () => {
+		const root = tempDir("c8ctl-blueprint-body-error-");
+		const fetch: BlueprintFetch = async () => ({
+			ok: true,
+			status: 200,
+			statusText: "OK",
+			json: async () => {
+				throw new Error("invalid JSON body");
+			},
+			arrayBuffer: async () => new ArrayBuffer(0),
+		});
+
+		try {
+			await assert.rejects(
+				scaffoldSetupBlueprint({
+					id: "rocket-launch",
+					destinationDir: join(root, "project"),
+					fetch,
+				}),
+				(error: unknown) => {
+					assert.ok(error instanceof BlueprintScaffoldError);
+					assert.match(
+						error.message,
+						/Could not fetch the blueprint file list from GitHub/,
+					);
+					assert.match(error.hint ?? "", /Check your network connection/);
+					return true;
+				},
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("rechecks the destination before writing downloaded files", async () => {
+		const root = tempDir("c8ctl-blueprint-race-");
+		const destination = join(root, "project");
+		const fetch: BlueprintFetch = async (url) => {
+			if (url.includes("/git/trees/main")) {
+				return jsonResponse({
+					truncated: false,
+					tree: [{ path: "1-rocket-launch/README.md", type: "blob" }],
+				});
+			}
+			mkdirSync(destination, { recursive: true });
+			writeFileSync(join(destination, "other.txt"), "created during download");
+			return fileResponse("# Rocket Launch\n");
+		};
+
+		try {
+			await assert.rejects(
+				scaffoldSetupBlueprint({
+					id: "rocket-launch",
+					destinationDir: destination,
+					fetch,
+				}),
+				/already exists and is not empty/,
+			);
+			assert.strictEqual(
+				readFileSync(join(destination, "other.txt"), "utf-8"),
+				"created during download",
+			);
+			assert.strictEqual(existsSync(join(destination, "README.md")), false);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test("rejects a truncated GitHub tree instead of writing a partial project", async () => {
 		const root = tempDir("c8ctl-blueprint-truncated-");
 		const fetch: BlueprintFetch = async () =>

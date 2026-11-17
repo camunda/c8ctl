@@ -179,17 +179,19 @@ function githubHeaders(): Record<string, string> {
 	};
 }
 
-async function request({
+async function request<T>({
 	fetch,
 	url,
 	timeoutMs,
 	failureMessage,
+	read,
 }: {
 	fetch: BlueprintFetch;
 	url: string;
 	timeoutMs: number;
 	failureMessage: string;
-}): Promise<BlueprintResponse> {
+	read: (response: BlueprintResponse) => Promise<T>;
+}): Promise<T> {
 	const controller = new AbortController();
 	let timedOut = false;
 	const timer = setTimeout(() => {
@@ -206,7 +208,7 @@ async function request({
 				`${failureMessage}: HTTP ${response.status} ${response.statusText} (${url}).`,
 			);
 		}
-		return response;
+		return await read(response);
 	} catch (error) {
 		if (error instanceof BlueprintScaffoldError) throw error;
 		throw new BlueprintScaffoldError(
@@ -321,7 +323,7 @@ async function downloadFiles({
 }): Promise<DownloadedFile[]> {
 	const files: DownloadedFile[] = [];
 	for (const relativePath of paths) {
-		const response = await request({
+		const contents = await request({
 			fetch,
 			url: rawFileUrl(
 				blueprint.source,
@@ -329,11 +331,9 @@ async function downloadFiles({
 			),
 			timeoutMs,
 			failureMessage: `Could not download ${relativePath} from GitHub`,
+			read: async (response) => Buffer.from(await response.arrayBuffer()),
 		});
-		files.push({
-			relativePath,
-			contents: Buffer.from(await response.arrayBuffer()),
-		});
+		files.push({ relativePath, contents });
 	}
 	return files;
 }
@@ -364,16 +364,14 @@ export async function scaffoldSetupBlueprint({
 		phase: "listing",
 		message: `Fetching the ${blueprint.name} file list…`,
 	});
-	const treeResponse = await request({
+	const tree = await request({
 		fetch,
 		url: githubTreeUrl(blueprint.source),
 		timeoutMs,
 		failureMessage: "Could not fetch the blueprint file list from GitHub",
+		read: (response) => response.json(),
 	});
-	const files = projectFilePaths(
-		parseGitHubTree(await treeResponse.json()),
-		blueprint.source,
-	);
+	const files = projectFilePaths(parseGitHubTree(tree), blueprint.source);
 	if (files.length === 0) {
 		throw new BlueprintScaffoldError(
 			`GitHub did not list any files for ${blueprint.name}.`,
@@ -397,6 +395,7 @@ export async function scaffoldSetupBlueprint({
 		message: `Writing ${blueprint.name} to ${directory}…`,
 		totalFiles: files.length,
 	});
+	assertDestinationAvailable(directory);
 	writeFiles(directory, downloaded);
 	onProgress?.({
 		phase: "complete",
