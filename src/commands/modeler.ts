@@ -460,7 +460,8 @@ function registerWithWindows(executable: string, logger: Logger): void {
 function installOnWindows({
 	isDryRun,
 	logger,
-}: Pick<CommandContext, "isDryRun" | "logger">): CommandResult {
+	quiet,
+}: Pick<CommandContext, "isDryRun" | "logger" | "quiet">): CommandResult {
 	const localAppData =
 		process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
 	const installDir = join(localAppData, "Programs", "Camunda Modeler");
@@ -496,8 +497,12 @@ function installOnWindows({
 		}
 		if (isDryRun) {
 			return {
-				kind: "info",
-				message: `Dry run: would install Camunda Modeler to ${installDir} with \`winget install --id ${WINGET_PACKAGE_ID}\`.`,
+				kind: "dryRun",
+				info: {
+					dryRun: true,
+					command: "modeler install",
+					message: `Dry run: would install Camunda Modeler to ${installDir} with \`winget install --id ${WINGET_PACKAGE_ID}\`.`,
+				},
 			};
 		}
 
@@ -517,7 +522,7 @@ function installOnWindows({
 			],
 			{
 				failureMessage: "winget could not install Camunda Modeler",
-				quiet: false,
+				quiet,
 			},
 		);
 	} catch (error) {

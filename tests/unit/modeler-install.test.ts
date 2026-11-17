@@ -115,10 +115,16 @@ childProcess.spawnSync = (command, args, options) => {
 		return { status: winget === "installed" ? 0 : 0x8a150014 };
 	}
 	if (command === "winget" && args[0] === "install") {
-		if (winget === "failing") return { status: 0x8a150010 };
+		const chatter = process.env.TOOL_CHATTER === "1";
+		const stdout = chatter ? "winget routine stdout\\n" : "";
+		const stderr = chatter ? "winget routine stderr\\n" : "";
+		if (stdout && options.stdio[1] !== "pipe") process.stderr.write(stdout);
+		if (stderr && options.stdio[2] !== "pipe") process.stderr.write(stderr);
+		if (winget === "failing") return { status: 0x8a150010, stdout, stderr };
 		const location = args[args.indexOf("--location") + 1];
 		fs.mkdirSync(location, { recursive: true });
 		fs.writeFileSync(join(location, "Camunda Modeler.exe"), "");
+		return { status: 0, stdout, stderr };
 	}
 	if (command === "powershell") {
 		fs.writeFileSync(options.env.C8CTL_SHORTCUT, options.env.C8CTL_TARGET);
@@ -690,6 +696,53 @@ describe("CLI behavioural: modeler install", () => {
 			sandbox.cleanup();
 		}
 	});
+
+	test("emits a JSON dry-run preview for winget", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		try {
+			const result = await sandbox.install(
+				{ C8CTL_OUTPUT_MODE: "json" },
+				"--dry-run",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const preview = parseJson(result);
+			assert.strictEqual(preview.dryRun, true);
+			assert.strictEqual(preview.command, "modeler install");
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				"winget --version",
+				"winget list --id Camunda.Modeler --exact --source winget",
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	for (const mode of ["text", "json"]) {
+		test(`quiet winget installs hide chatter but keep failure details in ${mode} mode`, {
+			skip: !isWindows,
+		}, async () => {
+			const sandbox = createWindowsSandbox();
+			try {
+				const env = { TOOL_CHATTER: "1", C8CTL_OUTPUT_MODE: mode };
+				const failed = await sandbox.install(
+					{ ...env, WINGET: "failing" },
+					"--quiet",
+				);
+				assert.strictEqual(failed.status, 1, failed.stderr);
+				assert.match(failed.stderr, /winget routine stdout/);
+				assert.match(failed.stderr, /winget routine stderr/);
+
+				const installed = await sandbox.install(env, "--quiet");
+				assert.strictEqual(installed.status, 0, installed.stderr);
+				assert.strictEqual(installed.stdout, "");
+				assert.strictEqual(installed.stderr, "");
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
 
 	test("installs with winget, then registers file types and a Start Menu shortcut", {
 		skip: !isWindows,
