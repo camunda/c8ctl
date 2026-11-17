@@ -34,6 +34,30 @@ const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
 const isLinux = process.platform === "linux";
 
+const STALLED_RELEASE_INDEX = `
+		if (process.env.STALL_RELEASE_INDEX === "1") {
+			return new Response(new ReadableStream({
+				start(controller) {
+					const keepAlive = setInterval(() => {}, 1000);
+					const stop = () => {
+						clearInterval(keepAlive);
+						controller.error(new Error("Stalled release-index fixture stopped"));
+					};
+					init.signal.addEventListener("abort", stop, { once: true });
+					// Observe cancellation after the installer handler, then release even a broken request.
+					for (const signal of ["SIGINT", "SIGTERM"]) {
+						process.once(signal, () => {
+							fs.writeFileSync(process.env.INDEX_ABORT_FILE, String(init.signal.aborted));
+							if (!init.signal.aborted) stop();
+						});
+					}
+					fs.writeFileSync(process.env.DOWNLOAD_PID_FILE + ".tmp", String(process.pid));
+					fs.renameSync(process.env.DOWNLOAD_PID_FILE + ".tmp", process.env.DOWNLOAD_PID_FILE);
+				},
+			}));
+		}
+`;
+
 /**
  * Loaded into the CLI subprocess: maps /Applications to APPLICATIONS_ROOT
  * (optionally read-only), records Launch Services registrations in TOOL_LOG,
@@ -75,6 +99,7 @@ const { fetch } = globalThis;
 globalThis.fetch = async (input, init) => {
 	const url = String(input);
 	if (url === releaseUrl) {
+${STALLED_RELEASE_INDEX}
 		return new Response('<a href="5.52.0/">5.52.0/</a><a href="nightly/">nightly/</a>');
 	}
 	if (url.startsWith(releaseUrl + "5.52.0/")) {
@@ -184,9 +209,10 @@ process.getuid = () => Number(process.env.FAKE_UID);
 Object.defineProperty(process, "arch", { value: process.env.FAKE_ARCH });
 if (process.env.UNSET_PATH === "1") delete process.env.PATH;
 const releaseUrl = "https://downloads.camunda.cloud/release/camunda-modeler/";
-globalThis.fetch = async (input) => {
+globalThis.fetch = async (input, init) => {
 	const url = String(input);
 	if (url === releaseUrl) {
+${STALLED_RELEASE_INDEX}
 		return new Response('<a href="5.52.0/">5.52.0/</a>');
 	}
 	return url === releaseUrl + "5.52.0/camunda-modeler-5.52.0-linux-x64.tar.gz"
@@ -1308,6 +1334,50 @@ describe("CLI behavioural: modeler install", () => {
 			sandbox.cleanup();
 		}
 	});
+
+	for (const scenario of [
+		{ name: "macOS", skip: !isMac, create: createSandbox },
+		{ name: "Linux", skip: !isLinux, create: createLinuxSandbox },
+	]) {
+		for (const signal of ["SIGINT", "SIGTERM"] as const) {
+			test(`${scenario.name} release-index downloads abort on ${signal}`, {
+				skip: scenario.skip,
+			}, async () => {
+				const sandbox = scenario.create();
+				const downloadTmp = join(sandbox.home, "download-tmp");
+				const pidFile = join(sandbox.home, "download.pid");
+				const abortFile = join(sandbox.home, "index-aborted");
+				mkdirSync(downloadTmp);
+				const resultPromise = sandbox.install({
+					TMPDIR: downloadTmp,
+					STALL_RELEASE_INDEX: "1",
+					DOWNLOAD_PID_FILE: pidFile,
+					INDEX_ABORT_FILE: abortFile,
+				});
+				try {
+					await pollUntilValue(
+						async () => (existsSync(pidFile) ? pidFile : undefined),
+						15_000,
+						25,
+						"a stalled Modeler release-index request",
+					);
+					const pid = Number(readFileSync(pidFile, "utf8"));
+					assert.ok(Number.isInteger(pid) && pid > 0);
+					process.kill(pid, signal);
+
+					const result = await resultPromise;
+					assert.strictEqual(result.timedOut, false, result.stderr);
+					assert.strictEqual(result.status, null, result.stderr);
+					assert.strictEqual(result.signal, signal, result.stderr);
+					assert.strictEqual(readFileSync(abortFile, "utf8"), "true");
+					assert.deepStrictEqual(readdirSync(downloadTmp), []);
+				} finally {
+					await resultPromise;
+					sandbox.cleanup();
+				}
+			});
+		}
+	}
 
 	for (const signal of ["SIGINT", "SIGTERM"] as const) {
 		test(`cleans up a partial download before exiting on ${signal}`, {

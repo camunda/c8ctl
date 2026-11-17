@@ -213,11 +213,11 @@ async function fetchResponse(
 	return response;
 }
 
-async function fetchReleaseIndex(): Promise<string> {
+async function fetchReleaseIndex(signal: AbortSignal): Promise<string> {
 	const response = await fetchResponse(
 		MODELER_RELEASE_URL,
 		"Could not check Camunda Modeler releases",
-		AbortSignal.timeout(30_000),
+		AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
 	);
 	try {
 		return await response.text();
@@ -335,7 +335,7 @@ async function downloadLatestRelease({
 	quiet: boolean;
 	signal: AbortSignal;
 }): Promise<{ version: string; archivePath: string }> {
-	const version = latestStableModelerVersion(await fetchReleaseIndex());
+	const version = latestStableModelerVersion(await fetchReleaseIndex(signal));
 	const name = archiveName(version);
 	const archivePath = join(dir, name);
 	logger.info(`Downloading Camunda Modeler ${version} for ${platform}...`);
