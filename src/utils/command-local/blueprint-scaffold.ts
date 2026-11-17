@@ -153,10 +153,17 @@ function blueprintById(id: string): SetupBlueprint {
 	);
 }
 
-function githubTreeUrl(source: BlueprintSource): string {
+function githubCommitUrl(source: BlueprintSource): string {
+	return (
+		`https://api.github.com/repos/${source.owner}/${source.repo}/commits/` +
+		encodeURIComponent(source.ref)
+	);
+}
+
+function githubTreeUrl(source: BlueprintSource, revision: string): string {
 	return (
 		`https://api.github.com/repos/${source.owner}/${source.repo}/git/trees/` +
-		`${encodeURIComponent(source.ref)}?recursive=1`
+		`${encodeURIComponent(revision)}?recursive=1`
 	);
 }
 
@@ -164,10 +171,14 @@ function encodeGitHubPath(path: string): string {
 	return path.split("/").map(encodeURIComponent).join("/");
 }
 
-function rawFileUrl(source: BlueprintSource, path: string): string {
+function rawFileUrl(
+	source: BlueprintSource,
+	revision: string,
+	path: string,
+): string {
 	return (
 		`https://raw.githubusercontent.com/${source.owner}/${source.repo}/` +
-		`${encodeURIComponent(source.ref)}/${encodeGitHubPath(path)}`
+		`${encodeURIComponent(revision)}/${encodeGitHubPath(path)}`
 	);
 }
 
@@ -221,6 +232,22 @@ async function request<T>({
 	} finally {
 		clearTimeout(timer);
 	}
+}
+
+function parseCommitSha(value: unknown): string {
+	if (
+		isRecord(value) &&
+		typeof value.sha === "string" &&
+		/^[0-9a-f]{40}$/i.test(value.sha)
+	) {
+		return value.sha;
+	}
+	throw new BlueprintScaffoldError(
+		"GitHub returned an unexpected blueprint revision.",
+		{
+			hint: "Try again later; the GitHub commit response format may have changed.",
+		},
+	);
 }
 
 function isGitHubTreeEntry(value: unknown): value is GitHubTreeEntry {
@@ -312,11 +339,13 @@ function destinationPath(directory: string, relativePath: string): string {
 
 async function downloadFiles({
 	blueprint,
+	revision,
 	paths,
 	fetch,
 	timeoutMs,
 }: {
 	blueprint: SetupBlueprint;
+	revision: string;
 	paths: readonly string[];
 	fetch: BlueprintFetch;
 	timeoutMs: number;
@@ -327,6 +356,7 @@ async function downloadFiles({
 			fetch,
 			url: rawFileUrl(
 				blueprint.source,
+				revision,
 				`${blueprint.source.path}/${relativePath}`,
 			),
 			timeoutMs,
@@ -364,9 +394,18 @@ export async function scaffoldSetupBlueprint({
 		phase: "listing",
 		message: `Fetching the ${blueprint.name} file list…`,
 	});
+	const revision = parseCommitSha(
+		await request({
+			fetch,
+			url: githubCommitUrl(blueprint.source),
+			timeoutMs,
+			failureMessage: "Could not resolve the blueprint revision from GitHub",
+			read: (response) => response.json(),
+		}),
+	);
 	const tree = await request({
 		fetch,
-		url: githubTreeUrl(blueprint.source),
+		url: githubTreeUrl(blueprint.source, revision),
 		timeoutMs,
 		failureMessage: "Could not fetch the blueprint file list from GitHub",
 		read: (response) => response.json(),
@@ -385,6 +424,7 @@ export async function scaffoldSetupBlueprint({
 	});
 	const downloaded = await downloadFiles({
 		blueprint,
+		revision,
 		paths: files,
 		fetch,
 		timeoutMs,

@@ -55,6 +55,20 @@ function tempDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
 }
 
+const RESOLVED_COMMIT = "0123456789abcdef0123456789abcdef01234567";
+
+function isCommitRequest(url: string): boolean {
+	return url.endsWith("/commits/main");
+}
+
+function isTreeRequest(url: string): boolean {
+	return url.includes(`/git/trees/${RESOLVED_COMMIT}`);
+}
+
+function resolvedCommitResponse(): BlueprintResponse {
+	return jsonResponse({ sha: RESOLVED_COMMIT });
+}
+
 describe("SETUP_BLUEPRINTS", () => {
 	test("contains exactly the three setup projects and their guides", () => {
 		assert.deepStrictEqual(
@@ -81,14 +95,17 @@ describe("SETUP_BLUEPRINTS", () => {
 });
 
 describe("scaffoldSetupBlueprint()", () => {
-	test("downloads every file in the selected GitHub project tree", async () => {
+	test("downloads every tree file from one resolved commit", async () => {
 		const root = tempDir("c8ctl-blueprint-test-");
 		const destination = join(root, "rocket");
 		const requestedUrls: string[] = [];
 		const progress: BlueprintProgress[] = [];
 		const fetch: BlueprintFetch = async (url) => {
 			requestedUrls.push(url);
-			if (url.includes("/git/trees/main")) {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			if (isTreeRequest(url)) {
 				return jsonResponse({
 					truncated: false,
 					tree: [
@@ -141,18 +158,29 @@ describe("scaffoldSetupBlueprint()", () => {
 				readFileSync(join(destination, "assets", "diagram.bpmn"), "utf-8"),
 				"<definitions />\n",
 			);
+			assert.strictEqual(
+				requestedUrls[0],
+				"https://api.github.com/repos/camunda/camunda-8-get-started/commits/main",
+			);
 			assert.ok(
 				requestedUrls.some((url) =>
 					url.startsWith(
-						"https://api.github.com/repos/camunda/camunda-8-get-started/git/trees/main",
+						`https://api.github.com/repos/camunda/camunda-8-get-started/git/trees/${RESOLVED_COMMIT}`,
 					),
 				),
 			);
 			assert.ok(
 				requestedUrls.some((url) =>
 					url.startsWith(
-						"https://raw.githubusercontent.com/camunda/camunda-8-get-started/main/1-rocket-launch/",
+						`https://raw.githubusercontent.com/camunda/camunda-8-get-started/${RESOLVED_COMMIT}/1-rocket-launch/`,
 					),
+				),
+			);
+			assert.ok(
+				requestedUrls.every(
+					(url) =>
+						!url.includes("/git/trees/main") &&
+						!url.includes("/camunda-8-get-started/main/"),
 				),
 			);
 			assert.deepStrictEqual(
@@ -167,7 +195,10 @@ describe("scaffoldSetupBlueprint()", () => {
 	test("uses the blueprint id below the current directory by default", async () => {
 		const root = tempDir("c8ctl-blueprint-default-");
 		const fetch: BlueprintFetch = async (url) => {
-			if (url.includes("/git/trees/main")) {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			if (isTreeRequest(url)) {
 				return jsonResponse({
 					truncated: false,
 					tree: [{ path: "1-rocket-launch/README.md", type: "blob" }],
@@ -194,7 +225,10 @@ describe("scaffoldSetupBlueprint()", () => {
 		const destination = join(root, "project");
 		mkdirSync(destination);
 		const fetch: BlueprintFetch = async (url) => {
-			if (url.includes("/git/trees/main")) {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			if (isTreeRequest(url)) {
 				return jsonResponse({
 					truncated: false,
 					tree: [{ path: "1-rocket-launch/README.md", type: "blob" }],
@@ -267,7 +301,10 @@ describe("scaffoldSetupBlueprint()", () => {
 	test("reports an unreachable GitHub host with an actionable hint", async () => {
 		const root = tempDir("c8ctl-blueprint-offline-");
 		const cause = Object.assign(new Error("ENOTFOUND"), { code: "ENOTFOUND" });
-		const fetch: BlueprintFetch = async () => {
+		const fetch: BlueprintFetch = async (url) => {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
 			throw new TypeError("fetch failed", { cause });
 		};
 
@@ -318,29 +355,34 @@ describe("scaffoldSetupBlueprint()", () => {
 
 	test("keeps a stalled response body inside the request timeout", async () => {
 		const root = tempDir("c8ctl-blueprint-stalled-body-");
-		const fetch: BlueprintFetch = async (_url, { signal }) => ({
-			ok: true,
-			status: 200,
-			statusText: "OK",
-			json: () =>
-				new Promise((_, reject) => {
-					// Safety net only: the assertion still fails if the request timeout
-					// does not abort the body read.
-					const fallback = setTimeout(
-						() => reject(new Error("body read without timeout")),
-						200,
-					);
-					signal.addEventListener(
-						"abort",
-						() => {
-							clearTimeout(fallback);
-							reject(new Error("aborted"));
-						},
-						{ once: true },
-					);
-				}),
-			arrayBuffer: async () => new ArrayBuffer(0),
-		});
+		const fetch: BlueprintFetch = async (url, { signal }) => {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			return {
+				ok: true,
+				status: 200,
+				statusText: "OK",
+				json: () =>
+					new Promise((_, reject) => {
+						// Safety net only: the assertion still fails if the request timeout
+						// does not abort the body read.
+						const fallback = setTimeout(
+							() => reject(new Error("body read without timeout")),
+							200,
+						);
+						signal.addEventListener(
+							"abort",
+							() => {
+								clearTimeout(fallback);
+								reject(new Error("aborted"));
+							},
+							{ once: true },
+						);
+					}),
+				arrayBuffer: async () => new ArrayBuffer(0),
+			};
+		};
 
 		try {
 			await assert.rejects(
@@ -364,15 +406,20 @@ describe("scaffoldSetupBlueprint()", () => {
 
 	test("wraps response body read failures in an actionable error", async () => {
 		const root = tempDir("c8ctl-blueprint-body-error-");
-		const fetch: BlueprintFetch = async () => ({
-			ok: true,
-			status: 200,
-			statusText: "OK",
-			json: async () => {
-				throw new Error("invalid JSON body");
-			},
-			arrayBuffer: async () => new ArrayBuffer(0),
-		});
+		const fetch: BlueprintFetch = async (url) => {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			return {
+				ok: true,
+				status: 200,
+				statusText: "OK",
+				json: async () => {
+					throw new Error("invalid JSON body");
+				},
+				arrayBuffer: async () => new ArrayBuffer(0),
+			};
+		};
 
 		try {
 			await assert.rejects(
@@ -400,7 +447,10 @@ describe("scaffoldSetupBlueprint()", () => {
 		const root = tempDir("c8ctl-blueprint-race-");
 		const destination = join(root, "project");
 		const fetch: BlueprintFetch = async (url) => {
-			if (url.includes("/git/trees/main")) {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			if (isTreeRequest(url)) {
 				return jsonResponse({
 					truncated: false,
 					tree: [{ path: "1-rocket-launch/README.md", type: "blob" }],
@@ -432,11 +482,15 @@ describe("scaffoldSetupBlueprint()", () => {
 
 	test("rejects a truncated GitHub tree instead of writing a partial project", async () => {
 		const root = tempDir("c8ctl-blueprint-truncated-");
-		const fetch: BlueprintFetch = async () =>
-			jsonResponse({
+		const fetch: BlueprintFetch = async (url) => {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			return jsonResponse({
 				truncated: true,
 				tree: [{ path: "1-rocket-launch/README.md", type: "blob" }],
 			});
+		};
 
 		try {
 			await assert.rejects(
@@ -455,11 +509,15 @@ describe("scaffoldSetupBlueprint()", () => {
 
 	test("rejects unsafe paths from the GitHub tree", async () => {
 		const root = tempDir("c8ctl-blueprint-path-");
-		const fetch: BlueprintFetch = async () =>
-			jsonResponse({
+		const fetch: BlueprintFetch = async (url) => {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			return jsonResponse({
 				truncated: false,
 				tree: [{ path: "1-rocket-launch/../outside.txt", type: "blob" }],
 			});
+		};
 
 		try {
 			await assert.rejects(
