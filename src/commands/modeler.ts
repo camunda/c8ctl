@@ -78,13 +78,21 @@ function formatExitCode(status: number | null): string {
 function runCommand(
 	command: string,
 	args: string[],
-	{ failureMessage, quiet }: { failureMessage: string; quiet: boolean },
+	{
+		failureMessage,
+		quiet,
+		stdin = "inherit",
+	}: {
+		failureMessage: string;
+		quiet: boolean;
+		stdin?: "inherit" | "ignore";
+	},
 ): void {
 	const result = spawnSync(command, args, {
 		encoding: "utf8",
 		stdio: quiet
-			? ["inherit", "pipe", "pipe"]
-			: ["inherit", process.stderr.fd, process.stderr.fd],
+			? [stdin, "pipe", "pipe"]
+			: [stdin, process.stderr.fd, process.stderr.fd],
 	});
 	const diagnostics = quiet
 		? `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
@@ -581,18 +589,30 @@ function findOnPath(command: string): string | undefined {
 }
 
 /** Runs `args` as root: directly when c8ctl runs as root, otherwise with sudo. */
-function runAsRoot(args: string[], failureMessage: string): void {
+function runAsRoot(
+	args: string[],
+	failureMessage: string,
+	quiet: boolean,
+): void {
 	const [command, ...rest] =
 		process.getuid?.() === 0 ? args : ["sudo", ...args];
 	try {
-		runCommand(command, rest, { failureMessage, quiet: false });
+		runCommand(command, rest, { failureMessage, quiet });
 	} catch (error) {
 		throw manualDownloadError(errorMessage(error));
 	}
 }
 
 /** Modeler's own script installs its desktop entry, icons, and MIME types for the current user. */
-function registerWithDesktop(installDir: string, logger: Logger): void {
+function registerWithDesktop({
+	installDir,
+	logger,
+	quiet,
+}: {
+	installDir: string;
+	logger: Logger;
+	quiet: boolean;
+}): void {
 	const script = join(installDir, "support", "xdg_register.sh");
 	// The script reports success even when the xdg-utils it calls are missing.
 	if (!findOnPath("xdg-mime")) {
@@ -602,13 +622,14 @@ function registerWithDesktop(installDir: string, logger: Logger): void {
 		return;
 	}
 	// Keep the interpreter fixed; the script path is versioned release data.
-	const result = spawnSync("/bin/bash", [script], {
-		stdio: ["ignore", process.stderr.fd, process.stderr.fd],
-	});
-	if (result.error || result.status !== 0) {
-		logger.warn(
-			`Could not register Camunda Modeler for .bpmn, .dmn, .form, and .rpa files. Run ${script} to retry.`,
-		);
+	try {
+		runCommand("/bin/bash", [script], {
+			failureMessage: `Could not register Camunda Modeler for .bpmn, .dmn, .form, and .rpa files. Run ${script} to retry.`,
+			quiet,
+			stdin: "ignore",
+		});
+	} catch (error) {
+		logger.warn(errorMessage(error));
 	}
 }
 
@@ -648,7 +669,7 @@ async function installOnLinux({
 			`Installing to ${LINUX_INSTALL_ROOT} needs root privileges; sudo may ask for your password.`,
 		);
 	}
-	runAsRoot(["true"], "Could not get root privileges");
+	runAsRoot(["true"], "Could not get root privileges", quiet);
 
 	logger.info("Checking for the latest stable Camunda Modeler release...");
 	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
@@ -676,20 +697,23 @@ async function installOnLinux({
 		const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
 		logger.info(`Installing Camunda Modeler to ${installDir}...`);
 		// Remove stale links before extraction and recreate the launcher last.
-		runAsRoot(["rm", "-f", launcher], `Could not remove ${launcher}`);
+		runAsRoot(["rm", "-f", launcher], `Could not remove ${launcher}`, quiet);
 		runAsRoot(
 			["tar", "--no-same-owner", "-xzf", archivePath, "-C", LINUX_INSTALL_ROOT],
 			"Could not extract Camunda Modeler",
+			quiet,
 		);
 		runAsRoot(
 			["chmod", "4755", join(installDir, "chrome-sandbox")],
 			"Could not set up the Camunda Modeler sandbox",
+			quiet,
 		);
 		runAsRoot(
 			["ln", "-sfn", join(releaseDir, LINUX_EXECUTABLE), launcher],
 			`Could not link ${launcher}`,
+			quiet,
 		);
-		registerWithDesktop(installDir, logger);
+		registerWithDesktop({ installDir, logger, quiet });
 		return {
 			kind: "success",
 			message: `Installed Camunda Modeler ${version} to ${installDir}.`,

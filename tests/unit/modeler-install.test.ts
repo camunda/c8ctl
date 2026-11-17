@@ -200,6 +200,9 @@ childProcess.spawnSync = (command, args, options) => {
 	const [real, ...rest] = (command === "sudo" ? args : [command, ...args]).map(
 		remapUsrBin,
 	);
+	if (process.env.TOOL_CHATTER === "1" && !desktopRegistration && options.stdio[1] !== "pipe") {
+		process.stderr.write("root tool chatter\\n");
+	}
 	return real === process.env.FAIL_AT ? { status: 1 } : spawnSync(real, rest, options);
 };
 syncBuiltinESMExports();
@@ -364,7 +367,16 @@ function createLinuxSandbox() {
 		"support/xdg_register.sh",
 	]) {
 		const script =
-			file === "support/xdg_register.sh" ? "#!/bin/bash\n" : "#!/bin/sh\n";
+			file === "support/xdg_register.sh"
+				? `#!/bin/bash
+if [ "$TOOL_CHATTER" = "1" ]; then
+	echo "registration routine stdout"
+	echo "registration routine stderr" >&2
+fi
+if [ "$FAIL_AT" = "register" ]; then exit 1; fi
+exit 0
+`
+				: "#!/bin/sh\n";
 		writeFileSync(join(release, file), script, { mode: 0o755 });
 	}
 	execFileSync("tar", [
@@ -1260,6 +1272,39 @@ describe("CLI behavioural: modeler install", () => {
 			sandbox.cleanup();
 		}
 	});
+
+	for (const mode of ["text", "json"]) {
+		test(`quiet Linux installs hide tool chatter but keep registration failures in ${mode} mode`, {
+			skip: !isLinux,
+		}, async () => {
+			for (const fails of [false, true]) {
+				const sandbox = createLinuxSandbox();
+				sandbox.fakeTool("xdg-mime");
+				try {
+					const result = await sandbox.install(
+						{
+							TOOL_CHATTER: "1",
+							C8CTL_OUTPUT_MODE: mode,
+							FAIL_AT: fails ? "register" : "",
+						},
+						"--quiet",
+					);
+					assert.strictEqual(result.status, 0, result.stderr);
+					assert.strictEqual(result.stdout, "");
+					if (fails) {
+						assert.match(result.stderr, /Could not register Camunda Modeler/);
+						assert.match(result.stderr, /registration routine stdout/);
+						assert.match(result.stderr, /registration routine stderr/);
+						assert.match(result.stderr, /xdg_register\.sh to retry/);
+					} else {
+						assert.strictEqual(result.stderr, "");
+					}
+				} finally {
+					sandbox.cleanup();
+				}
+			}
+		});
+	}
 
 	test("installs as root without sudo, and explains how to register file types without xdg-utils", {
 		skip: !isLinux,
