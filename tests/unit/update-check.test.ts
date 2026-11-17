@@ -153,6 +153,7 @@ afterEach(() => {
 	console.log = originalLog;
 	globalThis.fetch = originalFetch;
 	c8ctl.outputMode = originalOutputMode;
+	c8ctl.quiet = undefined;
 	if (originalCI !== undefined) process.env.CI = originalCI;
 	else delete process.env.CI;
 	if (originalDataDir !== undefined)
@@ -254,6 +255,14 @@ describe("printUpdateNotification (from cached check)", () => {
 	test("suppressed in JSON output mode, without consuming the notice", () => {
 		fresh({ latest: "2.0.0" });
 		c8ctl.outputMode = "json";
+		invoke("1.0.0");
+		assert.ok(!output().includes("newer version"));
+		assert.ok(!existsSync(notificationFile()));
+	});
+
+	test("suppressed with --quiet, without consuming the notice", () => {
+		fresh({ latest: "2.0.0" });
+		c8ctl.quiet = true;
 		invoke("1.0.0");
 		assert.ok(!output().includes("newer version"));
 		assert.ok(!existsSync(notificationFile()));

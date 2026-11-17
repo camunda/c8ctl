@@ -20,6 +20,7 @@ These flags are accepted by every command.
 | `--profile` | string |  | Use a specific profile |
 | `--dry-run` | boolean |  | Preview the API request without executing |
 | `--verbose` | boolean |  | Show verbose output |
+| `--quiet` / `-q` | boolean |  | Hide informational and success messages |
 | `--fields` | string |  | Comma-separated list of fields to display |
 | `--json` | boolean |  | Force JSON output for this invocation (does not persist; overrides session state and C8CTL_OUTPUT_MODE) |
 | `--yes` / `-y` | boolean |  | Skip confirmation prompts |
@@ -1188,6 +1189,33 @@ Remove a profile (alias: rm)
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--none` | boolean |  | Clear active profile |
+
+---
+
+### `skills`
+
+Install Camunda skills into AI coding harnesses
+
+**Resources:** install
+
+**Resource-specific flags:**
+
+<details>
+<summary><code>install</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--harness` | string |  | GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted) |
+
+</details>
+
+**Examples:**
+
+```bash
+c8ctl skills install                                        # Install or update skills for detected harnesses
+c8ctl skills install --harness claude-code                  # Install or update skills for Claude Code
+c8ctl skills install --harness github-copilot               # Install or update skills for GitHub Copilot CLI
+```
 
 ---
 

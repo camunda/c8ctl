@@ -1,8 +1,8 @@
 # AGENTS.md — `element-template` plugin
 
 Read [docs/design.md](./docs/design.md) before changing this plugin. It
-covers the **why**: vendor bundle, release-bundle source choice, cache
-strategy (`upstreamRef`-keyed dedup), lazy bootstrap, and semver-based
+covers the **why**: vendor bundle, npm package source choice, cache
+strategy (`id@version`-keyed dedup), explicit bootstrap, and semver-based
 version resolution.
 
 ## Where things live
@@ -14,7 +14,6 @@ version resolution.
 | `migration/` | The migration engine behind `update`: recipe parser (`recipe.ts`, schema in `migrates-from.schema.json`), step resolution (`steps.ts`), value resolution (`plan.ts`), applying to a headless modeler (`apply.ts`) and the report model (`report.ts`). **Self-contained: nothing in this folder may import from c8ctl or from the rest of the plugin**, so it can be lifted out into a library. `migration-output.ts` (outside it) renders the report. |
 | `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplates` (Modeler-aligned `.camunda/element-templates/` + Modeler user-data lookup), `resolveOotbTemplate`, `resolveTemplateId` (local first, then OOTB — every subcommand's id path), `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
-| `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
 | `vendor.ts` | `resolveVendorBundle()` + the minimal bpmn-js `Modeler`/`modeling` type surface shared by `apply`/`edit` |
 | `vendor-src/bundle-entry.js` | esbuild entry — re-exports `Modeler`, `CloudElementTemplatesCoreModule`, `ZeebeModdleExtension` |
@@ -27,16 +26,16 @@ version resolution.
   esbuild bundles.
 - **Cache file shape mirrors Desktop Modeler's
   `.camunda-connector-templates.json`.** Don't change the format
-  without reason — `metadata.upstreamRef` is the dedup key for
-  incremental sync.
+  without reason — current package templates replace cached entries
+  by `id@version`; `metadata.upstreamRef` records their origin.
 - **No subcommand auto-bootstraps the cache.** OOTB-id resolution
   is guarded by `requireCachePresent()` in `cache.ts`, which
   throws the shared `CACHE_NOT_FOUND_MESSAGE` when the cache is
   absent. The reason auto-bootstrap is forbidden: bootstrap progress
   goes through `logger.info`, which writes to stdout in text mode —
   it would corrupt `apply | bpmn lint` and `get <id> > template.json`
-  pipelines, and racing cold-cache invocations would both download the
-  same bundles. Don't re-add a bootstrap call to any subcommand
+  pipelines, and racing cold-cache invocations would both install the
+  same package. Don't re-add a bootstrap call to any subcommand
   without changing the logger story first.
 - **Path/URL refs and local id hits must not trigger the cache check.**
   Detection happens in `parseTemplateRef()` in `template-ref.ts`
@@ -88,16 +87,12 @@ version resolution.
   WeakMap-based `sourceByDetail` side table in `loadTemplate` preserves
   this identity so `get-properties` doesn't collapse them and `--set`
   writes to all matching duplicates.
-- **Templates come from the `camunda/connectors` GitHub releases, not
-  `raw.githubusercontent.com`** (blocked in many enterprise networks —
-  c8ctl#530). `sync` keeps the newest release of each of the 4 newest
-  minor lines (`MAX_MINOR_LINES`), skipping drafts, release candidates
-  and releases whose bundle asset isn't published yet. A bundle URL
-  changes with every patch, so `--prune` is skipped whenever a download
-  failed — otherwise one transient error would drop a whole minor line.
-  The release listing endpoint is overridable via
-  `C8CTL_CONNECTORS_RELEASES_URL` — useful for tests against a local
-  fixture server.
+- **Templates come from `@camunda/connectors-element-templates` via
+  `c8ctl.npm`**. Sync installs into a temporary directory under the locked
+  cache, then reads `src/element-templates/*.json`;
+  `C8CTL_ELEMENT_TEMPLATES_PACKAGE` allows package specs, URLs, and local
+  paths. Failed installs or malformed template files retain the old cache
+  and skip `--prune`.
 
 ## Testing
 
@@ -114,10 +109,11 @@ Agent v1 to v2 migration against the real templates, fetched at a pinned
 C8CTL_FIDELITY=1 node --experimental-strip-types --test tests/unit/element-template-migration-upstream-fidelity.test.ts
 ```
 
-Smoke-test against the live connectors releases (writes to a throwaway
+Smoke-test against the live npm package (writes to a throwaway
 dir):
 
 ```bash
-C8CTL_DATA_DIR=/tmp/c8ctl-smoke node --experimental-strip-types src/index.ts \
-  element-template search "AWS S3"
+export C8CTL_DATA_DIR=/tmp/c8ctl-smoke
+node --experimental-strip-types src/index.ts element-template sync
+node --experimental-strip-types src/index.ts element-template search "AWS S3"
 ```

@@ -16,6 +16,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for file changes and auto-redeploys (configurable extensions via `--extensions`)
 - **`.c8ignore` Support**: Filter deploy/watch file scanning with `.gitignore`-style patterns; `node_modules/`, `target/`, `.git/` ignored by default
+- **`deployResources` Selection**: Select a project's deployed and watched files with glob patterns in `camunda.json` (allowlist; replaces the extension scan and `.c8ignore` for that project)
 - **Open Applications**: Open Camunda web applications (Operate, Tasklist, Modeler, Optimize) in the browser directly from the CLI
 - **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
@@ -56,7 +57,6 @@ The full documentation is maintained in this repository under [`docs/`](docs/) a
 - [Getting started](docs/getting-started.md) — install, spin up a local cluster, credentials, profiles, output modes, and shell completion.
 - [Cluster inspection and process management](docs/cluster-inspection.md) — list, search, get, and manage process instances, user tasks, incidents, jobs, variables, messages, and forms.
 - [Identity management](docs/identity-management.md) — users, roles, groups, tenants, authorizations, and mapping rules.
-- [Cluster variables](docs/cluster-variables.md) — global and tenant-scoped cluster variables.
 - [Development workflows](docs/development-workflows.md) — deploy, run, watch, profiles, sessions, and the MCP proxy.
 - [Plugins](docs/plugins.md) — scaffold, install, and manage custom commands.
 - [Command reference](docs/command-reference.md) — every command, flag, resource, and alias.
@@ -139,6 +139,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `open` - Open Camunda web application in browser
 - `add` - Add a profile
 - `remove` (alias: `rm`) - Remove a profile
+- `skills` - Install Camunda AI coding skills
 - `load` - Load a c8ctl plugin
 - `unload` (alias: `rm`) - Unload a c8ctl plugin
 - `upgrade` - Upgrade a plugin
@@ -154,23 +155,30 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `help` (alias: `menu`) - Show help
 - `which` - Show active profile or output mode
 
-**Resources**: authorization (auth), cluster-variable, form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
+**Resources**: authorization (auth), cluster-variable, form, group, incident (inc), install, job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
 <!-- verb-resource-list:end -->
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
 
 ## Environment Variables
 
-- `CAMUNDA_BASE_URL`: Cluster base URL
+- `CAMUNDA_BASE_URL`: Cluster base URL (e.g. `http://localhost:8080/v2`)
+- `CAMUNDA_REST_ADDRESS`: SDK-standard alias for `CAMUNDA_BASE_URL`; `CAMUNDA_BASE_URL` wins when both are set
+- `CAMUNDA_AUTH_STRATEGY`: Authentication strategy — `NONE`, `BASIC`, or `OAUTH` (default: derived from the credentials present)
 - `CAMUNDA_CLIENT_ID`: OAuth client ID
 - `CAMUNDA_CLIENT_SECRET`: OAuth client secret
 - `CAMUNDA_TOKEN_AUDIENCE`: OAuth token audience
 - `CAMUNDA_OAUTH_URL`: OAuth token endpoint
+- `CAMUNDA_OAUTH_SCOPE`: OAuth scope (space-separated)
+- `CAMUNDA_USERNAME`: Basic auth username
+- `CAMUNDA_PASSWORD`: Basic auth password
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
 - `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`.
 - `C8CTL_DATA_DIR`: Override the OS-default data directory for plugins and session state.
 - `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr (also sets Camunda SDK logging to `debug`).
 - `CAMUNDA_SDK_LOG_LEVEL`: Camunda SDK log level (logs go to stderr). Defaults to `silent`; `--verbose` uses `trace`.
+
+Env vars apply when no `--profile` flag or active session profile is set; a profile always wins. When credential variables are set without a cluster address variable, c8ctl warns that it is falling back to the default `local` profile.
 
 ## Configuration Files
 

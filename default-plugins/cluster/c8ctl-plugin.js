@@ -414,7 +414,7 @@ const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
 const HEALTH_CHECK_TIMEOUT_MS = 3_000;
 const ALIAS_COLUMN_WIDTH = 22;
 
-function getCacheDir() {
+export function getCacheDir() {
   const envDir = process.env.C8RUN_CACHE_DIR;
   if (envDir) {
     return envDir;
@@ -438,6 +438,38 @@ function getCacheDir() {
         'c8run',
       );
   }
+}
+
+/**
+ * Platform/architecture pairs the Camunda Download Center publishes a
+ * Camunda 8 Run build for: darwin-aarch64, darwin-x86_64, linux-x86_64 and
+ * windows-x86_64. There is no Linux or Windows arm64 build.
+ */
+const PUBLISHED_PLATFORMS = {
+  darwin: ['x64', 'arm64'],
+  linux: ['x64'],
+  win32: ['x64'],
+};
+
+/**
+ * Why Camunda 8 Run cannot be downloaded for this platform, or null when it
+ * can. A mirror (C8CTL_C8RUN_DOWNLOAD_URL) may host other builds, so any
+ * platform is allowed when one is set.
+ */
+export function unpublishedPlatformMessage({
+  platform = osPlatform(),
+  arch = osArch(),
+  mirror = process.env.C8CTL_C8RUN_DOWNLOAD_URL,
+} = {}) {
+  if (mirror) return null;
+  if (Object.hasOwn(PUBLISHED_PLATFORMS, platform) && PUBLISHED_PLATFORMS[platform].includes(arch)) {
+    return null;
+  }
+  return (
+    `Camunda 8 Run is not published for ${platform} ${arch}. ` +
+    'The Camunda Download Center has builds for macOS (x64, arm64), Linux (x64) and Windows (x64). ' +
+    'To use your own build, set C8CTL_C8RUN_DOWNLOAD_URL to a mirror with the same layout that hosts it.'
+  );
 }
 
 function getPlatformIdentifier() {
@@ -833,7 +865,7 @@ export async function downloadWithRetry({
   progressIntervalMs = PROGRESS_INTERVAL_MS,
   extraHints = [],
 }) {
-  const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr' }) : () => {};
+  const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr', essential: true }) : () => {};
   const invalid = invalidDownloadUrlReason(url);
   if (invalid) {
     throw downloadError(
@@ -1178,6 +1210,10 @@ export function quoteForHint(path, platform = osPlatform()) {
 async function downloadC8Run(config) {
   const logger = getLogger();
   const version = config.version;
+
+  // Fail before requesting an archive that was never published.
+  const unpublished = unpublishedPlatformMessage();
+  if (unpublished) throw new Error(unpublished);
 
   const downloadUrl = getDownloadUrl(version);
 
@@ -1622,10 +1658,10 @@ async function startC8Run(config, debug = false, startArgs = []) {
       if (existsSync(versionFile)) {
         const runningVersion = readFileSync(versionFile, 'utf-8').trim();
         if (runningVersion) {
-          logger.info(`Detected running version marker: ${runningVersion}`);
+          logger.info(`Detected running version marker: ${runningVersion}`, { essential: true });
         }
       }
-      logger.info('Use "c8ctl cluster stop" to stop it first.');
+      logger.info('Use "c8ctl cluster stop" to stop it first.', { essential: true });
       return;
     }
 
@@ -1646,7 +1682,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     );
     const record = readRunningClusterRecord(config.cacheDir);
     if (record?.version) {
-      logger.info(`Detected running version from the durable PID record: ${record.version}`);
+      logger.info(`Detected running version from the durable PID record: ${record.version}`, { essential: true });
     }
     throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
@@ -1662,7 +1698,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
   if (typeof proc.pid !== 'number') {
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat "${logDir}"/*.log`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
     process.exit(1);
   }
 
@@ -1761,7 +1797,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
       'Cluster failed to start within timeout.',
     );
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat "${logDir}"/*.log`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
     process.exit(1);
   }
 }
@@ -2994,7 +3030,7 @@ export async function listRemoteVersions() {
     html = await response.text();
   } catch (error) {
     logger.error(`Failed to query the Camunda Download Center: ${error}`);
-    logger.info('Check your network connection and try again.');
+    logger.info('Check your network connection and try again.', { essential: true });
     process.exit(1);
   }
 
@@ -3221,7 +3257,7 @@ export async function streamLogs(cacheDir) {
 
   if (!existsSync(markerFile)) {
     logger.warn('No cluster is currently running.');
-    logger.info('Start one with: c8ctl cluster start');
+    logger.info('Start one with: c8ctl cluster start', { essential: true });
     return;
   }
 
@@ -3252,7 +3288,7 @@ export async function streamLogs(cacheDir) {
 
   if (existingLogs.length === 0) {
     logger.warn(`No log files found in ${logDir}`);
-    logger.info('The cluster may still be starting. Try again in a moment.');
+    logger.info('The cluster may still be starting. Try again in a moment.', { essential: true });
     return;
   }
 

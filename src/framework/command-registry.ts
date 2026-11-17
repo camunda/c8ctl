@@ -160,6 +160,12 @@ export interface CommandDef {
 	 * Each entry: { command, description }. Rendered in declaration order.
 	 */
 	helpExamples?: readonly { command: string; description: string }[];
+	/**
+	 * Extra lines appended to `c8ctl help <verb>` after the flags — for
+	 * usage notes that don't fit the flag schema (e.g. mcp-proxy's
+	 * [mcp-path] values and connection precedence).
+	 */
+	helpNotes?: readonly string[];
 }
 
 // ─── Resource Aliases ────────────────────────────────────────────────────────
@@ -198,6 +204,45 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	"cluster-variables": "cluster-variable",
 };
 
+// ─── Environment Variables ───────────────────────────────────────────────────
+
+/**
+ * The CAMUNDA_* environment variables c8ctl resolves when no `--profile` or
+ * session profile is selected, rendered as a dedicated "Environment
+ * Variables" section in the top-level `c8ctl help` output and in
+ * `c8ctl help mcp-proxy`. Kept out of the Flags section on purpose — that
+ * section is scoped to GLOBAL_FLAGS (see the class-scoped guard in
+ * tests/unit/help.test.ts), and an env var listed as a flag would imply it
+ * is a CLI option.
+ */
+export const ENVIRONMENT_VARIABLES_HELP: readonly {
+	name: string;
+	description: string;
+}[] = [
+	{
+		name: "CAMUNDA_BASE_URL",
+		description: "Cluster base URL (e.g. http://localhost:8080/v2)",
+	},
+	{
+		name: "CAMUNDA_REST_ADDRESS",
+		description:
+			"SDK-standard alias for CAMUNDA_BASE_URL; CAMUNDA_BASE_URL wins when both are set",
+	},
+	{
+		name: "CAMUNDA_AUTH_STRATEGY",
+		description:
+			"Authentication strategy: NONE, BASIC, or OAUTH (default: derived from the credentials present)",
+	},
+	{ name: "CAMUNDA_CLIENT_ID", description: "OAuth client ID" },
+	{ name: "CAMUNDA_CLIENT_SECRET", description: "OAuth client secret" },
+	{ name: "CAMUNDA_OAUTH_URL", description: "OAuth token endpoint" },
+	{ name: "CAMUNDA_TOKEN_AUDIENCE", description: "OAuth token audience" },
+	{ name: "CAMUNDA_OAUTH_SCOPE", description: "OAuth scope (space-separated)" },
+	{ name: "CAMUNDA_USERNAME", description: "Basic auth username" },
+	{ name: "CAMUNDA_PASSWORD", description: "Basic auth password" },
+	{ name: "CAMUNDA_DEFAULT_TENANT_ID", description: "Default tenant ID" },
+];
+
 // ─── Global Flags ────────────────────────────────────────────────────────────
 
 /**
@@ -220,6 +265,18 @@ export const GLOBAL_FLAGS = {
 		agentAppliesTo: "all commands",
 	},
 	verbose: { type: "boolean", description: "Show verbose output" },
+	quiet: {
+		type: "boolean",
+		description: "Hide informational and success messages",
+		short: "q",
+		agentDescription:
+			"Hide informational and success messages (status lines, progress, " +
+			'"✓ … done" confirmations) in both text and JSON output modes.\n' +
+			"A command's data and answer (including the key of a created resource, " +
+			"printed bare in text mode), warnings and errors are still printed, " +
+			"and the exit code is unchanged.",
+		agentAppliesTo: "all commands",
+	},
 	fields: {
 		type: "string",
 		description: "Comma-separated list of fields to display",
@@ -1965,6 +2022,46 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
+	skills: {
+		description: "Install Camunda AI coding skills",
+		helpDescription: "Install Camunda skills into AI coding harnesses",
+		helpFooterLabel: "Install Camunda skills",
+		helpNotes: [
+			"Requires GitHub CLI 2.90 or later; its skill commands are in preview.",
+			"Re-run to update the same skill directories; local edits to Camunda skills are overwritten.",
+			"Use a GitHub CLI agent ID for --harness. See `gh skill install --help` for supported IDs.",
+		],
+		hasDetailedHelp: true,
+		helpExamples: [
+			{
+				command: "c8ctl skills install",
+				description: "Install or update skills for detected harnesses",
+			},
+			{
+				command: "c8ctl skills install --harness claude-code",
+				description: "Install or update skills for Claude Code",
+			},
+			{
+				command: "c8ctl skills install --harness github-copilot",
+				description: "Install or update skills for GitHub Copilot CLI",
+			},
+		],
+		mutating: true,
+		requiresResource: true,
+		resources: ["install"],
+		flags: {},
+		resourceFlags: {
+			install: {
+				harness: {
+					type: "string",
+					rejectEmpty: true,
+					description:
+						"GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted)",
+				},
+			},
+		},
+	},
+
 	load: {
 		description: "Load a c8ctl plugin",
 		helpResource: "plugin [name|--from url]",
@@ -2198,6 +2295,19 @@ export const COMMAND_REGISTRY = {
 		requiresResource: false,
 		resources: [],
 		flags: {},
+		helpNotes: [
+			"MCP paths:",
+			"  /mcp/cluster      Cluster administration tools (default)",
+			"  /mcp/processes    Process execution tools",
+			"",
+			"Connection (highest precedence first):",
+			"  1. --profile <name>          A saved c8ctl or Modeler profile",
+			"  2. The active session profile (c8ctl use profile <name>)",
+			"  3. Environment variables     CAMUNDA_BASE_URL or CAMUNDA_REST_ADDRESS,",
+			"     plus CAMUNDA_AUTH_STRATEGY (NONE/BASIC/OAUTH) and the credential",
+			"     variables below",
+			"  4. The default 'local' profile (http://localhost:8080/v2, demo/demo)",
+		],
 	},
 
 	feedback: {

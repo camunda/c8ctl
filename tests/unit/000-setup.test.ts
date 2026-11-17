@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { after, before } from "node:test";
 import { getUserDataDir } from "../../src/core/config.ts";
 import { clearLoadedPlugins } from "../../src/framework/plugins/plugin-loader.ts";
+import { assertIsolatedUserDataDir } from "../utils/isolate-user-data-dir.ts";
 
 // Store original environment
 const originalEnv = { ...process.env };
@@ -16,6 +17,7 @@ const originalEnv = { ...process.env };
  * Clean up user data directory test artifacts
  */
 function cleanUserDataDir() {
+	assertIsolatedUserDataDir();
 	const userDataDir = getUserDataDir();
 	const profilesPath = join(userDataDir, "profiles.json");
 	const sessionPath = join(userDataDir, "session.json");

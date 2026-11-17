@@ -380,7 +380,7 @@ describe("round-3 framework prefix: profiles", () => {
 			assertFrameworkFailure(
 				result,
 				"Failed to add profile",
-				"CAMUNDA_BASE_URL not found",
+				"CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found",
 				"add profile (missing in file)",
 			);
 		} finally {
@@ -399,7 +399,7 @@ describe("round-3 framework prefix: profiles", () => {
 		assertFrameworkFailure(
 			result,
 			"Failed to add profile",
-			"CAMUNDA_BASE_URL not set in environment",
+			"CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set in environment",
 			"add profile (missing in env)",
 		);
 	});

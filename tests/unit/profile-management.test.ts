@@ -34,6 +34,14 @@ import { c8ctl } from "../../src/core/runtime.ts";
 
 const CLI_ENTRY = join(process.cwd(), "src", "index.ts");
 
+/**
+ * Safety net only, not a correctness signal: a CLI subprocess cold-starts
+ * Node with type stripping, which can take several seconds on a loaded
+ * runner. A tight deadline here killed healthy children and surfaced as an
+ * empty-output assertion failure.
+ */
+const CLI_SPAWN_TIMEOUT_MS = 60_000;
+
 describe("Profile management", () => {
 	describe("parseEnvFile", () => {
 		test("parses simple KEY=VALUE pairs", () => {
@@ -144,6 +152,16 @@ describe("Profile management", () => {
 			assert.strictEqual(hasCamundaEnvVars(), true);
 		});
 
+		test("returns true when only CAMUNDA_REST_ADDRESS is set", () => {
+			delete process.env.CAMUNDA_BASE_URL;
+			delete process.env.CAMUNDA_CLIENT_ID;
+			delete process.env.CAMUNDA_CLIENT_SECRET;
+			delete process.env.CAMUNDA_USERNAME;
+			delete process.env.CAMUNDA_PASSWORD;
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+			assert.strictEqual(hasCamundaEnvVars(), true);
+		});
+
 		test("returns false when no CAMUNDA_* credential vars are set", () => {
 			delete process.env.CAMUNDA_BASE_URL;
 			delete process.env.CAMUNDA_CLIENT_ID;
@@ -235,6 +253,27 @@ describe("Profile management", () => {
 			);
 		});
 
+		test("warns when session profile active and only CAMUNDA_REST_ADDRESS is set", () => {
+			addProfile({
+				name: "rest-profile",
+				baseUrl: "https://profile-cluster.example.com",
+			});
+			c8ctl.activeProfile = "rest-profile";
+			delete process.env.CAMUNDA_BASE_URL;
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+
+			const config = resolveClusterConfig();
+
+			assert.strictEqual(config.baseUrl, "https://profile-cluster.example.com");
+			const allOutput = `${consoleErrorSpy.join("\n")}\n${consoleLogSpy.join("\n")}`;
+			assert.ok(
+				allOutput.includes(
+					"Active profile 'rest-profile' is overriding CAMUNDA_*",
+				),
+				`Expected env var conflict warning, got:\nstderr: ${consoleErrorSpy.join("\n")}\nstdout: ${consoleLogSpy.join("\n")}`,
+			);
+		});
+
 		test("no warning when no CAMUNDA_* env vars are present", () => {
 			addProfile({
 				name: "clean-profile",
@@ -312,7 +351,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -352,7 +391,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -385,14 +424,14 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
 
 			const output = (result.stdout ?? "") + (result.stderr ?? "");
 			assert.ok(
-				output.includes("CAMUNDA_BASE_URL not found"),
+				output.includes("CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found"),
 				`Expected missing URL error, got: ${output}`,
 			);
 			assert.notStrictEqual(result.status, 0);
@@ -418,7 +457,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: {
 						...process.env,
 						C8CTL_DATA_DIR: testDataDir,
@@ -462,6 +501,7 @@ describe("Profile management", () => {
 			delete childEnv.CAMUNDA_CLIENT_SECRET;
 			delete childEnv.CAMUNDA_USERNAME;
 			delete childEnv.CAMUNDA_PASSWORD;
+			delete childEnv.CAMUNDA_REST_ADDRESS;
 
 			const result = spawnSync(
 				"node",
@@ -475,14 +515,14 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: childEnv,
 				},
 			);
 
 			const output = (result.stdout ?? "") + (result.stderr ?? "");
 			assert.ok(
-				output.includes("CAMUNDA_BASE_URL not set"),
+				output.includes("CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set"),
 				`Expected missing URL error, got: ${output}`,
 			);
 			assert.notStrictEqual(result.status, 0);
@@ -502,7 +542,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "use", "profile", "local"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -513,7 +553,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "use", "profile", "--none"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -531,7 +571,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "which", "profile"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -715,7 +755,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -753,7 +793,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -787,7 +827,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -827,7 +867,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -860,7 +900,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);

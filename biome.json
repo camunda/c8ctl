@@ -19,7 +19,7 @@
 			"default-plugins/**/*.ts"
 		],
 		"rules": {
-			"recommended": true,
+			"preset": "recommended",
 			"complexity": {
 				"noAdjacentSpacesInRegex": "error",
 				"noArguments": "error",

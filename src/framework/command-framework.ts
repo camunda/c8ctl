@@ -268,6 +268,8 @@ export interface CommandContext {
 	dryRun: DryRunFn;
 	/** Whether --verbose was set. */
 	verbose: boolean;
+	/** Whether --quiet was set (the logger already hides info and success messages). */
+	quiet: boolean;
 	/** Active profile name (for client/tenant resolution). */
 	profile: string | undefined;
 	/** Whether --yes was set (skip confirmation prompts). */
@@ -570,7 +572,7 @@ function renderResult(result: CommandResult, ctx: CommandContext): void {
 				const sorted = sortTableData(result.items, sortBy, logger, sortOrder);
 				logger.table(sorted);
 			} else {
-				logger.info(result.emptyMessage);
+				logger.info(result.emptyMessage, { essential: true });
 			}
 			break;
 		case "get":
@@ -584,7 +586,8 @@ function renderResult(result: CommandResult, ctx: CommandContext): void {
 			logger.json(result.info);
 			break;
 		case "info":
-			logger.info(result.message);
+			// An info result is the command's answer (e.g. "no form").
+			logger.info(result.message, { essential: true });
 			break;
 		case "success":
 			logger.success(result.message, result.key);

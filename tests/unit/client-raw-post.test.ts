@@ -52,6 +52,52 @@ describe("resolveAuthHeaders — custom profile headers (#547)", () => {
 		assert.ok(headers.Authorization?.startsWith("Basic "));
 	});
 
+	test("explicit NONE strategy sends no Authorization despite stale Basic credentials", async () => {
+		addProfile({
+			name: "strategy-none",
+			baseUrl: "https://cluster.example.com/v2",
+			username: "stale",
+			password: "stale",
+			authStrategy: "NONE",
+		});
+
+		const headers = await resolveAuthHeaders("strategy-none");
+
+		assert.strictEqual(headers.Authorization, undefined);
+	});
+
+	test("explicit BASIC strategy uses Basic auth even when OAuth credentials are present", async () => {
+		addProfile({
+			name: "strategy-basic",
+			baseUrl: "https://cluster.example.com/v2",
+			username: "demo",
+			password: "demo",
+			clientId: "id",
+			clientSecret: "secret",
+			authStrategy: "BASIC",
+		});
+
+		const headers = await resolveAuthHeaders("strategy-basic");
+
+		assert.strictEqual(
+			headers.Authorization,
+			`Basic ${Buffer.from("demo:demo").toString("base64")}`,
+		);
+	});
+
+	test("explicit BASIC strategy without Basic credentials fails with an actionable error", async () => {
+		addProfile({
+			name: "strategy-basic-missing",
+			baseUrl: "https://cluster.example.com/v2",
+			authStrategy: "BASIC",
+		});
+
+		await assert.rejects(
+			resolveAuthHeaders("strategy-basic-missing"),
+			/BASIC is selected/,
+		);
+	});
+
 	test("a custom header overrides the computed Authorization header", async () => {
 		addProfile({
 			name: "gateway-override",

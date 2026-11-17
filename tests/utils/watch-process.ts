@@ -43,6 +43,8 @@ export interface StartWatchOptions {
 	 * server via `CAMUNDA_BASE_URL`.
 	 */
 	env?: Record<string, string>;
+	/** Extra Node.js flags placed before the CLI entry (e.g. `--import`). */
+	nodeArgs?: string[];
 }
 
 export interface WatchProcess {
@@ -79,11 +81,19 @@ export function startWatchProcess(options: StartWatchOptions): WatchProcess {
 		extraArgs = [],
 		cwd = PROJECT_ROOT,
 		env: extraEnv = {},
+		nodeArgs = [],
 	} = options;
 
 	const child = spawn(
 		"node",
-		["--experimental-strip-types", CLI, "watch", ...extraArgs, watchDir],
+		[
+			"--experimental-strip-types",
+			...nodeArgs,
+			CLI,
+			"watch",
+			...extraArgs,
+			watchDir,
+		],
 		{
 			cwd,
 			env: { ...makeTestEnv({ C8CTL_DATA_DIR: dataDir }), ...extraEnv },

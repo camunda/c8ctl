@@ -15,6 +15,9 @@ import {
 	isPluginRegistered,
 	removePluginFromRegistry,
 } from "../../src/framework/plugins/plugin-registry.ts";
+import { assertIsolatedUserDataDir } from "../utils/isolate-user-data-dir.ts";
+
+assertIsolatedUserDataDir();
 
 // Test registry path
 const testRegistryPath = join(getUserDataDir(), "plugins.json");

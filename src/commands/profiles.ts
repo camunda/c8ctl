@@ -18,6 +18,7 @@ import {
 	parseEnvFile,
 	parseHeaderFlags,
 	removeProfile as removeProfileConfig,
+	resolveEnvBaseUrl,
 } from "../core/index.ts";
 import { confirm, defineCommand, select } from "../framework/index.ts";
 
@@ -29,7 +30,7 @@ function listProfiles(): void {
 	const profiles = getAllProfiles();
 
 	if (profiles.length === 0) {
-		logger.info("No profiles configured");
+		logger.info("No profiles configured", { essential: true });
 		logger.info("");
 		logger.info(
 			"Add a profile with: c8ctl profiles add <name> --url <cluster-url>",
@@ -93,6 +94,9 @@ interface AddProfileOptions {
  * Describe the auth type of a profile for user feedback.
  */
 function describeAuth(profile: Profile): string {
+	if (profile.authStrategy === "NONE") return "None";
+	if (profile.authStrategy === "BASIC") return "Basic auth";
+	if (profile.authStrategy === "OAUTH") return "OAuth (client credentials)";
 	if (profile.clientId && profile.clientSecret)
 		return "OAuth (client credentials)";
 	if (profile.username && profile.password) return "Basic auth";
@@ -109,6 +113,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 	if (name.startsWith(MODELER_PREFIX)) {
 		logger.info(
 			"Please choose a different name or manage this profile in Camunda Modeler",
+			{ essential: true },
 		);
 		throw new Error(
 			`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`,
@@ -139,8 +144,15 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		const vars = parseEnvFile(content);
 		profile = { ...envVarsToProfile(name, vars), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
-			logger.info("The .env file must contain at least CAMUNDA_BASE_URL.");
-			throw new Error(`CAMUNDA_BASE_URL not found in ${options.envFile}`);
+			logger.info(
+				"The .env file must contain at least CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS).",
+				{
+					essential: true,
+				},
+			);
+			throw new Error(
+				`CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found in ${options.envFile}`,
+			);
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from ${options.envFile})`);
@@ -150,8 +162,15 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		// --from-env: read from current process environment
 		profile = { ...envVarsToProfile(name, process.env), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
-			logger.info("Set CAMUNDA_BASE_URL before using --from-env.");
-			throw new Error("CAMUNDA_BASE_URL not set in environment");
+			logger.info(
+				"Set CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) before using --from-env.",
+				{
+					essential: true,
+				},
+			);
+			throw new Error(
+				"CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set in environment",
+			);
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from environment)`);
@@ -193,7 +212,9 @@ function removeProfile(name: string): void {
 
 	// Prevent removing Modeler profiles
 	if (name.startsWith(MODELER_PREFIX)) {
-		logger.info("Manage Modeler connections directly in Camunda Modeler");
+		logger.info("Manage Modeler connections directly in Camunda Modeler", {
+			essential: true,
+		});
 		throw new Error("Cannot remove Modeler profiles via c8ctl");
 	}
 
@@ -210,21 +231,23 @@ function removeProfile(name: string): void {
  */
 function whichProfile(): void {
 	const logger = getLogger();
+	// The profile name is the command's answer, so --quiet keeps it.
+	const say = (message: string) => logger.info(message, { essential: true });
 	const active = c8ctl.activeProfile;
 	if (!active) {
-		const hasBaseUrl = !!process.env.CAMUNDA_BASE_URL?.trim();
+		const hasBaseUrl = !!resolveEnvBaseUrl();
 		if (hasBaseUrl) {
-			logger.info("(none — CAMUNDA_* env vars will be used)");
+			say("(none — CAMUNDA_* env vars will be used)");
 		} else if (hasCamundaEnvVars()) {
-			logger.info(
-				`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL to use them)`,
+			say(
+				`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL or CAMUNDA_REST_ADDRESS to use them)`,
 			);
 		} else {
-			logger.info(`${DEFAULT_PROFILE} (default)`);
+			say(`${DEFAULT_PROFILE} (default)`);
 		}
 		return;
 	}
-	logger.info(active);
+	say(active);
 }
 
 // ─── defineCommand wrappers ──────────────────────────────────────────────────

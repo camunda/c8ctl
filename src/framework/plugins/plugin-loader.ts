@@ -55,6 +55,11 @@ export interface PluginCtx {
 	dryRun: boolean;
 	/** True when `--verbose` is set. */
 	verbose: boolean;
+	/**
+	 * True when `--quiet` is set. The host logger already hides `info` and
+	 * `success` messages; check this for output written another way.
+	 */
+	quiet: boolean;
 	/** Effective output mode (`--json` toggles to `json`). */
 	outputMode: OutputMode;
 	/** True when `--yes` is set. Skip confirmation prompts. */

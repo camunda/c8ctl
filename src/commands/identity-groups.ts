@@ -70,7 +70,7 @@ export const searchIdentityGroupsCommand = defineCommand(
 		);
 
 		if (items.length === 0) {
-			logger.info("No groups found");
+			logger.info("No groups found", { essential: true });
 			return;
 		}
 

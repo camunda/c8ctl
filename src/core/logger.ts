@@ -3,6 +3,7 @@
  * Handles output in multiple modes (text, json) based on session state
  */
 
+import { resolveEnvBaseUrl } from "./env-address.ts";
 import { c8ctl } from "./runtime.ts";
 
 export type OutputMode = "text" | "json";
@@ -135,7 +136,7 @@ function getLocalClusterHint(error?: Error): string | undefined {
 	// and no CAMUNDA_* env vars are configured (env vars point elsewhere)
 	if (c8ctl.activeProfile !== undefined && c8ctl.activeProfile !== "local")
 		return undefined;
-	if (!c8ctl.activeProfile && process.env.CAMUNDA_BASE_URL) return undefined;
+	if (!c8ctl.activeProfile && resolveEnvBaseUrl()) return undefined;
 
 	const isConnectionError = isNetworkError(error);
 	if (!isConnectionError) return undefined;
@@ -227,11 +228,19 @@ export class Logger {
 		this._logWriter.error(...data);
 	}
 
-	/** Override the stream for primary output while preserving mode-aware formatting. */
+	/**
+	 * Informational message. Hidden by `--quiet` unless `essential` — use
+	 * that for a command's answer (e.g. `which profile`) and for hints that
+	 * explain a warning or error. `stream` overrides where it is written.
+	 */
 	info(
 		message: string,
-		{ stream }: { stream?: "stdout" | "stderr" } = {},
+		{
+			stream,
+			essential = false,
+		}: { stream?: "stdout" | "stderr"; essential?: boolean } = {},
 	): void {
+		if (c8ctl.quiet && !essential) return;
 		const content =
 			this.mode === "text"
 				? message
@@ -271,7 +280,17 @@ export class Logger {
 		}
 	}
 
+	/**
+	 * Success confirmation. Hidden by `--quiet`, except that a `key` is
+	 * data (e.g. a new process instance's key): quiet text mode prints it
+	 * bare on stdout, and JSON mode keeps the record, which carries it.
+	 */
 	success(message: string, key?: string | number): void {
+		if (c8ctl.quiet && key === undefined) return;
+		if (c8ctl.quiet && this.mode === "text") {
+			this._writeLog(String(key));
+			return;
+		}
 		if (this.mode === "text") {
 			if (key !== undefined) {
 				this._writeLog(`✓ ${message} [Key: ${key}]`);

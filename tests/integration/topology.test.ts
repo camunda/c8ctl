@@ -9,10 +9,12 @@ import { join } from "node:path";
 import { beforeEach, describe, test } from "node:test";
 import { createClient } from "../../src/core/client.ts";
 import { getUserDataDir } from "../../src/core/config.ts";
+import { assertIsolatedUserDataDir } from "../utils/isolate-user-data-dir.ts";
 
 describe("Topology Integration Tests (requires Camunda 8 at localhost:8080)", () => {
 	beforeEach(() => {
 		// Clear session state before each test to ensure clean tenant resolution
+		assertIsolatedUserDataDir();
 		const sessionPath = join(getUserDataDir(), "session.json");
 		if (existsSync(sessionPath)) {
 			unlinkSync(sessionPath);

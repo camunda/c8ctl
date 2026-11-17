@@ -143,7 +143,32 @@ Rules:
 - Use imperative mood ("add support", not "added support").
 - Lowercase subject (except proper nouns). No PascalCase subjects (rule enforced).
 - Keep subject concise; body can include details, rationale, links.
-- Prefix breaking changes with BREAKING CHANGE: either in body or footer.
+- Mark a breaking change with a `BREAKING CHANGE:` footer: a paragraph after the body that starts with exactly `BREAKING CHANGE:` (uppercase, with a space). See the next section for the forms that do **not** work.
+
+#### Breaking changes are rare — fixing a bug is not one
+
+A `BREAKING CHANGE:` footer in a commit message makes semantic-release cut a **new major version**. The configured Angular preset (`conventional-changelog-angular`) recognizes only this form. The other Conventional Commits forms behave differently:
+
+| Commit message | What semantic-release does |
+| --- | --- |
+| `fix: …` with a `BREAKING CHANGE: …` footer | **major** release |
+| `fix!: …` or `fix(scope)!: …` with a `BREAKING CHANGE: …` footer | **major** release |
+| `fix: …` with a `BREAKING-CHANGE: …` footer (hyphen) | patch release; the footer is ignored |
+| `fix!: …` or `fix(scope)!: …` with no footer | **nothing**: the preset can't parse a `!` header, so the commit triggers no release and is left out of the release notes |
+
+So a `!` on its own is worse than useless: it silently drops the change. The merge guard treats all three markers as breaking-change *intent* and blocks merging until a maintainer applies the `ack-breaking-change` label. If you mean to ship a major version, always include the `BREAKING CHANGE:` footer, even when you also use `!`.
+
+Use these markers only when **intentionally supported, documented behaviour** changes in a way users must adapt to (a removed command or flag, a renamed flag, a changed output contract that is documented as stable).
+
+Do **not** mark a change as breaking just because:
+
+- it fixes a bug that some users may have relied on (for example, a command that silently fell back to the wrong cluster now fails with an error) — that is a `fix:`
+- it changes an exit code, error message or output on a path that was already wrong
+- it tightens validation of input that was never valid
+
+Describe the user-visible behaviour change in the commit body instead, so it still shows up in the release notes.
+
+If you are unsure, default to non-breaking and ask the engineer. A PR whose title or commits contain a breaking-change marker cannot be merged until a maintainer applies the `ack-breaking-change` label (enforced by [`.github/workflows/breaking-change-guard.yml`](.github/workflows/breaking-change-guard.yml)). AI agents must never apply that label themselves.
 
 #### Review-comment fix-ups
 
@@ -209,6 +234,10 @@ Never skip the lint and type-check steps before pushing.
 - `npm run test:unit` — fast unit tests (no live Camunda required)
 - `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). When any `src/` file is staged it also runs the layering guard (`check:layering`) against the working tree, so import-boundary regressions are caught at commit time instead of in CI. Skips biome, tsc, or the guard individually if the toolchain is not installed locally.
 
+#### Test user-data isolation — never touch the real c8ctl data dir
+
+Both `test:unit` and `test:integration` preload `tests/utils/isolate-user-data-dir.ts` via `--import`, which points `C8CTL_DATA_DIR` at a throwaway temp directory (per test subprocess). Several tests create, overwrite and delete `profiles.json`, `session.json` and `plugins.json`; without this preload they would wipe the developer's saved profiles and active-profile selection. Any test code that deletes or overwrites files in `getUserDataDir()` must call `assertIsolatedUserDataDir()` from that module first. `tests/unit/user-data-dir-isolation.test.ts` fails if the preload is dropped. When running a test file directly, pass `--import ./tests/utils/isolate-user-data-dir.ts`.
+
 #### Test process isolation — `--experimental-test-isolation=none` for integration tests
 
 `tests/unit/*.test.ts` runs with the default per-file process isolation of `node:test`. `tests/integration/*.test.ts` runs with `--experimental-test-isolation=none` (single process for all integration files).
@@ -244,6 +273,14 @@ If you find yourself wanting to promote a flag into the top-level Flags section:
 - **If the flag genuinely applies to every (or nearly every) command** — add it to `GLOBAL_FLAGS`. It is now global.
 - **If the flag is verb-specific but you want it discoverable** — keep it verb-specific. If an example would help, add an entry to the verb's `helpExamples` in `COMMAND_REGISTRY`; those examples are aggregated into the top-level `c8ctl --help` output under the global `Examples:` section, not into `c8ctl help <verb>`.
 - **Do not** reintroduce a per-flag opt-in field on `FlagDef`. Class-scoped guards in `tests/unit/help.test.ts` (`Top-level help is scoped to global flags (#321)`) compare the rendered top-level Flags section against `Object.keys(GLOBAL_FLAGS)` and will fail if anything else leaks in.
+
+### Agent instruction files
+
+- [`CLAUDE.md`](CLAUDE.md) carries only the tenet that must always be in context (there are no flaky tests) and imports this file with `@AGENTS.md`.
+- This file is the single source for everything else, including the triage procedure.
+- The `.claude/skills/steward` skill only points here, so it adds no second copy of any rule.
+- Derive, don't duplicate: duplicated content is limited to the stable tenet, so there is no drift surface. Add new rules here, not in `CLAUDE.md` or the skill.
+- [`tests/unit/agent-instructions.test.ts`](tests/unit/agent-instructions.test.ts) guards the chain.
 
 ### Work environment
 
@@ -319,7 +356,7 @@ We do not acknowledge the existence of "flaky tests". A test that passes sometim
 1. **A test defect** — the test contains a race, an unbounded timeout, an order-of-operation assumption, an unsynchronised readiness signal, or a dependency on wall-clock timing. Fix the test so its outcome is deterministic for the behaviour it claims to assert.
 2. **A product defect** — the production code has a race, a missed signal, an unhandled error path, or a resource it leaks under load. Fix the product.
 
-Either way, an intermittent failure is a real defect that must be diagnosed and fixed before the change merges. Do not retry the CI job, mark the test `skip`, add a `.retry()`, or describe the failure as "flaky" or "unrelated" in the PR description. "Re-run and hope" is a coping strategy, not engineering.
+Either way, an intermittent failure is a real defect that must be diagnosed and fixed before the change merges. Do not retry the CI job, mark the test `skip`, add a `.retry()`, or describe the failure as "flaky" or "unrelated" anywhere: PR descriptions, review comments and status updates. "Re-run and hope" is a coping strategy, not engineering.
 
 When triaging an intermittent CI failure:
 

@@ -22,7 +22,7 @@ env:
   EXPECTED_ENGINE: copilot
 engine:
   id: copilot
-  model: gpt-5.4
+  model: agent
   max-continuations: 1
 max-turns: 30
 timeout-minutes: 30

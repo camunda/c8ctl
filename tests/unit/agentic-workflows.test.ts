@@ -3,13 +3,14 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-const kinds = [
-	"fitness",
-	"implement",
-	"review-copilot",
-	"review-claude",
-	"reimplement",
+const workers = [
+	{ kind: "fitness", model: "opus" },
+	{ kind: "implement", model: "large" },
+	{ kind: "review-copilot", model: "agent" },
+	{ kind: "review-claude", model: "opus" },
+	{ kind: "reimplement", model: "large" },
 ];
+const kinds = workers.map(({ kind }) => kind);
 const workflow = (name: string) =>
 	readFileSync(
 		new URL(`../../.github/workflows/${name}`, import.meta.url),
@@ -45,7 +46,7 @@ test("workflow sources, compiled YAML and the compiler pin use LF checkouts on e
 });
 
 describe("agentic worker control boundaries", () => {
-	for (const kind of kinds) {
+	for (const { kind, model } of workers) {
 		test(`${kind} is disabled by default, independent and report-only`, () => {
 			const source = workflow(`agentic-${kind}.md`);
 			const lock = workflow(`agentic-${kind}.lock.yml`);
@@ -65,12 +66,17 @@ describe("agentic worker control boundaries", () => {
 			for (const group of lock.matchAll(/^\s+group: (.+)$/gm))
 				assert.ok(group[1]?.includes("github.run_id"));
 			assert.match(source, new RegExp(`EXPECTED_KIND: ${kind}`));
+			assert.match(source, new RegExp(`^  model: ${model}$`, "m"));
 			assert.match(
-				source,
-				kind === "review-claude"
-					? /model: claude-sonnet-4-6/
-					: /model: gpt-5\.4/,
+				lock.split("\n")[0] ?? "",
+				new RegExp(`"agent_model":"${model}"`),
 			);
+			const compiledModels = [
+				...lock.matchAll(/^\s+(?:ANTHROPIC|COPILOT)_MODEL: (.+)$/gm),
+			].map((match) => match[1]);
+			assert.ok(compiledModels.length > 0);
+			for (const compiledModel of compiledModels)
+				assert.equal(compiledModel, model);
 			assert.match(lock, /github\.ref == 'refs\/heads\/main'/);
 			assert.match(lock, /vars\.C8CTL_AUTOMATION_ENABLED == 'true'/);
 			assert.match(lock, /run-name:.*c8ctl-/);

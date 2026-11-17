@@ -1,6 +1,6 @@
 /**
  * `c8ctl element-template sync` — refresh the local OOTB element template
- * cache from the camunda/connectors GitHub releases.
+ * cache from the @camunda/connectors-element-templates npm package.
  */
 
 import type {} from "../../../src/core/runtime.ts";

@@ -136,7 +136,7 @@ debug_output() {
 
 cleanup_session() {
     # Clean session state between tests (uses C8CTL_DATA_DIR for cross-platform isolation)
-    local config_dir="${C8CTL_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/c8ctl}"
+    local config_dir="${C8CTL_DATA_DIR:?C8CTL_DATA_DIR must be set; refusing to touch the real user data dir}"
     if [ -f "$config_dir/session.json" ]; then
         rm -f "$config_dir/session.json"
     fi

@@ -418,6 +418,7 @@ describe("defineCommand", () => {
 			isDryRun: false,
 			dryRun: createDryRun(false),
 			verbose: false,
+			quiet: false,
 			profile: undefined,
 			yes: false,
 		};
