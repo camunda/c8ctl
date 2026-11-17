@@ -85,11 +85,19 @@ export function loadParityCases(): ParityCase[] {
 				expected = { kind: "selected", selected: selected.map(String) };
 			}
 			// Fixtures may carry a UTF-8 or UTF-16LE BOM.
-			const descriptor: unknown = JSON.parse(
-				decodeCamundaJson(readFileSync(join(dir, "camunda.json"))),
-			);
-			const declaresField =
-				isRecord(descriptor) && Object.hasOwn(descriptor, "deployResources");
+			// A descriptor that is not valid JSON cannot declare the field,
+			// but resolving it must still fail with `invalid-config`, so
+			// those cases run through the resolver checks too.
+			let declaresField: boolean;
+			try {
+				const descriptor: unknown = JSON.parse(
+					decodeCamundaJson(readFileSync(join(dir, "camunda.json"))),
+				);
+				declaresField =
+					!isRecord(descriptor) || Object.hasOwn(descriptor, "deployResources");
+			} catch {
+				declaresField = true;
+			}
 			return { name, description, spec, expected, declaresField };
 		});
 }
@@ -234,7 +242,8 @@ export const CLI_ERROR_SIGNATURE: Record<
 	RegExp
 > = {
 	// JSON output mode escapes the quotes around the field name.
-	"invalid-config": /Invalid \\?"deployResources\\?"/,
+	"invalid-config":
+		/Invalid \\?"deployResources\\?"|Invalid JSON in|must contain a single JSON object/,
 	"empty-selection": /No deployable files found: \\?"deployResources\\?"/,
 };
 

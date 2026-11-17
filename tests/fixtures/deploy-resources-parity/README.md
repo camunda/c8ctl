@@ -51,8 +51,9 @@ or, for a case that must fail without deploying anything:
 - `selected` lists project-relative paths with `/` separators. Comparison is
   order-insensitive; the list is sorted for readability.
 - `error` is one of:
-  - `invalid-config`: wrong field type, a wrong entry type, or an invalid
-    pattern (empty, a bare `!`, a `#` comment, a drive letter, a UNC root
+  - `invalid-config`: a `camunda.json` that is not valid JSON or whose top
+    level is not an object, a wrong field type, a wrong entry type, or an
+    invalid pattern (empty, a bare `!`, a `#` comment, a drive letter, a UNC root
     such as `//server`, a leading backslash, or containing `..`). A single
     leading `/` is not invalid: it anchors the pattern to the project root.
   - `empty-selection`: the final selection is empty.

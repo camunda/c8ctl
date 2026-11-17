@@ -44,6 +44,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"suspend",
 		"resume",
 		"migrate",
+		"modeler",
 		"modify",
 		"await",
 		"complete",
@@ -70,6 +71,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"use",
 		"output",
 		"completion",
+		"mcp",
 		"mcp-proxy",
 		"feedback",
 		"help",
@@ -536,6 +538,7 @@ describe("mutating flag correctness", () => {
 		"assign",
 		"unassign",
 		"completion",
+		"mcp",
 	];
 
 	const NON_MUTATING_VERBS = [

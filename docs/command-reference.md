@@ -740,6 +740,22 @@ c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 
 
 ---
 
+### `modeler`
+
+Install the latest stable Camunda Desktop Modeler on macOS, Windows, or Linux, skipping the installation when Modeler is already installed. On macOS, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable). On Windows, installs it with winget into %LOCALAPPDATA%\Programs\Camunda Modeler, then registers its file types and adds it to the Start Menu. On Linux (x64), installs the release into /usr/bin as root, using sudo, as the Camunda documentation describes, then registers its file types with the bundled support/xdg_register.sh.
+
+**Usage:** `c8ctl modeler install`
+
+**Resources:** install
+
+**Examples:**
+
+```bash
+c8ctl modeler install                                       # Install the latest stable Camunda Desktop Modeler
+```
+
+---
+
 ### `modify`
 
 Modify a running process instance by activating elements, terminating element instances or moving tokens, or move tokens in all active instances of a definition (batch)
@@ -1418,6 +1434,33 @@ Generate shell completion script
 c8ctl completion bash                                       # Generate bash completion script
 c8ctl completion install                                    # Auto-detect shell and install completions (auto-refreshes on upgrade)
 c8ctl completion install --shell zsh                        # Install completions for a specific shell
+```
+
+---
+
+### `mcp`
+
+Configure user-scoped Camunda orchestration and docs MCP servers
+
+**Usage:** `c8ctl mcp install|uninstall [harness...]`
+
+**Resources:** install, uninstall
+
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--orchestration` | boolean |  | Select the orchestration MCP server (default when --docs is absent) |
+| `--docs` | boolean |  | Select the Camunda docs MCP server; combine with --orchestration for both |
+| `--alias` | string |  | Orchestration server entry name (default: camunda) |
+
+**Examples:**
+
+```bash
+c8ctl mcp install                                           # Install orchestration MCP for detected harnesses
+c8ctl mcp install --docs                                    # Install only docs MCP for detected harnesses
+c8ctl mcp install claude-code cursor --docs --orchestration  # Install both MCP servers for selected harnesses
+c8ctl mcp uninstall claude-code --docs                      # Remove only the docs MCP entry
 ```
 
 ---

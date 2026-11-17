@@ -73,11 +73,13 @@ import {
 	listJobsCommand,
 	updateJobCommand,
 } from "./commands/jobs.ts";
+import { installMcpCommand, uninstallMcpCommand } from "./commands/mcp.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
 	correlateMessageCommand,
 	publishMessageCommand,
 } from "./commands/messages.ts";
+import { modelerInstallCommand } from "./commands/modeler.ts";
 import { feedbackCommand, openAppCommand } from "./commands/open.ts";
 import {
 	doctorPluginCommand,
@@ -278,6 +280,9 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	// on ctx.resource (bash / zsh / fish / install).
 	["completion:", completionCommand],
 
+	// ── Local applications ─────────────────────────────────────────────
+	["modeler:install", modelerInstallCommand],
+
 	// ── Variables ───────────────────────────────────────────────────────
 	["set:variable", setVariableCommand],
 
@@ -292,4 +297,6 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["open:optimize", openAppCommand],
 	["feedback:", feedbackCommand],
 	["mcp-proxy:", mcpProxyCommand],
+	["mcp:install", installMcpCommand],
+	["mcp:uninstall", uninstallMcpCommand],
 ]);

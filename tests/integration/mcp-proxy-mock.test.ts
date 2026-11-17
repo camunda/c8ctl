@@ -3,15 +3,22 @@
  */
 
 import assert from "node:assert";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Logger } from "../../src/core/logger.ts";
 import { createCamundaFetch } from "../../src/utils/command-local/mcp-proxy-helpers.ts";
+import { c8WithOptions } from "../utils/cli.ts";
+import { isRecord } from "../utils/guards.ts";
 import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 describe("MCP Proxy Mock Server Integration Tests", () => {
@@ -47,6 +54,125 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			await new Promise<void>((resolve) => {
 				mockServer.close(() => resolve());
 			});
+		}
+	});
+
+	test("an installed entry starts the proxy with its pinned profile after the active profile changes", async (t) => {
+		const home = mkdtempSync(join(tmpdir(), "c8ctl-mcp-launch-"));
+		t.after(() => rmSync(home, { recursive: true, force: true }));
+		const requests: Array<{
+			path: string | undefined;
+			auth: string | undefined;
+		}> = [];
+		mockServer = createServer(async (req, res) => {
+			requests.push({ path: req.url, auth: req.headers.authorization });
+			if (req.method !== "POST") {
+				res.writeHead(405).end();
+				return;
+			}
+			try {
+				let body = "";
+				for await (const chunk of req) body += String(chunk);
+				const message: unknown = JSON.parse(body);
+				if (!isRecord(message)) {
+					res.writeHead(400).end();
+					return;
+				}
+				if (message.id === undefined) {
+					res.writeHead(202).end();
+					return;
+				}
+				const result =
+					message.method === "initialize"
+						? {
+								protocolVersion: "2025-03-26",
+								capabilities: { tools: {} },
+								serverInfo: { name: "fixture-cluster", version: "1.0.0" },
+							}
+						: message.method === "tools/list"
+							? {
+									tools: [
+										{ name: "profile_probe", inputSchema: { type: "object" } },
+									],
+								}
+							: undefined;
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: message.id,
+						...(result
+							? { result }
+							: { error: { code: -32601, message: "Unknown fixture method" } }),
+					}),
+				);
+			} catch (error) {
+				res.writeHead(500).end(String(error));
+			}
+		});
+		await bindMockServer();
+		const env: Record<string, string> = {
+			HOME: home,
+			USERPROFILE: home,
+			C8CTL_DATA_DIR: join(home, "data"),
+			C8CTL_MODELER_DIR: join(home, "modeler"),
+			C8CTL_OUTPUT_MODE: "json",
+		};
+		const cli = (...args: string[]) => c8WithOptions({ env }, ...args);
+		for (const name of ["pinned", "other"]) {
+			const added = await cli(
+				"add",
+				"profile",
+				name,
+				"--baseUrl",
+				`${mockServerUrl}/v2`,
+				"--username",
+				name,
+				"--password",
+				"fixture-password",
+			);
+			assert.strictEqual(added.status, 0, added.stderr);
+		}
+		assert.strictEqual((await cli("use", "profile", "pinned")).status, 0);
+		const installed = await cli("mcp", "install", "cursor");
+		assert.strictEqual(installed.status, 0, installed.stderr);
+		assert.strictEqual((await cli("use", "profile", "other")).status, 0);
+		const config: unknown = JSON.parse(
+			readFileSync(join(home, ".cursor", "mcp.json"), "utf8"),
+		);
+		assert.ok(isRecord(config) && isRecord(config.mcpServers));
+		const entry = config.mcpServers.camunda;
+		assert.ok(isRecord(entry) && isRecord(entry.env));
+		assert.ok(typeof entry.command === "string");
+		assert.ok(
+			Array.isArray(entry.args) &&
+				entry.args.every((arg) => typeof arg === "string"),
+		);
+		for (const [name, value] of Object.entries(entry.env)) {
+			assert.ok(typeof value === "string");
+			env[name] = value;
+		}
+		const transport = new StdioClientTransport({
+			command: entry.command,
+			args: entry.args,
+			env,
+			stderr: "inherit",
+		});
+		const client = new Client({ name: "installer-test", version: "1.0.0" });
+		try {
+			await client.connect(transport);
+			const tools = await client.listTools();
+			assert.strictEqual(tools.tools[0]?.name, "profile_probe");
+			assert.ok(requests.length > 0);
+			for (const request of requests) {
+				assert.strictEqual(request.path, "/mcp/cluster");
+				assert.strictEqual(
+					request.auth,
+					`Basic ${Buffer.from("pinned:fixture-password").toString("base64")}`,
+				);
+			}
+		} finally {
+			await client.close();
 		}
 	});
 
