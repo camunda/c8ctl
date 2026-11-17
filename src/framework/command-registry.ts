@@ -1811,6 +1811,38 @@ export const COMMAND_REGISTRY = {
 
 	// ── Operational commands ───────────────────────────────────────────────
 
+	setup: {
+		description: "Guided first-run setup for local Camunda 8 development",
+		helpDescription:
+			"Guided first-run setup: install a local cluster, a starter " +
+			"blueprint project, and AI assistant tooling — prints the plan " +
+			"before anything runs.",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show setup details",
+		mutating: true,
+		requiresResource: false,
+		helpExamples: [
+			{
+				command: "c8ctl setup",
+				description: "Run the guided setup wizard",
+			},
+			{
+				command: "c8ctl setup --yes",
+				description: "Plan with the defaults, without prompting",
+			},
+		],
+		helpNotes: [
+			"The wizard offers to install Camunda 8 Run and start a local cluster,",
+			"install Desktop Modeler, create a starter project from a blueprint,",
+			"deploy and run it, and set up AI assistant skills and MCP servers.",
+			"Nothing is installed without your say.",
+			"Preview: the wizard prints the plan for your selection; the individual",
+			"setup steps land in upcoming releases.",
+		],
+		resources: [],
+		flags: {},
+	},
+
 	watch: {
 		description: "Watch files for changes and auto-deploy",
 		helpDescription: "Watch files for changes and auto-deploy",

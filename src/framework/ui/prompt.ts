@@ -401,6 +401,240 @@ export async function select<T>(
 	);
 }
 
+// ── multiSelect() ───────────────────────────────────────────────────
+
+export interface MultiSelectOption<T> {
+	/** Display label shown in the list. */
+	label: string;
+	/** Optional secondary text (dimmed, after the label). */
+	description?: string;
+	/** Value returned when this option is checked. */
+	value: T;
+	/** Initially checked (default: false). Also the non-interactive default. */
+	checked?: boolean;
+}
+
+export interface MultiSelectConfig<T> {
+	/** Prompt message shown above the options. */
+	message: string;
+	/** List of checkable options. At least one required. */
+	options: ReadonlyArray<MultiSelectOption<T>>;
+	/**
+	 * Key hint rendered dimmed below the message.
+	 * Defaults to the built-in key summary.
+	 */
+	keyHint?: string;
+	/**
+	 * Hint appended to non-interactive fallback output.
+	 * Defaults to "Hint: run interactively to choose."
+	 */
+	nonInteractiveHint?: string;
+	/** Streams to use instead of stdin/stderr. */
+	io?: PromptIO;
+}
+
+export interface MultiSelectResultInteractive<T> {
+	interactive: true;
+	cancelled: false;
+	/** Values of the checked options, in option order. May be empty. */
+	values: T[];
+}
+
+export interface MultiSelectResultCancelled {
+	interactive: true;
+	cancelled: true;
+}
+
+export interface MultiSelectResultNonInteractive<T> {
+	interactive: false;
+	cancelled: false;
+	/** Values of the options marked `checked`, in option order. */
+	values: T[];
+	/** Hint message suitable for logging in non-interactive mode. */
+	hint: string;
+}
+
+export type MultiSelectResult<T> =
+	| MultiSelectResultInteractive<T>
+	| MultiSelectResultCancelled
+	| MultiSelectResultNonInteractive<T>;
+
+const DEFAULT_MULTISELECT_KEY_HINT =
+	"↑/↓ move · space toggle · a all · enter confirm · esc cancel";
+
+/**
+ * Present an interactive checkbox list.
+ *
+ * - **Interactive**: renders one row per option on stderr. Arrow keys
+ *   move the highlight, Space (or the row's number) toggles it, `a`
+ *   toggles all, Enter confirms — possibly with nothing checked — and
+ *   Escape cancels. Returns the checked values in option order.
+ * - **Non-interactive**: returns the values of options marked
+ *   `checked` with `interactive: false` and a `hint` string the caller
+ *   can log.
+ */
+export async function multiSelect<T>(
+	config: MultiSelectConfig<T>,
+): Promise<MultiSelectResult<T>> {
+	const { message, options, nonInteractiveHint } = config;
+	const { input, output: out } = config.io ?? defaultIO();
+	const keyHint = config.keyHint ?? DEFAULT_MULTISELECT_KEY_HINT;
+
+	if (options.length === 0) {
+		throw new Error("multiSelect() requires at least one option");
+	}
+
+	// ── Non-interactive fallback ────────────────────────────────
+	if (!isInteractive({ input, output: out })) {
+		const values = options.filter((opt) => opt.checked).map((opt) => opt.value);
+		const lines: string[] = [`${message} (non-interactive, using defaults)`];
+		for (const opt of options) {
+			const desc = opt.description ? ` — ${opt.description}` : "";
+			lines.push(`  ${opt.checked ? "[x]" : "[ ]"} ${opt.label}${desc}`);
+		}
+		lines.push("");
+		lines.push(nonInteractiveHint ?? "Hint: run interactively to choose.");
+		return {
+			interactive: false,
+			cancelled: false,
+			values,
+			hint: lines.join("\n"),
+		};
+	}
+
+	// ── Interactive mode ────────────────────────────────────────
+	return new Promise<MultiSelectResult<T>>((resolve) => {
+		let cursor = 0;
+		const checked = options.map((opt) => opt.checked === true);
+
+		// Same wrap accounting as select(): rows wider than the terminal
+		// occupy extra physical lines that CURSOR_UP must traverse.
+		const cols = out.columns || 80;
+		const headerLines =
+			Math.max(1, Math.ceil((2 + message.length) / cols)) +
+			Math.max(1, Math.ceil((2 + keyHint.length) / cols));
+		const rowVisibleLength = (i: number): number => {
+			const opt = options[i];
+			// "  ❯ " (4) + "[x] " (4) + label + optional " " + description
+			return (
+				8 +
+				opt.label.length +
+				(opt.description ? 1 + opt.description.length : 0)
+			);
+		};
+		const physicalLines = options.reduce(
+			(sum, _opt, i) =>
+				sum + Math.max(1, Math.ceil(rowVisibleLength(i) / cols)),
+			0,
+		);
+
+		function render(firstRender: boolean) {
+			if (!firstRender) {
+				out.write(CURSOR_UP(physicalLines));
+			}
+			for (let i = 0; i < options.length; i++) {
+				const opt = options[i];
+				const highlighted = i === cursor;
+				const pointer = highlighted ? `${CYAN}❯${RESET}` : " ";
+				const box = checked[i] ? `${CYAN}[x]${RESET}` : "[ ]";
+				const label = highlighted ? `${BOLD}${opt.label}${RESET}` : opt.label;
+				const desc = opt.description ? ` ${DIM}${opt.description}${RESET}` : "";
+				out.write(
+					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${box} ${label}${desc}\n`,
+				);
+			}
+		}
+
+		function clearMenu() {
+			out.write(CURSOR_UP(physicalLines));
+			for (let i = 0; i < physicalLines; i++) {
+				out.write(`${CLEAR_LINE}\n`);
+			}
+			out.write(CURSOR_UP(physicalLines));
+		}
+
+		// Print the message header and key hint
+		out.write(`${BOLD}${CYAN}?${RESET} ${BOLD}${message}${RESET}\n`);
+		out.write(`  ${DIM}${keyHint}${RESET}\n`);
+		out.write(HIDE_CURSOR);
+		render(true);
+
+		// Enable keypress events BEFORE raw mode so the first
+		// keystroke is captured (order matters).
+		emitKeypressEvents(input);
+		input.on("keypress", onKeypress);
+		input.setRawMode?.(true);
+		input.resume();
+
+		function confirmSelection() {
+			cleanup();
+			clearMenu();
+			const chosen = options.filter((_opt, i) => checked[i]);
+			const summary =
+				chosen.length > 0
+					? `${CYAN}${chosen.map((opt) => opt.label).join(", ")}${RESET}`
+					: `${DIM}(none selected)${RESET}`;
+			out.write(`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${summary}\n`);
+			resolve({
+				interactive: true,
+				cancelled: false,
+				values: chosen.map((opt) => opt.value),
+			});
+		}
+
+		function onKeypress(_chunk: Buffer | string, key: Key) {
+			if (!key) return;
+
+			const digit = Number(key.sequence);
+			if (
+				key.sequence?.length === 1 &&
+				Number.isInteger(digit) &&
+				digit >= 1 &&
+				digit <= Math.min(options.length, MAX_NUMBERED_OPTIONS)
+			) {
+				checked[digit - 1] = !checked[digit - 1];
+				render(false);
+			} else if (key.name === "up" || (key.ctrl && key.name === "p")) {
+				cursor = cursor <= 0 ? options.length - 1 : cursor - 1;
+				render(false);
+			} else if (key.name === "down" || (key.ctrl && key.name === "n")) {
+				cursor = cursor >= options.length - 1 ? 0 : cursor + 1;
+				render(false);
+			} else if (key.name === "space") {
+				checked[cursor] = !checked[cursor];
+				render(false);
+			} else if (key.sequence === "a") {
+				const checkAll = checked.some((isChecked) => !isChecked);
+				checked.fill(checkAll);
+				render(false);
+			} else if (key.name === "return") {
+				confirmSelection();
+			} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
+				cleanup();
+				clearMenu();
+				out.write(CURSOR_UP(headerLines));
+				for (let i = 0; i < headerLines; i++) {
+					out.write(`${CLEAR_LINE}\n`);
+				}
+				out.write(CURSOR_UP(headerLines));
+				// Ctrl+C: re-raise so the process exits naturally
+				if (key.ctrl && key.name === "c") {
+					process.kill(process.pid, "SIGINT");
+				}
+				// Escape: resolve as cancelled
+				resolve({ interactive: true, cancelled: true });
+			}
+		}
+
+		function cleanup() {
+			input.removeListener("keypress", onKeypress);
+			input.setRawMode?.(false);
+			input.pause();
+			out.write(SHOW_CURSOR);
+		}
+	});
+}
+
 // ── confirm() ─────────────────────────────────────────────────────
 
 /** Parse a yes/no answer; `undefined` means the answer was not recognised. */

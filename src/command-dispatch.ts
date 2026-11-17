@@ -120,6 +120,7 @@ import {
 	useTenantCommand,
 	whichOutputCommand,
 } from "./commands/session.ts";
+import { setupCommand } from "./commands/setup.ts";
 import { installSkillsCommand } from "./commands/skills.ts";
 import { getTopologyCommand } from "./commands/topology.ts";
 import {
@@ -273,6 +274,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["set:variable", setVariableCommand],
 
 	// ── Resourceless verbs ─────────────────────────────────────────────
+	["setup:", setupCommand],
 	["deploy:", deployCommand],
 	["run:", runCommand],
 	["watch:", watchCommand],

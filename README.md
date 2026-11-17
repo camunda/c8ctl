@@ -136,6 +136,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `run` - Deploy and start process
 - `assign` - Assign resource to target
 - `unassign` - Unassign resource from target
+- `setup` - Guided first-run setup for local Camunda 8 development
 - `watch` (alias: `w`) - Watch files for changes and auto-deploy
 - `open` - Open Camunda web application in browser
 - `add` - Add a profile
