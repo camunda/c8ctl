@@ -335,7 +335,48 @@ export function planMcpConfigs({
 	});
 }
 
-export function writeMcpConfig(plan: McpConfigPlan): void {
+export interface WriteMcpConfigOptions {
+	/** Total time to wait for another c8ctl writer before failing. */
+	lockTimeoutMs?: number;
+	/** Delay between lock acquisition attempts. */
+	lockRetryMs?: number;
+}
+
+/**
+ * Take the per-target cross-process lock (`<target>.lock`), created
+ * exclusively so exactly one c8ctl writer holds it at a time. Held from
+ * snapshot validation through replacement in `writeMcpConfig`, a second
+ * writer observes the first's replacement and is rejected by the stale
+ * snapshot check rather than silently discarding the other connection.
+ */
+function acquireConfigLock(
+	targetPath: string,
+	timeoutMs: number,
+	retryMs: number,
+): string {
+	const lockPath = `${targetPath}.lock`;
+	const deadline = Date.now() + timeoutMs;
+	const waitSlot = new Int32Array(new SharedArrayBuffer(4));
+	for (;;) {
+		try {
+			closeSync(openSync(lockPath, "wx", 0o600));
+			return lockPath;
+		} catch (error) {
+			if (!(isRecord(error) && error.code === "EEXIST")) throw error;
+			if (Date.now() >= deadline) {
+				throw new Error(
+					`Another c8ctl process is updating ${targetPath}. Retry shortly, or remove the stale lock ${lockPath} if that process crashed.`,
+				);
+			}
+			Atomics.wait(waitSlot, 0, 0, retryMs);
+		}
+	}
+}
+
+export function writeMcpConfig(
+	plan: McpConfigPlan,
+	options?: WriteMcpConfigOptions,
+): void {
 	if (
 		!plan.changes.some(
 			(change) => change.status === "installed" || change.status === "removed",
@@ -343,25 +384,34 @@ export function writeMcpConfig(plan: McpConfigPlan): void {
 	)
 		return;
 	mkdirSync(dirname(plan.targetPath), { recursive: true });
-	const temp = `${plan.targetPath}.${randomUUID()}.tmp`;
-	let fd: number | undefined;
-	let created = false;
+	const lockPath = acquireConfigLock(
+		plan.targetPath,
+		options?.lockTimeoutMs ?? 5000,
+		options?.lockRetryMs ?? 50,
+	);
 	try {
-		fd = openSync(temp, "wx", 0o600);
-		created = true;
-		writeFileSync(fd, plan.content, "utf8");
-		if (process.platform !== "win32") fchmodSync(fd, plan.mode);
-		fsyncSync(fd);
-		closeSync(fd);
-		fd = undefined;
-		if (readOptionalFile(plan.targetPath) !== plan.original) {
-			throw new Error(
-				`MCP config changed during installation: ${plan.path}. Run the command again.`,
-			);
+		const temp = `${plan.targetPath}.${randomUUID()}.tmp`;
+		let fd: number | undefined;
+		let created = false;
+		try {
+			fd = openSync(temp, "wx", 0o600);
+			created = true;
+			writeFileSync(fd, plan.content, "utf8");
+			if (process.platform !== "win32") fchmodSync(fd, plan.mode);
+			fsyncSync(fd);
+			closeSync(fd);
+			fd = undefined;
+			if (readOptionalFile(plan.targetPath) !== plan.original) {
+				throw new Error(
+					`MCP config changed during installation: ${plan.path}. Run the command again.`,
+				);
+			}
+			renameSync(temp, plan.targetPath);
+		} finally {
+			if (fd !== undefined) closeSync(fd);
+			if (created) rmSync(temp, { force: true });
 		}
-		renameSync(temp, plan.targetPath);
 	} finally {
-		if (fd !== undefined) closeSync(fd);
-		if (created) rmSync(temp, { force: true });
+		rmSync(lockPath, { force: true });
 	}
 }

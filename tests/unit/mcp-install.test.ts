@@ -15,6 +15,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
+import {
+	type McpConfigPlan,
+	writeMcpConfig,
+} from "../../src/utils/command-local/mcp-install-helpers.ts";
 import { c8, c8WithOptions, parseJson } from "../utils/cli.ts";
 import { isRecord } from "../utils/guards.ts";
 
@@ -147,7 +151,11 @@ for (const harness of HARNESSES) {
 		assert.ok(isRecord(servers["camunda-docs"]));
 		if (harness === "claude-desktop") {
 			assert.ok(Array.isArray(servers["camunda-docs"].args));
-			assert.ok(servers["camunda-docs"].args.includes(DOCS_URL));
+			assert.ok(
+				servers["camunda-docs"].args.some(
+					(arg: unknown) => typeof arg === "string" && arg === DOCS_URL,
+				),
+			);
 			assert.ok(servers["camunda-docs"].args.includes("mcp-remote"));
 		} else {
 			assert.equal(servers["camunda-docs"].url, DOCS_URL);
@@ -419,6 +427,46 @@ syncBuiltinESMExports();
 	assert.match(result.stderr, /replacement denied/);
 	assert.equal(readFileSync(s.paths.cursor, "utf8"), before);
 	assert.deepEqual(readdirSync(dirname(s.paths.cursor)), ["mcp.json"]);
+});
+
+test("concurrent writers serialize on a per-target lock", async (t) => {
+	const s = sandbox(t);
+	s.write("cursor", '{"mcpServers":{}}');
+	const targetPath = realpathSync(s.paths.cursor);
+	const original = readFileSync(targetPath, "utf8");
+	const plan = (content: string): McpConfigPlan => ({
+		harness: "cursor",
+		path: s.paths.cursor,
+		targetPath,
+		original,
+		content,
+		mode: 0o600,
+		changes: [{ server: "camunda-docs", status: "installed" }],
+	});
+
+	// A lock held by another process rejects this writer instead of racing it.
+	writeFileSync(`${targetPath}.lock`, "");
+	assert.throws(
+		() =>
+			writeMcpConfig(plan(`{"mcpServers":{"a":{}}}\n`), {
+				lockTimeoutMs: 50,
+				lockRetryMs: 10,
+			}),
+		/Another c8ctl process is updating/,
+	);
+	assert.equal(readFileSync(targetPath, "utf8"), original);
+	rmSync(`${targetPath}.lock`);
+
+	// Two writers planning from the same snapshot: the first wins, the second
+	// observes the replacement under the lock and is rejected, keeping the
+	// first writer's connection. The lock is released on success and failure.
+	const first = plan(`{"mcpServers":{"camunda-docs":{"url":"${DOCS_URL}"}}}\n`);
+	const second = plan(`{"mcpServers":{"camunda":{"command":"c8ctl"}}}\n`);
+	writeMcpConfig(first);
+	assert.equal(existsSync(`${targetPath}.lock`), false);
+	assert.throws(() => writeMcpConfig(second), /changed during installation/);
+	assert.equal(readFileSync(targetPath, "utf8"), first.content);
+	assert.equal(existsSync(`${targetPath}.lock`), false);
 });
 
 test("MCP help and shell completions expose target selection and uninstall", async () => {
