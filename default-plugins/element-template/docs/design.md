@@ -187,6 +187,11 @@ the same key. `update` registers the applied template as well, so
 the library's own update semantics apply, and add a recipe on top for values
 that moved.
 
+The migration engine and recipe parser come from the
+`bpmn-js-element-templates/migration` public API and are bundled into c8ctl's
+vendor module at build time. c8ctl selects templates, invokes the bundled API,
+and owns CLI reports, diagnostic redaction, and file writes.
+
 - **Template resolution.** The target id resolves like every other id, local
   templates first (see above), with `isEngineCompatible` as the eligibility
   rule; the cache is required only on the fallback. Steps, the applied source
@@ -207,12 +212,12 @@ that moved.
   marketplace and the cache. `metadata` is the schema's free-form area; it
   needs no change to the element template schema and survives validation.
   `--recipe` supplies the same format from a file for templates that carry none.
-- **Versioned and strict.** The recipe has a `schemaVersion`. A reader refuses a
-  version it does not know and any unknown key, rather than applying part of a
-  recipe or silently ignoring a typo. The version is checked first and selects
-  the parser from a version-to-parser map, so a newer recipe always asks for a
-  newer c8ctl, whatever keys it adds; a later version can then add fields without
-  older readers reporting them as typos.
+- **Provisional and host-gated.** c8ctl owns recipe schema-version policy. It
+  currently accepts the provisional `schemaVersion: 1` metadata format and
+  rejects unrecognized versions before handing recipes to the shared migration
+  package. The format is not a supported public contract and may be replaced
+  when the formal schema is defined; schema upgrades belong in the host, not
+  the UI-agnostic engine.
 - **Unusable embedded recipes fail the run.** A run moves one source template to
   one target, so an unusable recipe on the target or on the latest version of the
   source lineage affects every element in it. The run fails up front and names the
@@ -322,8 +327,9 @@ that moved.
   physical disk exhaustion or interruption of a blocked kernel syscall. The unit
   suite runs on Windows; POSIX signal, permission and EPIPE cases skip it. Confirm no writer is active before
   manually inspecting/removing leftovers.
-- **Extraction.** `migration/` has no c8ctl dependencies, so it can be moved
-  into a library once the recipe format is settled.
+- **Engine ownership.** Recipe parsing and migration are provided by the
+  `bpmn-js-element-templates/migration` public API. c8ctl owns command
+  orchestration, BPMN value redaction, report rendering, and filesystem writes.
 
 ## Plugin dependencies
 

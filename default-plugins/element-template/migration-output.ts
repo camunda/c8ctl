@@ -4,14 +4,14 @@
  */
 
 import { isRecord } from "../../src/core/index.ts";
-import { bindingTargetKey, sameTarget } from "./migration/binding.ts";
-import type { ElementValue } from "./migration/element-values.ts";
+import { bindingTargetKey, sameTarget } from "./binding-utils.ts";
 import type {
 	Field,
 	MigrationReport,
+	MigrationTemplate,
 	ValueSource,
-} from "./migration/report.ts";
-import type { MigrationTemplate } from "./migration/types.ts";
+} from "./migration-types.ts";
+import type { ElementValue } from "./migration-values.ts";
 
 /** Uses existing property/group identity metadata, not a custom sensitivity flag. */
 export interface MigrationRedactionContext {

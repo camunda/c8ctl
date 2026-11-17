@@ -1,6 +1,6 @@
 /**
  * Unit tests for reading element values off a BPMN extension tree
- * (default-plugins/element-template/migration/element-values.ts)
+ * (default-plugins/element-template/migration-values.ts)
  */
 
 import assert from "node:assert";
@@ -8,7 +8,7 @@ import { describe, test } from "node:test";
 import {
 	enumerateElementValues,
 	getExtensionElements,
-} from "../../default-plugins/element-template/migration/element-values.ts";
+} from "../../default-plugins/element-template/migration-values.ts";
 import { extensionElements, moddle } from "../utils/moddle.ts";
 
 describe("enumerateElementValues", () => {

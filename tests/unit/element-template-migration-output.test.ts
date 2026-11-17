@@ -5,13 +5,6 @@
 
 import assert from "node:assert";
 import { afterEach, describe, test } from "node:test";
-import type {
-	Field,
-	MigrationReport,
-	MovedItem,
-	ValueSource,
-} from "../../default-plugins/element-template/migration/report.ts";
-import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 import {
 	redactMigrationDiagnostic,
 	renderLegend,
@@ -19,6 +12,13 @@ import {
 	reportToJson,
 	shouldUseColor,
 } from "../../default-plugins/element-template/migration-output.ts";
+import type {
+	Field,
+	MigrationReport,
+	MigrationTemplate,
+	MovedItem,
+	ValueSource,
+} from "../../default-plugins/element-template/migration-types.ts";
 
 type WithSource<T> = Omit<T, "source"> & { source?: ValueSource };
 

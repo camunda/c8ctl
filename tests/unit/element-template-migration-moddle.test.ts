@@ -1,6 +1,6 @@
 /**
  * Unit tests for the typed moddle accessors
- * (default-plugins/element-template/migration/moddle.ts)
+ * (default-plugins/element-template/moddle.ts)
  */
 
 import assert from "node:assert";
@@ -11,7 +11,7 @@ import {
 	getModdleNumber,
 	getModdleString,
 	isModdleElement,
-} from "../../default-plugins/element-template/migration/moddle.ts";
+} from "../../default-plugins/element-template/moddle.ts";
 import { moddle } from "../utils/moddle.ts";
 
 const WRONG_TYPES: [name: string, value: unknown][] = [

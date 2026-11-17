@@ -1288,14 +1288,22 @@ describe("update CLI: unusable recipes and lossy overwrites (shared update fixtu
 			recipePath,
 		);
 		assert.strictEqual(result.status, 1);
-		assert.match(result.stderr, /Update c8ctl/);
+		assert.match(
+			result.stderr,
+			/c8ctl currently accepts the provisional schemaVersion 1 format only/,
+		);
 	});
 
 	const NEWER_RECIPE = { schemaVersion: 2, future: true, sources: [] };
 	const unusableRecipe = (sources: object[]) => ({ schemaVersion: 1, sources });
 
 	for (const { label, recipe, error } of [
-		{ label: "a newer", recipe: NEWER_RECIPE, error: /Update c8ctl/ },
+		{
+			label: "a newer",
+			recipe: NEWER_RECIPE,
+			error:
+				/c8ctl currently accepts the provisional schemaVersion 1 format only/,
+		},
 		{
 			label: "an owner-invalid",
 			recipe: unusableRecipe([{ kind: "change", sourceTemplateId: NEW.id }]),
@@ -1318,7 +1326,12 @@ describe("update CLI: unusable recipes and lossy overwrites (shared update fixtu
 	}
 
 	for (const { label, recipe, error } of [
-		{ label: "a newer", recipe: NEWER_RECIPE, error: /Update c8ctl/ },
+		{
+			label: "a newer",
+			recipe: NEWER_RECIPE,
+			error:
+				/c8ctl currently accepts the provisional schemaVersion 1 format only/,
+		},
 		{
 			label: "an owner-invalid",
 			recipe: unusableRecipe([
@@ -1362,7 +1375,7 @@ describe("update CLI: unusable recipes and lossy overwrites (shared update fixtu
 			dataDirWithCache([OLD, applied]),
 			templatePath,
 			"io.example.old@2",
-			/Update c8ctl/,
+			/c8ctl currently accepts the provisional schemaVersion 1 format only/,
 			bpmn,
 		);
 	});

@@ -1,6 +1,6 @@
 /**
- * MIG-012: real connector journeys through the update command
- * (default-plugins/element-template/commands/migrate.ts)
+ * MIG-012: fixture-backed journeys through the package migration API and update command
+ * (bpmn-js-element-templates/migration)
  */
 
 import assert from "node:assert/strict";
@@ -39,7 +39,7 @@ const spawnCli = (dir: string, args: string[]) =>
 		{ env: { C8CTL_DATA_DIR: dir }, timeout: CLI_TIMEOUT },
 		...args,
 	);
-test("simple recipe CLI integration: serialization, reports, authorization and repeated no-op", async () => {
+test("package-backed simple recipe CLI integration: serialization, reports, authorization and repeated no-op", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "c8-migration-simple-"));
 	const run = (...args: string[]) =>
 		spawnCli(dir, ["element-template", ...args]);
@@ -160,7 +160,7 @@ test("simple recipe CLI integration: serialization, reports, authorization and r
 	}
 });
 
-test("complex recipe CLI integration: source upgrades, floors, nested guards and conditional values", async () => {
+test("package-backed complex recipe CLI integration: source upgrades, floors, nested guards and conditional values", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "c8-migration-complex-"));
 	const run = (...args: string[]) =>
 		spawnCli(dir, ["element-template", ...args]);

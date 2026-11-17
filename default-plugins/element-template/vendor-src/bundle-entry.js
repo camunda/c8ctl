@@ -11,6 +11,20 @@
 
 import Modeler from 'bpmn-js-headless/lib/Modeler';
 import { CloudElementTemplatesCoreModule } from 'bpmn-js-element-templates/core';
+import {
+  buildReport,
+  DestinationError,
+  emptyFacts,
+  findSuccessors,
+  latestOf,
+  migrateElement,
+  parseRecipe,
+  readAppliedTemplate,
+  readEmbeddedRecipe,
+  RecipeError,
+  resolveCatalog,
+  validateRecipeOwner,
+} from 'bpmn-js-element-templates/migration';
 import ZeebeModdleExtension from 'zeebe-bpmn-moddle/resources/zeebe.json';
 
 /**
@@ -36,9 +50,25 @@ const HeadlessTextRendererModule = {
   }],
 };
 
+const migration = {
+  buildReport,
+  DestinationError,
+  emptyFacts,
+  findSuccessors,
+  latestOf,
+  migrateElement,
+  parseRecipe,
+  readAppliedTemplate,
+  readEmbeddedRecipe,
+  RecipeError,
+  resolveCatalog,
+  validateRecipeOwner,
+};
+
 export {
   Modeler,
   CloudElementTemplatesCoreModule,
   ZeebeModdleExtension,
   HeadlessTextRendererModule,
+  migration,
 };

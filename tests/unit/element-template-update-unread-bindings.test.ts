@@ -1,6 +1,6 @@
 /**
- * Bindings the migration engine cannot read: a value the target does not
- * keep counts as a loss (default-plugins/element-template/migration/report.ts)
+ * Bindings the migration API cannot read: a value the target does not
+ * keep counts as a loss in the update report.
  */
 
 import assert from "node:assert/strict";

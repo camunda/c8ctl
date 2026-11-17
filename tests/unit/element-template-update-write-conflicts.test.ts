@@ -14,11 +14,11 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import type { MigrationTemplate } from "../../default-plugins/element-template/migration-types.ts";
 import {
 	enumerateElementValues,
 	getExtensionElements,
-} from "../../default-plugins/element-template/migration/element-values.ts";
-import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
+} from "../../default-plugins/element-template/migration-values.ts";
 import { c8WithOptions } from "../utils/cli.ts";
 import {
 	createTestModeler,

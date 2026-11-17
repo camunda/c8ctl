@@ -14,10 +14,14 @@ import {
 import { resolve as resolvePath } from "node:path";
 import semver from "semver";
 import type {} from "../../src/core/runtime.ts";
-import { maybePrependFeel } from "./migration/binding.ts";
+import { maybePrependFeel } from "./binding-utils.ts";
 
-export { maybePrependFeel } from "./migration/binding.ts";
-export { globToRegex } from "./migration/plan.ts";
+export { maybePrependFeel } from "./binding-utils.ts";
+
+export function globToRegex(pattern: string): RegExp {
+	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`, "s");
+}
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -166,6 +170,7 @@ export type TemplateProperty = {
 	optional?: boolean;
 	value?: unknown;
 	feel?: string;
+	secret?: boolean;
 	choices?: TemplateChoice[];
 	condition?: TemplateCondition;
 	constraints?: TemplateConstraints;

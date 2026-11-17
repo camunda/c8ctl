@@ -1,14 +1,14 @@
 /**
  * Shared bpmn-js vendor-bundle loading + minimal type surface for commands
- * that round-trip BPMN through bpmn-js-headless (`apply`, `edit`) and for
- * validating local templates (`template-ref.ts`).
+ * that round-trip BPMN through bpmn-js-headless (`apply`, `edit`, `update`)
+ * and for validating local templates (`template-ref.ts`).
  */
 
 import { existsSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Template } from "./helpers.ts";
-import type { TemplateProperty } from "./migration/types.ts";
+import type { Template, TemplateProperty } from "./helpers.ts";
+import type { MigrationApi } from "./migration-types.ts";
 import type { ModdleElement } from "./moddle.ts";
 
 export type { ModdleElement };
@@ -87,6 +87,7 @@ export type VendorBundle = {
 	CloudElementTemplatesCoreModule: unknown;
 	ZeebeModdleExtension: unknown;
 	HeadlessTextRendererModule: unknown;
+	migration: MigrationApi;
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

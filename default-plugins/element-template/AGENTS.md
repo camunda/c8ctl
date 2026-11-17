@@ -11,12 +11,16 @@ version resolution.
 | --- | --- |
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
 | `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync`, `update`. `update` is a thin wrapper over `commands/migrate.ts` |
-| `migration/` | The migration engine behind `update`: recipe parser (`recipe.ts`, schema in `migrates-from.schema.json`), step resolution (`steps.ts`), value resolution (`plan.ts`), applying to a headless modeler (`apply.ts`) and the report model (`report.ts`). **Self-contained: nothing in this folder may import from c8ctl or from the rest of the plugin**, so it can be lifted out into a library. `migration-output.ts` (outside it) renders the report. |
+| `commands/migrate.ts` | `update` CLI orchestration; consumes the migration API bundled into the vendor module. |
+| `migration-types.ts` | c8ctl's typed boundary for the package's public migration API; no engine implementation. |
+| `migration-values.ts` | c8ctl's BPMN value reader used to redact diagnostics. |
+| `migration-output.ts` | c8ctl report rendering and diagnostic redaction. |
+| `recipe-schema.ts` | Host-owned compatibility gate for the provisional recipe format. |
 | `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplates` (Modeler-aligned `.camunda/element-templates/` + Modeler user-data lookup), `resolveOotbTemplate`, `resolveTemplateId` (local first, then OOTB — every subcommand's id path), `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
 | `vendor.ts` | `resolveVendorBundle()` + the minimal bpmn-js `Modeler`/`modeling` type surface shared by `apply`/`edit` |
-| `vendor-src/bundle-entry.js` | esbuild entry — re-exports `Modeler`, `CloudElementTemplatesCoreModule`, `ZeebeModdleExtension` |
+| `vendor-src/bundle-entry.js` | esbuild entry — bundles the migration API alongside `Modeler`, `CloudElementTemplatesCoreModule`, and `ZeebeModdleExtension` |
 
 ## Things to know before editing
 
@@ -24,6 +28,14 @@ version resolution.
   The plugin loads `dist/vendor/bpmn-element-templates.cjs`, not the
   source. `vendor-src/bundle-entry.js` is the only entry point that
   esbuild bundles.
+- **Migration must work without the development package installed.**
+  Load the migration API through the vendor bundle, never a runtime
+  import or dynamic require of `bpmn-js-element-templates/migration`.
+  The installed-layout test guards this production boundary.
+- **Recipe schema policy belongs to c8ctl, not the shared engine.**
+  Metadata-based migration instructions remain accepted but unsupported.
+  Remove the provisional compatibility code when the formal schema replaces
+  it; do not add host-specific upgrade guidance to the shared engine.
 - **Cache file shape mirrors Desktop Modeler's
   `.camunda-connector-templates.json`.** Don't change the format
   without reason — current package templates replace cached entries
@@ -97,16 +109,17 @@ version resolution.
 ## Testing
 
 ```bash
-npm run build:vendor && node --experimental-strip-types --test tests/unit/element-template.test.ts
+npm run build:vendor && node --experimental-strip-types --import ./tests/utils/isolate-user-data-dir.ts --test tests/unit/element-template.test.ts
 ```
 
 Test fixtures in `tests/fixtures/element-templates/` are synthetic. Never
-commit upstream connector templates (see its `SOURCES.md`). To check the AI
-Agent v1 to v2 migration against the real templates, fetched at a pinned
-`camunda/connectors` commit:
+commit upstream connector templates (see its `SOURCES.md`). The shared
+package owns engine unit tests. Verify the host integration and the
+production layout after building against an API-bearing package:
 
 ```bash
-C8CTL_FIDELITY=1 node --experimental-strip-types --test tests/unit/element-template-migration-upstream-fidelity.test.ts
+npm run build:dist
+node --experimental-strip-types --import ./tests/utils/isolate-user-data-dir.ts --test tests/unit/element-template-update-scenarios.test.ts tests/unit/element-template-update-selection.test.ts tests/unit/element-template-production-package.test.ts
 ```
 
 Smoke-test against the live npm package (writes to a throwaway

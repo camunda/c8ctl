@@ -56,6 +56,68 @@ test("without --to a deprecated template stays put and the report names declared
 	assert.doesNotMatch(result.stdout, /io\.example\.new/);
 });
 
+test("the latest version per template id controls deprecation hints", async () => {
+	const deprecatedV2 = { ...V2, deprecated: true };
+	const successor = {
+		...NEW,
+		id: "io.example.versioned-successor",
+		metadata: {
+			migratesFrom: {
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: V1.id,
+						paths: [],
+					},
+				],
+			},
+		},
+	};
+	const result = await run(
+		dataDirWithCache([V1, deprecatedV2, successor]),
+		"update",
+		V1.id,
+		TASK,
+		ws.versionedBpmn,
+		"--to",
+		`${V1.id}@2`,
+		"--dry-run",
+		"--json",
+	);
+	assert.strictEqual(result.status, 0, result.stderr);
+	assert.deepStrictEqual(JSON.parse(result.stdout).deprecation, {
+		templateId: V1.id,
+		successors: [successor.id],
+	});
+});
+
+test("unusable successor recipes are omitted from deprecation hints", async () => {
+	const unusableSuccessor = {
+		...NEW,
+		metadata: {
+			migratesFrom: {
+				schemaVersion: 2,
+				sources: [{ kind: "change", sourceTemplateId: OLD.id }],
+			},
+		},
+	};
+	const result = await run(
+		dataDirWithCache([OLD, unusableSuccessor]),
+		"update",
+		OLD.id,
+		TASK,
+		ws.oldBpmn,
+		"--dry-run",
+		"--json",
+	);
+	assert.strictEqual(result.status, 0, result.stderr);
+	assert.deepStrictEqual(JSON.parse(result.stdout).deprecation, {
+		templateId: OLD.id,
+		successors: [],
+	});
+});
+
 test("fails for an element without a template and for unknown elements", async () => {
 	const templatePath = join(ws.workDir, "new.json");
 	writeFileSync(templatePath, JSON.stringify(NEW));

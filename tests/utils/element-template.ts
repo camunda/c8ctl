@@ -2,17 +2,9 @@
  * Shared builders and seeding helpers for the element-template migration tests.
  */
 
-import assert from "node:assert";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import type { MigrationModeler } from "../../default-plugins/element-template/migration/apply.ts";
-import type { ElementValue } from "../../default-plugins/element-template/migration/element-values.ts";
-import {
-	getModdleElement,
-	getModdleList,
-} from "../../default-plugins/element-template/migration/moddle.ts";
-import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 import type {
 	ElementTemplatesService,
 	VendorBundle,
@@ -66,16 +58,6 @@ export function template(
 	};
 }
 
-/** A populated `zeebe:input` value as read from an element. */
-export function elementValue(key: string, value: string): ElementValue {
-	return {
-		bindingType: "zeebe:input",
-		key,
-		value,
-		isFeel: value.startsWith("="),
-	};
-}
-
 /** Write `templates.json` and `fetched-at` into `<dataDir>/element-templates`. */
 export function seedTemplateCache(
 	dataDir: string,
@@ -122,32 +104,4 @@ export async function createTestModeler(
 	});
 	await modeler.importXML(xml);
 	return modeler;
-}
-
-/** Apply `applied` to `Task_1` of `DIAGRAM` and set its input values. */
-export async function setupAppliedModeler(
-	vendor: VendorBundle,
-	applied: MigrationTemplate,
-	values: Record<string, string>,
-) {
-	const modeler = await createTestModeler(vendor);
-	const elementTemplates = modeler.get("elementTemplates");
-	const modeling = modeler.get("modeling");
-	elementTemplates.set([applied]);
-	const element = modeler.get("elementRegistry").get("Task_1");
-	assert.ok(element);
-	const seeded = elementTemplates.applyTemplate(element, applied) ?? element;
-	for (const [name, value] of Object.entries(values)) {
-		const ext = getModdleElement(seeded.businessObject, "extensionElements");
-		const io = getModdleList(ext, "values").find(
-			(v) => v.$type === "zeebe:IoMapping",
-		);
-		const param = getModdleList(io, "inputParameters").find(
-			(p) => p.target === name,
-		);
-		assert.ok(param);
-		modeling.updateModdleProperties(seeded, param, { source: value });
-	}
-	const migrationModeler: MigrationModeler = { elementTemplates, modeling };
-	return { modeler, migrationModeler, element: seeded };
 }

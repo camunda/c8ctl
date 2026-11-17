@@ -25,33 +25,6 @@ import {
 	type Template,
 } from "../helpers.ts";
 import {
-	type MigrationModeler,
-	migrateElement,
-	readAppliedTemplate,
-	type ValueMap,
-} from "../migration/apply.ts";
-import {
-	type ElementValue,
-	enumerateElementValues,
-	getExtensionElements,
-} from "../migration/element-values.ts";
-import { getModdleString } from "../migration/moddle.ts";
-import { DestinationError, emptyFacts } from "../migration/plan.ts";
-import {
-	parseRecipe,
-	type Recipe,
-	RecipeError,
-	readEmbeddedRecipe,
-	validateRecipeOwner,
-} from "../migration/recipe.ts";
-import { buildReport, type MigrationReport } from "../migration/report.ts";
-import {
-	findSuccessors,
-	latestOf,
-	resolveCatalog,
-} from "../migration/steps.ts";
-import type { MigrationTemplate } from "../migration/types.ts";
-import {
 	type MigrationRedactionContext,
 	type RecipeOrigin,
 	redactMigrationDiagnostic,
@@ -60,6 +33,20 @@ import {
 	reportToJson,
 	shouldUseColor,
 } from "../migration-output.ts";
+import type {
+	MigrationApi,
+	MigrationReport,
+	MigrationTemplate,
+	Recipe,
+	ValueMap,
+} from "../migration-types.ts";
+import {
+	type ElementValue,
+	enumerateElementValues,
+	getExtensionElements,
+} from "../migration-values.ts";
+import { getModdleString } from "../moddle.ts";
+import { validateRecipeSchemaVersion } from "../recipe-schema.ts";
 import {
 	findLocalTemplates,
 	getExecutionPlatformVersion,
@@ -79,6 +66,19 @@ import {
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
+
+let vendorBundle: VendorBundle | undefined;
+
+function getVendorBundle(): VendorBundle {
+	if (vendorBundle) return vendorBundle;
+	const loaded: VendorBundle = require(resolveVendorBundle());
+	vendorBundle = loaded;
+	return loaded;
+}
+
+function getMigrationApi(): MigrationApi {
+	return getVendorBundle().migration;
+}
 
 const COMMAND = "element-template update";
 const USAGE =
@@ -219,7 +219,7 @@ function parseMapArg(arg: string): ValueMap {
 
 function isMigrationTemplate(
 	template: Template,
-): template is Template & { id: string } {
+): template is MigrationTemplate {
 	return typeof template.id === "string";
 }
 
@@ -244,16 +244,25 @@ function loadRecipeFile(path: string): Recipe {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`Cannot read recipe ${path}: ${message}`);
 	}
-	return parseRecipe(raw);
+	validateRecipeSchemaVersion(raw, `Recipe file ${path}`);
+	return getMigrationApi().parseRecipe(raw);
 }
 
 function embeddedRecipe(template: MigrationTemplate): Recipe | undefined {
+	const metadata = isRecord(template.metadata) ? template.metadata : undefined;
+	if (metadata && Object.hasOwn(metadata, "migratesFrom")) {
+		validateRecipeSchemaVersion(
+			metadata.migratesFrom,
+			`Template ${template.id}@${template.version}`,
+		);
+	}
 	try {
-		const recipe = readEmbeddedRecipe(template);
-		if (recipe) validateRecipeOwner(recipe, template);
+		const api = getMigrationApi();
+		const recipe = api.readEmbeddedRecipe(template);
+		if (recipe) api.validateRecipeOwner(recipe, template);
 		return recipe;
 	} catch (error) {
-		if (error instanceof RecipeError) {
+		if (error instanceof getMigrationApi().RecipeError) {
 			throw new Error(
 				`Template ${template.id}@${template.version} carries an unusable recipe. ${error.message}`,
 			);
@@ -263,7 +272,7 @@ function embeddedRecipe(template: MigrationTemplate): Recipe | undefined {
 }
 
 function createModeler(): ModelerInstance {
-	const vendor: VendorBundle = require(resolveVendorBundle());
+	const vendor = getVendorBundle();
 	return new vendor.Modeler({
 		additionalModules: [
 			vendor.HeadlessTextRendererModule,
@@ -340,7 +349,7 @@ async function resolveTarget({
 	const arg = to ?? templateId;
 	const ref = parseTemplateRef(arg);
 	const checkConflicts = (id: string) =>
-		resolveCatalog(
+		getMigrationApi().resolveCatalog(
 			migrationTemplates(templatePool.pool([id]).filter((t) => t.id === id)),
 		);
 	if (ref?.kind === "id") checkConflicts(ref.id);
@@ -352,7 +361,6 @@ async function resolveTarget({
 					requireEngineCompatibility: true,
 					loadTemplates: () => {
 						const cached = templatePool.cache();
-						// The cached versions join the pool, so check it again.
 						checkConflicts(ref.id);
 						return cached;
 					},
@@ -389,7 +397,9 @@ function selectElements(
 		if (!element) {
 			throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
 		}
-		const applied = readAppliedTemplate(element.businessObject);
+		const applied = getMigrationApi().readAppliedTemplate(
+			element.businessObject,
+		);
 		if (!applied) {
 			throw new Error(
 				`Element "${elementId}" has no element template applied. Use 'apply' first.`,
@@ -410,7 +420,8 @@ function selectElements(
 		const element = registry.get(id);
 		if (
 			element &&
-			readAppliedTemplate(element.businessObject)?.id === templateId
+			getMigrationApi().readAppliedTemplate(element.businessObject)?.id ===
+				templateId
 		) {
 			seen.add(id);
 			result.push(selected(element, id));
@@ -453,13 +464,12 @@ function deprecationOf(
 	templates: MigrationTemplate[],
 	cache: MigrationTemplate[],
 ): Deprecation | null {
-	const latest = templates
-		.filter((t) => t.id === templateId)
-		.sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
+	const api = getMigrationApi();
+	const latest = api.latestOf(templates, templateId);
 	if (!latest?.deprecated) return null;
-	let successors: MigrationTemplate[] = [];
+	let successors: MigrationTemplate[];
 	try {
-		successors = findSuccessors(
+		successors = api.findSuccessors(
 			cache,
 			templateId,
 			latest.version ?? 0,
@@ -467,6 +477,7 @@ function deprecationOf(
 		);
 	} catch {
 		// The hint is informational; a catalog conflict must not fail the run.
+		successors = [];
 	}
 	return { templateId, successors: successors.map((t) => t.id) };
 }
@@ -537,7 +548,8 @@ async function runMigrateInternal(
 		selected.some(
 			({ element }) =>
 				!localVersions.includes(
-					readAppliedTemplate(element.businessObject)?.version ?? 0,
+					getMigrationApi().readAppliedTemplate(element.businessObject)
+						?.version ?? 0,
 				),
 		)
 	) {
@@ -590,13 +602,13 @@ async function runMigrateInternal(
 		engineVersion,
 	).flatMap((t) => (t.id === templateId ? [t.version ?? 0] : []));
 	const newestLocal = Math.max(-1, ...localCompatibleVersions);
-	const localLatest = latestOf(
+	const localLatest = getMigrationApi().latestOf(
 		compatibleTemplates(pool.localOf(templateId), engineVersion),
 		templateId,
 	);
 	let localRecipe: Recipe | undefined;
 	try {
-		localRecipe = localLatest && readEmbeddedRecipe(localLatest);
+		localRecipe = localLatest && embeddedRecipe(localLatest);
 	} catch {
 		// Step resolution reports an unusable recipe for each element.
 	}
@@ -621,7 +633,8 @@ async function runMigrateInternal(
 		floors.length > 0 &&
 		selected.some(({ element }) => {
 			const reached = reachedLocally(
-				readAppliedTemplate(element.businessObject)?.version ?? 0,
+				getMigrationApi().readAppliedTemplate(element.businessObject)
+					?.version ?? 0,
 			);
 			return (
 				!hasFallback &&
@@ -635,7 +648,7 @@ async function runMigrateInternal(
 	const sourceLatest =
 		target.id === templateId
 			? undefined
-			: latestOf(
+			: getMigrationApi().latestOf(
 					compatibleTemplates(pool.pool([templateId]), engineVersion).filter(
 						(t) => t.id === templateId,
 					),
@@ -643,7 +656,7 @@ async function runMigrateInternal(
 				);
 	let sourceRecipe: Recipe | undefined;
 	try {
-		sourceRecipe = sourceLatest && readEmbeddedRecipe(sourceLatest);
+		sourceRecipe = sourceLatest && embeddedRecipe(sourceLatest);
 	} catch {
 		// Step resolution reports an unusable recipe for each element.
 	}
@@ -657,7 +670,8 @@ async function runMigrateInternal(
 	const lowestApplied = Math.min(
 		...selected.map(
 			({ element }) =>
-				readAppliedTemplate(element.businessObject)?.version ?? 0,
+				getMigrationApi().readAppliedTemplate(element.businessObject)
+					?.version ?? 0,
 		),
 	);
 	if (
@@ -674,12 +688,12 @@ async function runMigrateInternal(
 		pool.pool([templateId, target.id]),
 		engineVersion,
 	);
-	const templates = resolveCatalog(
+	const templates = getMigrationApi().resolveCatalog(
 		cache.filter((t) => t.id === templateId || t.id === target.id),
 		[target],
 	);
 	redaction.templates = [...lineages([templateId, target.id]), target];
-	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
+	if (targetRecipe) getMigrationApi().validateRecipeOwner(targetRecipe, target);
 	// An applied source need not be engine-compatible to describe its values.
 	const fromTemplateOf = (applied: { id: string; version: number }) => {
 		const isApplied = (t: MigrationTemplate) =>
@@ -698,13 +712,15 @@ async function runMigrateInternal(
 	// Every element climbs its source lineage's recipe, so a bad one fails the
 	// run. The lineage includes the applied source, as in `migrateElement`.
 	for (const { element } of selected) {
-		const applied = readAppliedTemplate(element.businessObject);
+		const applied = getMigrationApi().readAppliedTemplate(
+			element.businessObject,
+		);
 		if (!applied || applied.id === target.id) continue;
-		const catalog = resolveCatalog(templates, [
+		const catalog = getMigrationApi().resolveCatalog(templates, [
 			fromTemplateOf(applied).fromTemplate,
 			target,
 		]);
-		const sourceLatest = latestOf(catalog, applied.id);
+		const sourceLatest = getMigrationApi().latestOf(catalog, applied.id);
 		if (sourceLatest) embeddedRecipe(sourceLatest);
 	}
 	if (!isEngineCompatible(target, engineVersion)) {
@@ -725,15 +741,11 @@ async function runMigrateInternal(
 	const ownerOf = (report: MigrationReport) =>
 		sourceLineageRecipe(report) ? templateId : target.id;
 
-	const service = modeler.get("elementTemplates");
-	const migrationModeler: MigrationModeler = {
-		elementTemplates: service,
-		modeling: modeler.get("modeling"),
-	};
-
 	const outcomes: Outcome[] = [];
 	for (const { element, id, name } of selected) {
-		const applied = readAppliedTemplate(element.businessObject);
+		const applied = getMigrationApi().readAppliedTemplate(
+			element.businessObject,
+		);
 		if (!applied) continue;
 		if (target.id === applied.id && (target.version ?? 0) === applied.version) {
 			// The unchanged result records it in JSON mode.
@@ -762,8 +774,8 @@ async function runMigrateInternal(
 		}
 		const { source, fromTemplate } = fromTemplateOf(applied);
 		try {
-			const result = migrateElement({
-				modeler: migrationModeler,
+			const result = getMigrationApi().migrateElement({
+				modeler,
 				element,
 				fromTemplate,
 				sourceKnown: source !== undefined,
@@ -795,7 +807,9 @@ async function runMigrateInternal(
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const carryOver =
-				error instanceof DestinationError && error.carryOver && !targetRecipe;
+				error instanceof getMigrationApi().DestinationError &&
+				error.carryOver &&
+				!targetRecipe;
 			outcomes.push({
 				status: "failed",
 				id,
@@ -853,13 +867,13 @@ async function runMigrateInternal(
 			o.name
 				? { elementName: redactMigrationDiagnostic(o.name, redaction) }
 				: {};
-		const emptyReport = (version: number) =>
-			buildReport({
+		const emptyReport = (version: number): MigrationReport =>
+			getMigrationApi().buildReport({
 				fromTemplate: { ...target, version },
 				toTemplate: target,
 				before: [],
 				after: [],
-				facts: emptyFacts(),
+				facts: getMigrationApi().emptyFacts(),
 				usedRecipe: false,
 				refusal: null,
 			});

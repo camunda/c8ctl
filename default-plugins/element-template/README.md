@@ -228,6 +228,12 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
 
 ### Migration recipes
 
+**Provisional compatibility only:** c8ctl currently accepts schemaVersion 1
+metadata-based instructions and `--recipe` files, but this recipe format is not
+a supported public contract. c8ctl owns schema-version compatibility and
+rejects unrecognized versions. The provisional format may be removed or
+replaced when the formal recipe schema is defined.
+
 A recipe describes how values of older templates map onto the template that
 carries it. It lives in the target template as `metadata.migratesFrom`, or in
 a file passed with `--recipe`, which replaces the embedded one. Without a recipe,
@@ -306,10 +312,10 @@ step in `report.steps` of `--json`. File recipes replace only the target recipe 
 same rules.
 This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` recipes and requires
 `kind` on every source. Older strict readers reject the new fields. See
-[`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
+`bpmn-js-element-templates/migration/migrates-from.schema.json` for the full format.
 Recipes are validated strictly: an unknown key or an unsupported `schemaVersion` fails the command
-instead of being ignored. `schemaVersion` is checked first, so a recipe with a newer version always
-reports that c8ctl must be updated, whatever other keys it has. An unusable recipe embedded in the
+instead of being ignored. c8ctl checks `schemaVersion` before passing a recipe to the migration
+package, so an unrecognized version is rejected regardless of its other keys. An unusable recipe embedded in the
 target template, or in the latest version of the source template, fails the whole `update` run and
 names that template. `metadata.migratesFrom` is not part of the official element template schema.
 Draft07 validation alone is insufficient: the parser also rejects duplicate source markers/floors,

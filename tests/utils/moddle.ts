@@ -1,8 +1,8 @@
 /**
- * Plain-object stand-ins for moddle elements, for engine unit tests.
+ * Plain-object stand-ins for moddle elements used by plugin unit tests.
  */
 
-import type { ModdleElement } from "../../default-plugins/element-template/migration/moddle.ts";
+import type { ModdleElement } from "../../default-plugins/element-template/moddle.ts";
 
 export function moddle(
 	$type: string,
