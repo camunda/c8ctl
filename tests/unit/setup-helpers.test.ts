@@ -65,6 +65,11 @@ describe("SETUP_STEPS", () => {
 		assert.strictEqual(SETUP_STEPS[0].component, null);
 		assert.match(SETUP_STEPS[0].title, /prerequisites/i);
 	});
+
+	test("step ids are unique", () => {
+		const ids = SETUP_STEPS.map((s) => s.id);
+		assert.strictEqual(new Set(ids).size, ids.length);
+	});
 });
 
 describe("renderWelcomeBanner()", () => {
@@ -131,9 +136,9 @@ describe("renderSetupPlan()", () => {
 		);
 	});
 
-	test("the preview note keeps the skeleton honest", () => {
+	test("the plan is the contract: no preview note, execution follows", () => {
 		const plan = renderSetupPlan(defaultSelection(), { color: false });
-		assert.match(plan, /Nothing was installed/);
+		assert.doesNotMatch(plan, /Nothing was installed/);
 	});
 });
 
@@ -152,5 +157,13 @@ describe("setupPlanPayload()", () => {
 		assert.strictEqual(docsStep?.status, "skipped");
 		const prereq = payload.steps.find((s) => s.title === "Check prerequisites");
 		assert.strictEqual(prereq?.status, "planned");
+	});
+
+	test("reports the chosen blueprint, null when none was picked", () => {
+		assert.strictEqual(setupPlanPayload(defaultSelection()).blueprint, null);
+		assert.strictEqual(
+			setupPlanPayload(defaultSelection(), { blueprint: "ai-agent" }).blueprint,
+			"ai-agent",
+		);
 	});
 });

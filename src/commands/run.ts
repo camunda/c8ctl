@@ -19,8 +19,9 @@ import { parseVariablesFlag } from "../utils/index.ts";
 
 /**
  * Extract process ID from BPMN file content.
+ * Shared with `c8ctl setup`, which starts a blueprint's process.
  */
-function extractProcessId(bpmnContent: string): string | null {
+export function extractProcessId(bpmnContent: string): string | null {
 	const match = bpmnContent.match(/process[^>]+id="([^"]+)"/);
 	return match ? match[1] : null;
 }

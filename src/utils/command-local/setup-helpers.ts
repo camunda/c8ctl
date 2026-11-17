@@ -105,7 +105,20 @@ export function defaultSelection(): ReadonlySet<SetupComponentId> {
 
 // ── The ordered plan ───────────────────────────────────────────────
 
+export type SetupStepId =
+	| "prerequisites"
+	| "install-c8run"
+	| "start-cluster"
+	| "install-modeler"
+	| "scaffold-blueprint"
+	| "deploy-blueprint"
+	| "install-skills"
+	| "cluster-mcp"
+	| "docs-mcp"
+	| "open-operate";
+
 export interface SetupStep {
+	readonly id: SetupStepId;
 	readonly title: string;
 	readonly detail: string;
 	/** The component this step belongs to; null = always runs. */
@@ -118,51 +131,61 @@ export interface SetupStep {
  */
 export const SETUP_STEPS: readonly SetupStep[] = [
 	{
+		id: "prerequisites",
 		title: "Check prerequisites",
 		detail: "Node.js ≥ 22.18, supported OS, network access",
 		component: null,
 	},
 	{
+		id: "install-c8run",
 		title: "Install Camunda 8 Run",
 		detail: "download the latest release",
 		component: "cluster",
 	},
 	{
+		id: "start-cluster",
 		title: "Start the local cluster",
 		detail: "wait until it reports healthy",
 		component: "cluster",
 	},
 	{
+		id: "install-modeler",
 		title: "Install Desktop Modeler",
 		detail: "the visual BPMN editor",
 		component: "modeler",
 	},
 	{
-		title: "Pick a blueprint, create the project",
+		id: "scaffold-blueprint",
+		title: "Create the blueprint project",
 		detail: "Rocket Launch, Service worker, or AI agent",
 		component: "blueprint",
 	},
 	{
+		id: "deploy-blueprint",
 		title: "Deploy and start the process",
 		detail: "your first running process instance",
 		component: "blueprint",
 	},
 	{
+		id: "install-skills",
 		title: "Install AI assistant skills",
 		detail: "for the AI coding tools found on this machine",
 		component: "skills",
 	},
 	{
+		id: "cluster-mcp",
 		title: "Configure the cluster MCP server",
 		detail: "connect your AI assistant to the cluster",
 		component: "cluster-mcp",
 	},
 	{
+		id: "docs-mcp",
 		title: "Configure the docs MCP server",
 		detail: "Camunda 8 documentation in your AI assistant",
 		component: "docs-mcp",
 	},
 	{
+		id: "open-operate",
 		title: "Open Operate",
 		detail: "http://localhost:8080/operate — log in with demo/demo",
 		component: "cluster",
@@ -231,8 +254,7 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 
 /**
  * The tailored step plan for a selection: chosen steps numbered with
- * their detail, unchosen steps dimmed and marked as skipped. Ends with
- * the skeleton honesty note — nothing has been installed yet.
+ * their detail, unchosen steps dimmed and marked as skipped.
  */
 export function renderSetupPlan(
 	selected: ReadonlySet<SetupComponentId>,
@@ -258,20 +280,17 @@ export function renderSetupPlan(
 		}
 	}
 	lines.push("");
-	lines.push(
-		`  ${s.brand}✨${s.reset} Nothing was installed — this preview prints the plan only.`,
-	);
-	lines.push(
-		`  ${s.dim}Real execution lands with the next setup steps.${s.reset}`,
-	);
-	lines.push("");
 	return lines.join("\n");
 }
 
 /** Structured plan for JSON output mode and --dry-run. */
-export function setupPlanPayload(selected: ReadonlySet<SetupComponentId>): {
+export function setupPlanPayload(
+	selected: ReadonlySet<SetupComponentId>,
+	{ blueprint }: { blueprint?: string } = {},
+): {
 	command: string;
 	preview: true;
+	blueprint: string | null;
 	components: readonly { id: string; label: string; selected: boolean }[];
 	steps: readonly {
 		title: string;
@@ -282,6 +301,7 @@ export function setupPlanPayload(selected: ReadonlySet<SetupComponentId>): {
 	return {
 		command: "setup",
 		preview: true,
+		blueprint: blueprint ?? null,
 		components: SETUP_COMPONENTS.map((c) => ({
 			id: c.id,
 			label: c.label,
