@@ -13,6 +13,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -21,6 +22,7 @@ import { delimiter, join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import { isRecord } from "../../src/core/index.ts";
 import { c8, c8WithOptions } from "../utils/cli.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
@@ -379,9 +381,16 @@ describe("c8ctl setup", () => {
 
 	test("--yes deploys the blueprint and starts a process instance when the cluster is up", async () => {
 		const stub = stubbedExecution({ clusterUp: true });
+		const capture = join(stub.cwd, "capture.json");
 		try {
 			const result = await c8WithOptions(
-				stub.options,
+				{
+					...stub.options,
+					env: {
+						...stub.options.env,
+						C8CTL_SETUP_STUB_CAPTURE: capture,
+					},
+				},
 				"setup",
 				"--yes",
 				"--blueprint",
@@ -393,6 +402,15 @@ describe("c8ctl setup", () => {
 			assert.match(out, /Process instance created/);
 			assert.match(out, /2251799813686751/);
 			assert.match(out, /Setup finished\./);
+			// The Rocket Launch model needs mission inputs to run through;
+			// setup starts the instance with the blueprint's variables.
+			const request: unknown = JSON.parse(readFileSync(capture, "utf-8"));
+			assert.ok(isRecord(request), "capture is not an object");
+			assert.strictEqual(request.processDefinitionId, "rocket-launch");
+			assert.deepStrictEqual(request.variables, {
+				missionName: "Apollo",
+				fuelLevel: 80,
+			});
 		} finally {
 			stub.cleanup();
 		}

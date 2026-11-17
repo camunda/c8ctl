@@ -41,6 +41,11 @@ export interface SetupBlueprint {
 	 * to the scaffolded project root.
 	 */
 	readonly processFile: string;
+	/**
+	 * Variables for the first process instance, where the model needs
+	 * inputs to run through without an incident.
+	 */
+	readonly startVariables?: Record<string, unknown>;
 }
 
 export const SETUP_BLUEPRINTS = [
@@ -57,6 +62,9 @@ export const SETUP_BLUEPRINTS = [
 			path: "1-rocket-launch",
 		},
 		processFile: "rocket-launch.bpmn",
+		// The mission decision reads these; the upstream quick-start's
+		// "full send" launch.
+		startVariables: { missionName: "Apollo", fuelLevel: 80 },
 	},
 	{
 		id: "service-worker",

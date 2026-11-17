@@ -22,6 +22,8 @@
  *                                   the SDK deploy/instance endpoints
  *                                   answer; any other value (default)
  *                                   makes the cluster unreachable.
+ *   C8CTL_SETUP_STUB_CAPTURE=file — the process-instance creation request
+ *                                   body is written to this file.
  */
 
 import fs from "node:fs";
@@ -163,11 +165,17 @@ globalThis.fetch = async (
 		return json({ status: "UP" });
 	}
 
-	// The Orchestration Cluster API (CAMUNDA_BASE_URL in tests).
-	if (url === "http://test-cluster/v2/deployments") {
+	// The Orchestration Cluster API of the built-in local profile, which
+	// setup's deploy step pins explicitly.
+	if (url === "http://localhost:8080/v2/deployments") {
 		return json(DEPLOYMENT_RESULT);
 	}
-	if (url === "http://test-cluster/v2/process-instances") {
+	if (url === "http://localhost:8080/v2/process-instances") {
+		// Capture the request body so tests can assert the start variables.
+		const capture = process.env.C8CTL_SETUP_STUB_CAPTURE;
+		if (capture && input instanceof Request) {
+			fs.writeFileSync(capture, await input.text());
+		}
 		return json(PROCESS_INSTANCE_RESULT);
 	}
 

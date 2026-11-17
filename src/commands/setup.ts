@@ -19,7 +19,12 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { resolveTenantId, SilentError } from "../core/index.ts";
+import {
+	createClient,
+	DEFAULT_PROFILE,
+	resolveTenantId,
+	SilentError,
+} from "../core/index.ts";
 import {
 	type CommandContext,
 	defineCommand,
@@ -137,6 +142,8 @@ async function runBlueprintDeploy(
 		throw new Error("The blueprint project was not created.");
 	}
 
+	const deployDir = join(directory, blueprint.deployPath ?? ".");
+
 	// Deploying needs a running cluster. Rather than failing on a
 	// connection error, say what to do and leave the project in place.
 	const health = await checkLocalClusterHealth();
@@ -145,12 +152,16 @@ async function runBlueprintDeploy(
 			`Could not reach the local cluster (${health.detail}) — the blueprint was not deployed.`,
 		);
 		logger.info("Start the cluster with: c8ctl cluster start");
-		logger.info(`Then deploy the project with: c8ctl deploy ${directory}`);
+		logger.info(`Then deploy the project with: c8ctl deploy "${deployDir}"`);
 		return;
 	}
 
-	await deployResources([join(directory, blueprint.deployPath ?? ".")], {
-		profile: ctx.profile,
+	// Both mutations target the cluster the health check just probed: the
+	// built-in local profile. An explicit profile name wins over the
+	// session profile and CAMUNDA_* env vars, so a remote active profile
+	// cannot redirect the first-run deployment.
+	await deployResources([deployDir], {
+		profile: DEFAULT_PROFILE,
 		basePath: directory,
 		verbose: ctx.verbose,
 	});
@@ -161,9 +172,12 @@ async function runBlueprintDeploy(
 		throw new Error(`Could not find a process id in ${blueprint.processFile}.`);
 	}
 	logger.info(`Starting a ${blueprint.name} process instance...`);
-	const created = await ctx.client.createProcessInstance({
+	const created = await createClient(DEFAULT_PROFILE).createProcessInstance({
 		processDefinitionId: ProcessDefinitionId.assumeExists(processId),
-		tenantId: TenantId.assumeExists(resolveTenantId(ctx.profile)),
+		tenantId: TenantId.assumeExists(resolveTenantId(DEFAULT_PROFILE)),
+		...(blueprint.startVariables !== undefined && {
+			variables: blueprint.startVariables,
+		}),
 	});
 	logger.success("Process instance created", created.processInstanceKey);
 }
