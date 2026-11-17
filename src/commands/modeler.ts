@@ -675,9 +675,7 @@ async function installOnLinux({
 		const installDir = join(LINUX_INSTALL_ROOT, releaseDir);
 		const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
 		logger.info(`Installing Camunda Modeler to ${installDir}...`);
-		// The launcher marks Modeler as installed, so it goes first and comes back
-		// last: a stale link that extraction would revive cannot make an
-		// unfinished installation look complete, and a retry starts over.
+		// Remove stale links before extraction and recreate the launcher last.
 		runAsRoot(["rm", "-f", launcher], `Could not remove ${launcher}`);
 		runAsRoot(
 			["tar", "--no-same-owner", "-xzf", archivePath, "-C", LINUX_INSTALL_ROOT],

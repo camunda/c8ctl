@@ -163,7 +163,7 @@ fs.statSync = (path, options) => statSync(remapFilesystemPath(path), options);
 const { spawnSync } = childProcess;
 childProcess.spawnSync = (command, args, options) => {
 	const desktopRegistration =
-	command === "/bin/bash" && String(args[0]).startsWith("/usr/bin/");
+		command === "/bin/bash" && String(args[0]).startsWith("/usr/bin/");
 	if (
 		!["sudo", "true", "rm", "tar", "chmod", "ln"].includes(command) &&
 		!command.startsWith("/usr/bin/") &&
@@ -328,7 +328,6 @@ function createLinuxSandbox() {
 	mkdirSync(binRoot);
 	mkdirSync(usrBin);
 	mkdirSync(join(release, "support"), { recursive: true });
-	// The isolated PATH exposes system tools; this symlink supplies Node.
 	symlinkSync(process.execPath, join(binDir, "node"));
 	for (const command of ["chmod", "ln", "rm"]) {
 		symlinkSync(`/bin/${command}`, join(binDir, command));
@@ -387,7 +386,6 @@ function createLinuxSandbox() {
 		binDir,
 		binRoot,
 		usrBin,
-		/** Put a stub command on PATH. */
 		fakeTool: (name: string): void =>
 			writeFileSync(join(binDir, name), "#!/bin/sh\n", { mode: 0o755 }),
 		toolCalls: (): string[] => readToolLog(toolLog),
@@ -496,7 +494,6 @@ describe("CLI behavioural: modeler install", () => {
 	test("prints manual download instructions on unsupported platforms", async () => {
 		const result = await c8WithOptions(
 			{
-				// Loading node:os first keeps the host's temp and home directories.
 				nodeArgs: [
 					"--import",
 					'data:text/javascript,import "node:os"; Object.defineProperty(process, "platform", { value: "freebsd" });',
@@ -1019,7 +1016,6 @@ describe("CLI behavioural: modeler install", () => {
 		const sandbox = createLinuxSandbox();
 		const onPath = join(sandbox.binDir, "camunda-modeler");
 		try {
-			// Neither a directory nor a non-executable file can run Modeler.
 			for (const create of [
 				() => mkdirSync(onPath),
 				() => writeFileSync(onPath, "", { mode: 0o644 }),
@@ -1226,7 +1222,6 @@ describe("CLI behavioural: modeler install", () => {
 				"camunda-modeler-5.52.0-linux-x64/camunda-modeler",
 			);
 
-			// The launcher link is on PATH now, so a second run skips.
 			sandbox.resetToolCalls();
 			const again = await sandbox.install();
 			assert.strictEqual(again.status, 0, again.stderr);
@@ -1299,7 +1294,6 @@ describe("CLI behavioural: modeler install", () => {
 		const sandbox = createLinuxSandbox();
 		const launcher = join(sandbox.usrBin, "camunda-modeler");
 		try {
-			// Extraction would make this dangling link valid.
 			symlinkSync("camunda-modeler-5.52.0-linux-x64/camunda-modeler", launcher);
 
 			const failed = await sandbox.install({ FAIL_AT: "chmod" });
