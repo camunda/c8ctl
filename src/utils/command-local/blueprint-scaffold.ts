@@ -108,7 +108,7 @@ export const SETUP_BLUEPRINTS = [
 		startNote:
 			"needs an LLM provider. Configure the AI Agent connector secrets " +
 			"for your cluster, then start a chat instance with: " +
-			`c8ctl create pi --id=ai-agent-chat-with-tools --variables '{"inputText":"Hello!"}'`,
+			`c8ctl create pi --id=ai-agent-chat-with-tools --variables '{"inputText":"Hello!"}' --profile local`,
 	},
 ] as const satisfies readonly SetupBlueprint[];
 

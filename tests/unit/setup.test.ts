@@ -545,7 +545,10 @@ describe("c8ctl setup", () => {
 			assert.match(out, /Deployment successful/);
 			assert.match(out, /deployed but not started/);
 			assert.match(out, /needs an LLM provider/);
-			assert.match(out, /c8ctl create pi --id=ai-agent-chat-with-tools/);
+			assert.match(
+				out,
+				/c8ctl create pi --id=ai-agent-chat-with-tools .* --profile local/,
+			);
 			// No process instance was started.
 			assert.ok(
 				!existsSync(capture),
