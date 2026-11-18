@@ -20,10 +20,11 @@
  * step report and the JSON payload are the command's answer on stdout.
  *
  * Exit codes: 0 when every selected step succeeded, or when nothing
- * was installed on purpose (the wizard was cancelled, a piped run
- * without --yes stopped after the banner, or --json / --dry-run
- * printed the plan only). A re-run reuses finished work where possible
- * and repeats the blueprint deploy and start and the skills install by
+ * was installed for lack of a go-ahead (the wizard was cancelled with
+ * Escape — Ctrl+C ends it by signal, 130 on POSIX shells — a piped,
+ * --quiet or JSON-mode run had no --yes, or --json / --dry-run printed
+ * the plan only). A re-run reuses finished work where possible and
+ * repeats the blueprint deploy and start and the skills install by
  * design. 1 when arguments failed validation or any step failed — the
  * remaining eligible steps still ran, dependents of a failed step (and
  * the deploy finale after any failure) were skipped, and re-running
