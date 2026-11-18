@@ -103,23 +103,32 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 	},
 ];
 
-/** Selected component ids when the wizard cannot ask (non-TTY, --yes). */
-export function defaultSelection(): ReadonlySet<SetupComponentId> {
-	const selected = new Set(
-		SETUP_COMPONENTS.filter((c) => c.defaultSelected).map((c) => c.id),
-	);
-	// A component whose requirements are not selected cannot run; each
-	// pass only ever removes, so this settles quickly even for chains.
+/**
+ * Drop components whose requirements are not selected. Each pass only
+ * ever removes, so this settles quickly even for chains. Applied after
+ * flag overrides too, so a flag cannot resurrect a disabled component.
+ */
+export function enforceComponentDependencies(
+	selected: ReadonlySet<SetupComponentId>,
+): Set<SetupComponentId> {
+	const next = new Set(selected);
 	for (let changed = true; changed; ) {
 		changed = false;
 		for (const c of SETUP_COMPONENTS) {
-			if (selected.has(c.id) && c.requires?.some((r) => !selected.has(r.id))) {
-				selected.delete(c.id);
+			if (next.has(c.id) && c.requires?.some((r) => !next.has(r.id))) {
+				next.delete(c.id);
 				changed = true;
 			}
 		}
 	}
-	return selected;
+	return next;
+}
+
+/** Selected component ids when the wizard cannot ask (non-TTY, --yes). */
+export function defaultSelection(): ReadonlySet<SetupComponentId> {
+	return enforceComponentDependencies(
+		new Set(SETUP_COMPONENTS.filter((c) => c.defaultSelected).map((c) => c.id)),
+	);
 }
 
 // ── The ordered plan ───────────────────────────────────────────────

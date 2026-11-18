@@ -1861,6 +1861,11 @@ export const COMMAND_REGISTRY = {
 				type: "boolean",
 				description: "Do not install Desktop Modeler",
 			},
+			"docs-mcp": {
+				type: "boolean",
+				description:
+					"Also configure the docs MCP server (off unless selected or flagged)",
+			},
 		},
 	},
 

@@ -46,6 +46,13 @@ export interface SetupBlueprint {
 	 * inputs to run through without an incident.
 	 */
 	readonly startVariables?: Record<string, unknown>;
+	/**
+	 * When set, setup deploys the project but does not start an instance:
+	 * the process needs something setup cannot provide (credentials,
+	 * inputs). The note tells the user what to configure and how to
+	 * start it themselves afterwards.
+	 */
+	readonly startNote?: string;
 }
 
 export const SETUP_BLUEPRINTS = [
@@ -95,6 +102,13 @@ export const SETUP_BLUEPRINTS = [
 			path: "solutions/ai-agent-chat-with-tools",
 		},
 		processFile: "ai-agent-chat-with-tools.bpmn",
+		// The model calls an LLM through Camunda-provided connector
+		// secrets that exist only on SaaS, and it expects an initial
+		// input — a fresh local cluster cannot run it as-is.
+		startNote:
+			"needs an LLM provider. Configure the AI Agent connector secrets " +
+			"for your cluster, then start a chat instance with: " +
+			`c8ctl create pi --id=ai-agent-chat-with-tools --variables '{"inputText":"Hello!"}'`,
 	},
 ] as const satisfies readonly SetupBlueprint[];
 

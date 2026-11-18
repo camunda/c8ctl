@@ -24,11 +24,7 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import {
-	createClient,
-	DEFAULT_PROFILE,
-	resolveTenantId,
-} from "../core/index.ts";
+import { createClient, DEFAULT_PROFILE } from "../core/index.ts";
 import {
 	type CommandContext,
 	defineCommand,
@@ -43,6 +39,7 @@ import {
 	defaultSelection,
 	deriveAppUrl,
 	detectInstalledHarnesses,
+	enforceComponentDependencies,
 	formatStepResult,
 	MANUAL_SETUP_LINKS,
 	openUrl,
@@ -70,7 +67,16 @@ interface SetupFlags {
 	readonly blueprint?: string;
 	readonly modeler?: boolean;
 	readonly "no-modeler"?: boolean;
+	readonly "docs-mcp"?: boolean;
 }
+
+/**
+ * The tenant of a fresh local C8Run cluster. Pinned explicitly: tenant
+ * resolution otherwise prefers the session tenant and
+ * CAMUNDA_DEFAULT_TENANT_ID, which could name a remote tenant the local
+ * cluster does not know.
+ */
+const LOCAL_TENANT_ID = "<default>";
 
 /** State one step hands to a later one. */
 interface SetupRun {
@@ -78,7 +84,12 @@ interface SetupRun {
 	blueprintDir?: string;
 }
 
-/** Explicit flags override the checkbox selection: --no-modeler wins. */
+/**
+ * Explicit flags override the checkbox selection: --no-modeler wins.
+ * Dependencies are then re-enforced, so a flag cannot resurrect a
+ * component whose requirement is deselected (e.g. --blueprint without
+ * the local cluster).
+ */
 function applyComponentFlags(
 	selected: ReadonlySet<SetupComponentId>,
 	flags: SetupFlags,
@@ -87,7 +98,8 @@ function applyComponentFlags(
 	if (flags["no-modeler"]) next.delete("modeler");
 	else if (flags.modeler) next.add("modeler");
 	if (flags.blueprint !== undefined) next.add("blueprint");
-	return next;
+	if (flags["docs-mcp"]) next.add("docs-mcp");
+	return enforceComponentDependencies(next);
 }
 
 /** The blueprint a non-interactive run would install: the flag, else the first. */
@@ -250,14 +262,24 @@ async function runBlueprintDeploy(
 	}
 
 	// Both mutations target the cluster the health check just probed: the
-	// built-in local profile. An explicit profile name wins over the
-	// session profile and CAMUNDA_* env vars, so a remote active profile
-	// cannot redirect the first-run deployment.
+	// built-in local profile and its default tenant. An explicit profile
+	// and tenant win over the session and CAMUNDA_* env vars, so neither
+	// a remote active profile nor a preselected tenant can redirect the
+	// first-run deployment.
 	await deployResources([deployDir], {
 		profile: DEFAULT_PROFILE,
 		basePath: directory,
 		verbose: ctx.verbose,
+		tenantId: LOCAL_TENANT_ID,
 	});
+
+	if (blueprint.startNote) {
+		logger.info(
+			`The ${blueprint.name} process is deployed but not started: it ${blueprint.startNote}`,
+		);
+		logger.info(`Guide: ${blueprint.guideUrl}`);
+		return;
+	}
 
 	const processFile = join(directory, blueprint.processFile);
 	const processId = extractProcessId(readFileSync(processFile, "utf-8"));
@@ -267,7 +289,7 @@ async function runBlueprintDeploy(
 	logger.info(`Starting a ${blueprint.name} process instance...`);
 	const created = await createClient(DEFAULT_PROFILE).createProcessInstance({
 		processDefinitionId: ProcessDefinitionId.assumeExists(processId),
-		tenantId: TenantId.assumeExists(resolveTenantId(DEFAULT_PROFILE)),
+		tenantId: TenantId.assumeExists(LOCAL_TENANT_ID),
 		...(blueprint.startVariables !== undefined && {
 			variables: blueprint.startVariables,
 		}),
@@ -482,6 +504,12 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		selected = defaultSelection();
 	}
 	selected = applyComponentFlags(selected, flags);
+	if (flags.blueprint !== undefined && !selected.has("blueprint")) {
+		// The flag asked for a blueprint but its dependency was deselected.
+		logger.info("--blueprint is ignored: the local cluster is not selected.", {
+			essential: true,
+		});
+	}
 
 	// Every question comes before any work: pick the blueprint next.
 	let blueprintId = effectiveBlueprint(selected, flags);
@@ -532,7 +560,11 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	}
 	if (failures > 0) {
 		logger.info(
-			`Setup finished with ${failures} failed step(s). Fix the cause and re-run c8ctl setup — completed steps are detected and skipped.`,
+			`Setup finished with ${failures} failed step(s). Fix the cause and re-run c8ctl setup.`,
+			{ essential: true },
+		);
+		logger.info(
+			"Note: an existing blueprint project directory is kept as-is and blocks re-scaffolding — remove it to scaffold again, or deploy it directly with c8ctl deploy.",
 			{ essential: true },
 		);
 		process.exitCode = 1;

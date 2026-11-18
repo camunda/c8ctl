@@ -390,6 +390,9 @@ describe("c8ctl setup", () => {
 			"capture.json",
 		);
 		const stub = stubbedExecution({ capture });
+		// A preselected tenant must not leak into the local deployment:
+		// setup pins the local cluster's default tenant.
+		stub.options.env.CAMUNDA_DEFAULT_TENANT_ID = "remote-tenant";
 		try {
 			const result = await c8WithOptions(
 				stub.options,
@@ -431,6 +434,11 @@ describe("c8ctl setup", () => {
 			const request: unknown = JSON.parse(readFileSync(capture, "utf-8"));
 			assert.ok(isRecord(request), "capture is not an object");
 			assert.strictEqual(request.processDefinitionId, "rocket-launch");
+			assert.strictEqual(
+				request.tenantId,
+				"<default>",
+				"a preselected tenant leaked into the local deployment",
+			);
 			assert.deepStrictEqual(request.variables, {
 				missionName: "Apollo",
 				fuelLevel: 80,
@@ -469,6 +477,79 @@ describe("c8ctl setup", () => {
 			// The project exists but was never deployed.
 			assert.ok(
 				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("--yes --docs-mcp also configures the docs MCP server", async () => {
+		const stub = stubbedExecution();
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--docs-mcp",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Configure the docs MCP server", "SUCCESS");
+			const mcpConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(
+				isRecord(mcpConfig) &&
+					isRecord(mcpConfig.mcpServers) &&
+					isRecord(mcpConfig.mcpServers["camunda-docs"]),
+				"docs MCP server was not written",
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("--docs-mcp plans the docs step non-interactively", async () => {
+		const result = await c8WithOptions(
+			{ env: { C8CTL_OUTPUT_MODE: "text" } },
+			"setup",
+			"--docs-mcp",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /\d+\. Configure the docs MCP server/);
+		assert.doesNotMatch(
+			result.stdout,
+			/- Configure the docs MCP server — skipped/,
+		);
+	});
+
+	test("the ai-agent blueprint is deployed but not started, with guidance", async () => {
+		const capture = join(
+			mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-")),
+			"capture.json",
+		);
+		const stub = stubbedExecution({ capture });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"ai-agent",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			assert.match(out, /Deployment successful/);
+			assert.match(out, /deployed but not started/);
+			assert.match(out, /needs an LLM provider/);
+			assert.match(out, /c8ctl create pi --id=ai-agent-chat-with-tools/);
+			// No process instance was started.
+			assert.ok(
+				!existsSync(capture),
+				"an instance was started despite the missing LLM provider",
 			);
 		} finally {
 			stub.cleanup();
@@ -562,6 +643,30 @@ describe("c8ctl setup", () => {
 			stepLine(out, "Install Desktop Modeler", "SUCCESS");
 			stepLine(out, "Install AI assistant skills", "SUCCESS");
 			// No blueprint project without the cluster.
+			assert.ok(!existsSync(join(stub.cwd, "rocket-launch")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive: --blueprint is ignored when the cluster is deselected", async () => {
+		// The flag cannot resurrect the dependency-disabled blueprint.
+		const stub = stubbedExecution();
+		try {
+			const result = await runInteractive(
+				[{ waitFor: "Docs MCP server", keys: " \r" }],
+				{
+					args: ["--blueprint", "rocket-launch"],
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(
+				stripVTControlCharacters(result.stdout + result.stderr),
+				/--blueprint is ignored: the local cluster is not selected\./,
+			);
 			assert.ok(!existsSync(join(stub.cwd, "rocket-launch")));
 		} finally {
 			stub.cleanup();
