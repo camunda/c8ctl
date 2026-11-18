@@ -11,13 +11,13 @@
       "description": "Optional reference to this schema, for editor support in standalone recipe files. Empty and whitespace-only strings are allowed; null and non-string values are not."
     },
     "schemaVersion": {
-      "const": 1,
-      "description": "Version of this recipe format. The revised version 1 dialect requires explicit upgrade/change kinds and rejects legacy minVersion entries. Earlier strict version 1 readers reject the revised fields; no compatibility reader is provided. A reader that does not know the version must refuse the recipe."
+      "const": 2,
+      "description": "Version of this recipe format. Version 2 replaces `kind` with an optional `sourceTemplateId`: `toVersion` is always required and `minSourceVersion` is optional on any step. A reader that does not know the version must refuse the recipe."
     },
     "sources": {
       "type": "array",
       "minItems": 1,
-      "description": "Explicit upgrade and change entries. Keyed marker uniqueness and recipe-owner ID/version relations require semantic validation in addition to this schema.",
+      "description": "The migration steps, one per released version. Uniqueness of (sourceTemplateId or owner id, toVersion) and the owner-relative version constraints (toVersion <= owner version; for a same-id step also minSourceVersion < toVersion) require semantic validation in addition to this schema.",
       "items": { "$ref": "#/definitions/source" }
     }
   },
@@ -53,37 +53,62 @@
     },
     "source": {
       "type": "object",
-      "required": ["kind", "sourceTemplateId"],
+      "description": "One migration step. Same-id step (`sourceTemplateId` omitted): applies to elements bound to the owner's template whose applied version is below `toVersion` (and at least `minSourceVersion`, if set) and moves them to `toVersion`. An element runs every step above its applied version in ascending order, so a version without a step is a no-op: steps `toVersion: 2` and `toVersion: 4` migrate a v1 element through both and a v2 or v3 element through the second only. Template change (`sourceTemplateId` set): applies to elements bound to that other template at any version (at least `minSourceVersion`, if set) and moves them to the owner's template at `toVersion`, from where the same-id steps above `toVersion` continue the chain (a change with `toVersion: 1` followed by a same-id step with `toVersion: 2` migrates an old element to the owner's v1 and then to v2); the two templates have separate version numbers, so `minSourceVersion` is a version of the old template and `toVersion` a version of the owner. Each step is written once, when its version is released.",
+      "required": ["toVersion"],
       "additionalProperties": false,
-      "oneOf": [
-        { "properties": { "kind": { "const": "upgrade" }, "toVersion": {}, "minSourceVersion": false }, "required": ["toVersion"] },
-        { "properties": { "kind": { "const": "change" }, "toVersion": false } }
-      ],
       "properties": {
-        "kind": { "enum": ["upgrade", "change"] },
         "sourceTemplateId": {
           "type": "string",
           "minLength": 1,
           "pattern": "\\S",
-          "description": "Id of the template an element is migrated from. The target's own id denotes a same-id version step."
+          "description": "Id of the template an element is migrated from. Optional: when omitted it defaults to the recipe owner's own id (a version step of the same template). Set it for a template change."
         },
         "toVersion": {
           "type": "integer",
-          "minimum": 0,
+          "minimum": 1,
           "maximum": 9007199254740991,
-          "description": "Destination template version for an upgrade. Source ID must equal the recipe owner's ID and the version must not exceed the owner's version."
+          "description": "Version of the owner's template the step migrates to. Must not exceed the owner's version. Unique per `sourceTemplateId` within the recipe. Same-id step: the element's version must be below it. Template change: the element switches to the owner's template at this version, whatever its old version was."
         },
         "minSourceVersion": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "Lowest actually reached source version accepted by a change. Omit to accept any reached version. Source ID must differ from the recipe owner's ID."
+          "description": "Optional floor: lowest version of the source template this step accepts. For a same-id step it must be below `toVersion`; for a template change it is a version of the old template and has no relation to `toVersion`. Omit to accept any version. Use it when the step was only written for newer sources, for example a template change that can only carry values over from version 12 upward."
+        },
+        "releaseNote": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Optional release note for this step: a short text for users describing what changes when elements are migrated to `toVersion`. Shown in the migration report when the step runs."
         },
         "paths": {
           "type": "array",
           "default": [],
-          "description": "Mapping entries, applied in order against a snapshot of the source element's values. Missing or empty paths means template application without path rules for either source kind. Values that no entry maps are carried over when the target binds the same key and dropped, with a report line, otherwise.",
+          "description": "Mapping entries, applied in order against a snapshot of the source element's values. Missing or empty paths means template application without path rules. Values that no entry maps are carried over when the target binds the same key and dropped, with a report line, otherwise.",
           "items": { "$ref": "#/definitions/node" }
+        }
+      }
+    },
+    "nodeMetadata": {
+      "type": "object",
+      "description": "Optional metadata of a node: an override of the engine's lossy classification, a risk estimate and fields to revisit. Risk and revisit are shown in the migration report when the node is active.",
+      "additionalProperties": false,
+      "properties": {
+        "lossyOverride": {
+          "type": "boolean",
+          "description": "The lossy classification to use for this node instead of the engine's own. `true`: treat the node as lossy even if the engine sees no lost value, so an in-place write needs `--allow-lossy`. `false`: treat it as not lossy even if the engine would flag a value as lost, for example a value consumed by a rename or a guarded rename that legitimately did not fire. Omit to keep the engine's own classification."
+        },
+        "risk": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Author's risk estimate for this node, from 1 (safe, mechanical) to 5 (can change runtime behaviour or drop data). Shown in the migration report. Informational: it does not change what is written."
+        },
+        "revisit": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/path" },
+          "description": "Binding keys of the target template the user should review by hand after the upgrade, for example a value the migration had to guess. Listed in the migration report when the node is active."
         }
       }
     },
@@ -105,7 +130,8 @@
         "to": { "$ref": "#/definitions/path" },
         "valueMap": { "$ref": "#/definitions/valueMap" },
         "when": { "$ref": "#/definitions/when" },
-        "note": { "$ref": "#/definitions/note" }
+        "note": { "$ref": "#/definitions/note" },
+        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" }
       }
     },
     "set": {
@@ -117,7 +143,8 @@
         "to": { "$ref": "#/definitions/path" },
         "set": { "$ref": "#/definitions/scalar" },
         "when": { "$ref": "#/definitions/when" },
-        "note": { "$ref": "#/definitions/note" }
+        "note": { "$ref": "#/definitions/note" },
+        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" }
       }
     },
     "template": {
@@ -129,7 +156,8 @@
         "to": { "$ref": "#/definitions/path" },
         "template": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "when": { "$ref": "#/definitions/when" },
-        "note": { "$ref": "#/definitions/note" }
+        "note": { "$ref": "#/definitions/note" },
+        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" }
       }
     },
     "group": {
@@ -139,6 +167,7 @@
       "additionalProperties": false,
       "properties": {
         "when": { "$ref": "#/definitions/when" },
+        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" },
         "rules": {
           "type": "array",
           "minItems": 1,
