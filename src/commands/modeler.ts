@@ -726,96 +726,104 @@ async function installOnLinux({
 	}
 }
 
-export const modelerInstallCommand = defineCommand(
-	"modeler",
-	"install",
-	async (ctx) => {
-		if (process.platform === "win32") return installOnWindows(ctx);
-		if (process.platform === "linux") return installOnLinux(ctx);
-		if (process.platform !== "darwin") {
-			throw new Error(
-				`c8ctl modeler install currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
-			);
-		}
+/**
+ * Install the latest Desktop Modeler for this OS, skipping when already
+ * installed. Exported so `c8ctl setup` can run the same installation as a
+ * wizard step without going through the command wrapper (whose error path
+ * owns process exit).
+ */
+export async function installDesktopModeler(
+	ctx: Pick<CommandContext, "isDryRun" | "logger" | "quiet">,
+): Promise<CommandResult> {
+	if (process.platform === "win32") return installOnWindows(ctx);
+	if (process.platform === "linux") return installOnLinux(ctx);
+	if (process.platform !== "darwin") {
+		throw new Error(
+			`c8ctl modeler install currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
+		);
+	}
 
-		const installedPath = findInstalledModeler();
-		if (installedPath) {
+	const installedPath = findInstalledModeler();
+	if (installedPath) {
+		return {
+			kind: "info",
+			message: `Camunda Modeler is already installed at ${installedPath}; skipping installation.`,
+		};
+	}
+
+	if (hasPackageManager("brew", "Homebrew")) {
+		if (
+			isInstalledWith({
+				command: "brew",
+				args: ["list", "--cask", "--versions", "camunda-modeler"],
+				notInstalledStatus: 1,
+				description: "the Homebrew Modeler cask",
+			})
+		) {
 			return {
 				kind: "info",
-				message: `Camunda Modeler is already installed at ${installedPath}; skipping installation.`,
+				message:
+					"Camunda Modeler is already installed with Homebrew; skipping installation.",
 			};
 		}
-
-		if (hasPackageManager("brew", "Homebrew")) {
-			if (
-				isInstalledWith({
-					command: "brew",
-					args: ["list", "--cask", "--versions", "camunda-modeler"],
-					notInstalledStatus: 1,
-					description: "the Homebrew Modeler cask",
-				})
-			) {
-				return {
-					kind: "info",
-					message:
-						"Camunda Modeler is already installed with Homebrew; skipping installation.",
-				};
-			}
-			if (ctx.isDryRun) {
-				return {
-					kind: "dryRun",
-					info: {
-						dryRun: true,
-						command: "modeler install",
-						message:
-							"Dry run: would install Camunda Modeler with `brew install --cask camunda-modeler`.",
-					},
-				};
-			}
-
-			ctx.logger.info("Installing Camunda Modeler with Homebrew...");
-			runCommand("brew", ["install", "--cask", "camunda-modeler"], {
-				failureMessage: "Homebrew could not install Camunda Modeler",
-				quiet: ctx.quiet,
-			});
-			// Homebrew does not register new apps with Launch Services.
-			const brewInstalledPath =
-				findInstalledModeler() ?? resolveHomebrewModelerPath();
-			registerWithLaunchServices(brewInstalledPath, ctx.logger);
-			return {
-				kind: "success",
-				message: "Installed Camunda Modeler with Homebrew.",
-			};
-		}
-
-		const applicationsDir = installApplicationsDir();
 		if (ctx.isDryRun) {
 			return {
 				kind: "dryRun",
 				info: {
 					dryRun: true,
 					command: "modeler install",
-					message: `Dry run: would download the latest stable Camunda Modeler and install it to ${join(applicationsDir, APP_BUNDLE_NAME)}.`,
+					message:
+						"Dry run: would install Camunda Modeler with `brew install --cask camunda-modeler`.",
 				},
 			};
 		}
-		if (applicationsDir !== SYSTEM_APPLICATIONS_DIR) {
-			ctx.logger.info(
-				`${SYSTEM_APPLICATIONS_DIR} is not writable; installing to ${applicationsDir} instead.`,
-			);
-		}
 
-		ctx.logger.info(
-			"Checking for the latest stable Camunda Modeler release...",
-		);
-		const { version, destination } = await installFromOfficialDownload({
-			applicationsDir,
-			logger: ctx.logger,
+		ctx.logger.info("Installing Camunda Modeler with Homebrew...");
+		runCommand("brew", ["install", "--cask", "camunda-modeler"], {
+			failureMessage: "Homebrew could not install Camunda Modeler",
 			quiet: ctx.quiet,
 		});
+		// Homebrew does not register new apps with Launch Services.
+		const brewInstalledPath =
+			findInstalledModeler() ?? resolveHomebrewModelerPath();
+		registerWithLaunchServices(brewInstalledPath, ctx.logger);
 		return {
 			kind: "success",
-			message: `Installed Camunda Modeler ${version} to ${destination}.`,
+			message: "Installed Camunda Modeler with Homebrew.",
 		};
-	},
+	}
+
+	const applicationsDir = installApplicationsDir();
+	if (ctx.isDryRun) {
+		return {
+			kind: "dryRun",
+			info: {
+				dryRun: true,
+				command: "modeler install",
+				message: `Dry run: would download the latest stable Camunda Modeler and install it to ${join(applicationsDir, APP_BUNDLE_NAME)}.`,
+			},
+		};
+	}
+	if (applicationsDir !== SYSTEM_APPLICATIONS_DIR) {
+		ctx.logger.info(
+			`${SYSTEM_APPLICATIONS_DIR} is not writable; installing to ${applicationsDir} instead.`,
+		);
+	}
+
+	ctx.logger.info("Checking for the latest stable Camunda Modeler release...");
+	const { version, destination } = await installFromOfficialDownload({
+		applicationsDir,
+		logger: ctx.logger,
+		quiet: ctx.quiet,
+	});
+	return {
+		kind: "success",
+		message: `Installed Camunda Modeler ${version} to ${destination}.`,
+	};
+}
+
+export const modelerInstallCommand = defineCommand(
+	"modeler",
+	"install",
+	(ctx) => installDesktopModeler(ctx),
 );

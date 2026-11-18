@@ -1828,7 +1828,11 @@ export const COMMAND_REGISTRY = {
 			},
 			{
 				command: "c8ctl setup --yes",
-				description: "Plan with the defaults, without prompting",
+				description: "Set up the defaults, without prompting",
+			},
+			{
+				command: "c8ctl setup --blueprint rocket-launch",
+				description: "Set up the defaults with the Rocket Launch blueprint",
 			},
 		],
 		helpNotes: [
@@ -1836,11 +1840,33 @@ export const COMMAND_REGISTRY = {
 			"install Desktop Modeler, create a starter project from a blueprint,",
 			"deploy and run it, and set up AI assistant skills and MCP servers.",
 			"Nothing is installed without your say.",
-			"Preview: the wizard prints the plan for your selection; the individual",
-			"setup steps land in upcoming releases.",
+			"Steps report [SUCCESS], [ERROR] or [SKIPPED] in order; a failed step",
+			"does not stop the rest. The blueprint needs the local cluster —",
+			"deselect the cluster and the blueprint option is disabled.",
+			"Non-interactive runs (piped output, CI, --json) print the plan only;",
+			"pass --yes to execute it with the defaults.",
 		],
 		resources: [],
-		flags: {},
+		flags: {
+			blueprint: {
+				type: "string",
+				description:
+					"Starter blueprint to install: rocket-launch, service-worker, or ai-agent",
+			},
+			modeler: {
+				type: "boolean",
+				description: "Install Desktop Modeler, whatever the selection",
+			},
+			"no-modeler": {
+				type: "boolean",
+				description: "Do not install Desktop Modeler",
+			},
+			"docs-mcp": {
+				type: "boolean",
+				description:
+					"Also configure the docs MCP server (off unless selected or flagged)",
+			},
+		},
 	},
 
 	watch: {

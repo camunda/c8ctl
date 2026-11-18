@@ -51,6 +51,12 @@ export interface SetupComponent {
 	readonly why: string;
 	/** Pre-checked state, also the non-interactive and --yes default. */
 	readonly defaultSelected: boolean;
+	/**
+	 * Components this one cannot work without: while any of them is
+	 * deselected, this option is greyed out with the reason and forced
+	 * off.
+	 */
+	readonly requires?: readonly { id: SetupComponentId; reason: string }[];
 }
 
 /**
@@ -75,6 +81,7 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 		label: "Starter blueprint",
 		why: "A working example project, deployed and started for you",
 		defaultSelected: true,
+		requires: [{ id: "cluster", reason: "needs the local cluster" }],
 	},
 	{
 		id: "skills",
@@ -96,20 +103,59 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 	},
 ];
 
+/**
+ * Drop components whose requirements are not selected. Each pass only
+ * ever removes, so this settles quickly even for chains. Applied after
+ * flag overrides too, so a flag cannot resurrect a disabled component.
+ */
+export function enforceComponentDependencies(
+	selected: ReadonlySet<SetupComponentId>,
+): Set<SetupComponentId> {
+	const next = new Set(selected);
+	for (let changed = true; changed; ) {
+		changed = false;
+		for (const c of SETUP_COMPONENTS) {
+			if (next.has(c.id) && c.requires?.some((r) => !next.has(r.id))) {
+				next.delete(c.id);
+				changed = true;
+			}
+		}
+	}
+	return next;
+}
+
 /** Selected component ids when the wizard cannot ask (non-TTY, --yes). */
 export function defaultSelection(): ReadonlySet<SetupComponentId> {
-	return new Set(
-		SETUP_COMPONENTS.filter((c) => c.defaultSelected).map((c) => c.id),
+	return enforceComponentDependencies(
+		new Set(SETUP_COMPONENTS.filter((c) => c.defaultSelected).map((c) => c.id)),
 	);
 }
 
 // ── The ordered plan ───────────────────────────────────────────────
 
+export type SetupStepId =
+	| "prerequisites"
+	| "install-c8run"
+	| "start-cluster"
+	| "install-modeler"
+	| "scaffold-blueprint"
+	| "deploy-blueprint"
+	| "install-skills"
+	| "cluster-mcp"
+	| "docs-mcp"
+	| "open-operate";
+
 export interface SetupStep {
+	readonly id: SetupStepId;
 	readonly title: string;
 	readonly detail: string;
 	/** The component this step belongs to; null = always runs. */
 	readonly component: SetupComponentId | null;
+	/**
+	 * Steps that must have succeeded for this step to run; otherwise it
+	 * is reported as skipped with the unmet steps named.
+	 */
+	readonly dependsOn?: readonly SetupStepId[];
 }
 
 /**
@@ -118,56 +164,94 @@ export interface SetupStep {
  */
 export const SETUP_STEPS: readonly SetupStep[] = [
 	{
+		id: "prerequisites",
 		title: "Check prerequisites",
 		detail: "Node.js ≥ 22.18, supported OS, network access",
 		component: null,
 	},
 	{
+		id: "install-c8run",
 		title: "Install Camunda 8 Run",
 		detail: "download the latest release",
 		component: "cluster",
 	},
 	{
+		id: "start-cluster",
 		title: "Start the local cluster",
 		detail: "wait until it reports healthy",
 		component: "cluster",
+		dependsOn: ["install-c8run"],
 	},
 	{
+		id: "install-modeler",
 		title: "Install Desktop Modeler",
 		detail: "the visual BPMN editor",
 		component: "modeler",
 	},
 	{
-		title: "Pick a blueprint, create the project",
+		id: "scaffold-blueprint",
+		title: "Create the blueprint project",
 		detail: "Rocket Launch, Service worker, or AI agent",
 		component: "blueprint",
 	},
 	{
+		id: "deploy-blueprint",
 		title: "Deploy and start the process",
 		detail: "your first running process instance",
 		component: "blueprint",
+		dependsOn: ["scaffold-blueprint", "start-cluster"],
 	},
 	{
+		id: "install-skills",
 		title: "Install AI assistant skills",
 		detail: "for the AI coding tools found on this machine",
 		component: "skills",
 	},
 	{
+		id: "cluster-mcp",
 		title: "Configure the cluster MCP server",
 		detail: "connect your AI assistant to the cluster",
 		component: "cluster-mcp",
+		dependsOn: ["start-cluster"],
 	},
 	{
+		id: "docs-mcp",
 		title: "Configure the docs MCP server",
 		detail: "Camunda 8 documentation in your AI assistant",
 		component: "docs-mcp",
 	},
 	{
+		id: "open-operate",
 		title: "Open Operate",
 		detail: "http://localhost:8080/operate — log in with demo/demo",
 		component: "cluster",
+		dependsOn: ["start-cluster"],
 	},
 ];
+
+// ── Step results ───────────────────────────────────────────────────
+
+export type SetupStepStatus = "success" | "error" | "skipped";
+
+const STATUS_TAGS: Record<SetupStepStatus, string> = {
+	success: "[SUCCESS]",
+	error: "[ERROR]",
+	skipped: "[SKIPPED]",
+};
+
+/**
+ * One finished step, aligned for a wizard report: the title followed by
+ * a dot leader and the status tag in a fixed column. `width` is the
+ * longest title in the plan, so the tags line up.
+ */
+export function formatStepResult(
+	title: string,
+	status: SetupStepStatus,
+	width: number,
+): string {
+	const dots = ".".repeat(Math.max(2, width - title.length + 2));
+	return `  ${title} ${dots} ${STATUS_TAGS[status]}`;
+}
 
 // ── Welcome banner ─────────────────────────────────────────────────
 
@@ -231,8 +315,7 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 
 /**
  * The tailored step plan for a selection: chosen steps numbered with
- * their detail, unchosen steps dimmed and marked as skipped. Ends with
- * the skeleton honesty note — nothing has been installed yet.
+ * their detail, unchosen steps dimmed and marked as skipped.
  */
 export function renderSetupPlan(
 	selected: ReadonlySet<SetupComponentId>,
@@ -258,20 +341,17 @@ export function renderSetupPlan(
 		}
 	}
 	lines.push("");
-	lines.push(
-		`  ${s.brand}✨${s.reset} Nothing was installed — this preview prints the plan only.`,
-	);
-	lines.push(
-		`  ${s.dim}Real execution lands with the next setup steps.${s.reset}`,
-	);
-	lines.push("");
 	return lines.join("\n");
 }
 
 /** Structured plan for JSON output mode and --dry-run. */
-export function setupPlanPayload(selected: ReadonlySet<SetupComponentId>): {
+export function setupPlanPayload(
+	selected: ReadonlySet<SetupComponentId>,
+	{ blueprint }: { blueprint?: string } = {},
+): {
 	command: string;
 	preview: true;
+	blueprint: string | null;
 	components: readonly { id: string; label: string; selected: boolean }[];
 	steps: readonly {
 		title: string;
@@ -282,6 +362,7 @@ export function setupPlanPayload(selected: ReadonlySet<SetupComponentId>): {
 	return {
 		command: "setup",
 		preview: true,
+		blueprint: blueprint ?? null,
 		components: SETUP_COMPONENTS.map((c) => ({
 			id: c.id,
 			label: c.label,

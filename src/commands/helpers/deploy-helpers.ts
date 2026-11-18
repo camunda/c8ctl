@@ -899,10 +899,13 @@ export async function deployResources(
 		/** Plan resolved earlier in the same invocation (see
 		 *  `collectResourcesForPaths`); descriptors are then not re-read. */
 		plan?: DeployPathPlan[];
+		/** Explicit tenant, bypassing session/env resolution. `c8ctl setup`
+		 *  uses it to pin the local cluster's default tenant. */
+		tenantId?: string;
 	},
 ): Promise<void> {
 	const logger = getLogger();
-	const tenantId = resolveTenantId(options.profile);
+	const tenantId = options.tenantId ?? resolveTenantId(options.profile);
 
 	// ─── Pre-API-call validation and preparation ────────────────────────
 	// These steps run OUTSIDE any try/catch so validation errors bubble

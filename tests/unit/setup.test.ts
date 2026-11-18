@@ -1,26 +1,42 @@
 /**
- * Behavioural tests for `c8ctl setup` (the skeleton): registration,
- * welcome + plan output, --dry-run, help, completion, and the
- * interactive checkbox list driven through a fake TTY.
+ * Behavioural tests for `c8ctl setup`: registration, welcome + plan
+ * output, --dry-run, help, completion, the interactive prompts driven
+ * through a fake TTY (including the cluster→blueprint dependency), and
+ * full execution of every step against the offline stub in
+ * tests/utils/setup-stub.ts (cluster child processes, GitHub, the
+ * Orchestration Cluster API, Modeler detection, gh, browser).
  */
 
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import { isRecord } from "../../src/core/index.ts";
 import { c8, c8WithOptions } from "../utils/cli.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
 const FAKE_TTY = pathToFileURL(
 	resolve(import.meta.dirname, "..", "utils", "fake-tty.ts"),
 ).href;
+const SETUP_STUB = pathToFileURL(
+	resolve(import.meta.dirname, "..", "utils", "setup-stub.ts"),
+).href;
 
 const BRAND_BLUE = "\x1b[38;2;79;57;246m";
 const PROMPT_TEXT = "What should we set up for you?";
+const BLUEPRINT_PROMPT_TEXT = "Which starter blueprint should we install?";
 
 interface InteractiveResult {
 	status: number | null;
@@ -28,9 +44,16 @@ interface InteractiveResult {
 	stderr: string;
 }
 
+interface KeyStage {
+	/** stderr marker that arms this stage. */
+	waitFor: string;
+	/** Keys written (stdin closed) once the marker appears. */
+	keys: string;
+}
+
 /**
- * Spawn `c8ctl setup` under a fake TTY, wait for the checkbox list to
- * render, then send the keystrokes. Mirrors the prompt driver in
+ * Spawn `c8ctl setup` under a fake TTY, then send each stage's keys when
+ * its marker renders on stderr. Mirrors the prompt driver in
  * tests/utils/deploy-resources.ts.
  *
  * The child env forwards the isolated C8CTL_DATA_DIR from the test
@@ -41,9 +64,21 @@ interface InteractiveResult {
  * the SIGKILL safety net.
  */
 function runInteractive(
-	keys: string,
-	args: string[] = [],
-	fallbackKeys = "\x1b",
+	stages: KeyStage[],
+	{
+		args = [],
+		env = {},
+		nodeArgs = [],
+		cwd,
+		fallbackKeys = "\x1b",
+	}: {
+		args?: string[];
+		env?: Record<string, string>;
+		nodeArgs?: string[];
+		/** Working directory — pass a temp dir for runs that scaffold. */
+		cwd?: string;
+		fallbackKeys?: string;
+	} = {},
 ): Promise<InteractiveResult> {
 	const forwardedDataDir = process.env.C8CTL_DATA_DIR;
 	const ownDataDir = forwardedDataDir
@@ -56,29 +91,32 @@ function runInteractive(
 				"--experimental-strip-types",
 				"--import",
 				FAKE_TTY,
+				...nodeArgs,
 				CLI,
 				"setup",
 				...args,
 			],
 			{
 				stdio: ["pipe", "pipe", "pipe"],
+				...(cwd !== undefined ? { cwd } : {}),
 				env: {
 					PATH: process.env.PATH,
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: forwardedDataDir ?? ownDataDir,
 					C8CTL_INTERACTIVE: "true",
 					C8CTL_OUTPUT_MODE: "text",
+					...env,
 				},
 			},
 		);
 		let stdout = "";
 		let stderr = "";
-		let sent = false;
-		const sendKeys = (value: string) => {
-			if (!sent) {
-				sent = true;
-				child.stdin.end(value);
-			}
+		let stageIndex = 0;
+		const sendStage = () => {
+			if (stageIndex >= stages.length) return;
+			child.stdin.write(stages[stageIndex].keys);
+			stageIndex += 1;
+			if (stageIndex >= stages.length) child.stdin.end();
 		};
 		child.stdout.setEncoding("utf-8");
 		child.stderr.setEncoding("utf-8");
@@ -87,13 +125,23 @@ function runInteractive(
 		});
 		child.stderr.on("data", (chunk: string) => {
 			stderr += chunk;
-			// The last menu row signals the list has rendered; piped stdin
+			// The marker row signals the prompt has rendered; piped stdin
 			// buffers, so the keys are delivered once the prompt listens.
-			if (stderr.includes("Docs MCP server")) sendKeys(keys);
+			if (
+				stageIndex < stages.length &&
+				stderr.includes(stages[stageIndex].waitFor)
+			) {
+				sendStage();
+			}
 		});
 		// If no menu renders (e.g. a mode that must not prompt), close
 		// stdin with the fallback keys so the child can exit on its own.
-		const fallback = setTimeout(() => sendKeys(fallbackKeys), 5_000);
+		const fallback = setTimeout(() => {
+			if (stageIndex === 0) {
+				child.stdin.end(fallbackKeys);
+				stageIndex = stages.length;
+			}
+		}, 5_000);
 		// Safety net only: a stuck prompt must not hang the test runner.
 		const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
 		child.on("error", rejectRun);
@@ -104,6 +152,87 @@ function runInteractive(
 			resolveRun({ status, stdout, stderr });
 		});
 	});
+}
+
+/**
+ * An offline execution sandbox for `c8ctl setup --yes`:
+ * - a temp working directory the blueprint project is scaffolded into
+ * - a fake `camunda-modeler` executable (the Linux installed-lookup;
+ *   macOS/Windows detection is patched in the stub itself)
+ * - a fixture HOME with a `.claude` directory, so harness detection
+ *   finds Claude Code and every harness config root (HOME, USERPROFILE,
+ *   APPDATA, XDG_CONFIG_HOME) points into the fixture — a harness found
+ *   on the host PATH can never write to a real user config
+ * - the fetch/fs/child-process stub preload
+ */
+function stubbedExecution({
+	clusterUp = false,
+	failStep,
+	capture,
+}: {
+	clusterUp?: boolean;
+	/** Step id whose child process exits 1 (e.g. "install-c8run"). */
+	failStep?: string;
+	/** File the process-instance request body is captured into. */
+	capture?: string;
+} = {}): {
+	cwd: string;
+	home: string;
+	options: {
+		cwd: string;
+		nodeArgs: string[];
+		env: Record<string, string>;
+	};
+	cleanup: () => void;
+} {
+	const cwd = mkdtempSync(join(tmpdir(), "c8ctl-setup-run-"));
+	const bin = join(cwd, "bin");
+	const home = join(cwd, "home");
+	mkdirSync(join(home, ".claude"), { recursive: true });
+	mkdirSync(bin);
+	const fakeModeler = join(bin, "camunda-modeler");
+	writeFileSync(fakeModeler, "#!/bin/sh\n");
+	chmodSync(fakeModeler, 0o755);
+	return {
+		cwd,
+		home,
+		options: {
+			cwd,
+			nodeArgs: ["--import", SETUP_STUB],
+			env: {
+				C8CTL_OUTPUT_MODE: "text",
+				PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+				HOME: home,
+				USERPROFILE: home,
+				APPDATA: join(home, "AppData", "Roaming"),
+				XDG_CONFIG_HOME: join(home, ".config"),
+				// These take precedence over HOME in the MCP helper — pin them
+				// into the fixture as well, or a developer who exports them
+				// would have their real harness config rewritten by the test.
+				CLAUDE_CONFIG_DIR: join(home, ".claude"),
+				COPILOT_HOME: join(home, ".copilot"),
+				...(clusterUp ? { C8CTL_SETUP_STUB_CLUSTER: "up" } : {}),
+				...(failStep ? { C8CTL_SETUP_STUB_FAIL: failStep } : {}),
+				...(capture ? { C8CTL_SETUP_STUB_CAPTURE: capture } : {}),
+			},
+		},
+		cleanup: () => rmSync(cwd, { recursive: true, force: true }),
+	};
+}
+
+/** Every step title followed by its status tag. */
+function stepLine(
+	out: string,
+	title: string,
+	tag: "SUCCESS" | "ERROR" | "SKIPPED",
+): void {
+	assert.match(
+		out,
+		new RegExp(
+			`${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\.+ \\[${tag}\\]`,
+		),
+		`expected "${title} … [${tag}]" in:\n${out}`,
+	);
 }
 
 describe("c8ctl setup", () => {
@@ -122,6 +251,25 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(docsMcp.selected, false);
 	});
 
+	test("JSON mode never executes: it prints the plan only", async () => {
+		const stub = stubbedExecution();
+		try {
+			const result = await c8WithOptions(
+				{ nodeArgs: stub.options.nodeArgs, cwd: stub.cwd },
+				"setup",
+				"--yes",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const payload = JSON.parse(result.stdout);
+			assert.strictEqual(payload.command, "setup");
+			assert.strictEqual(payload.blueprint, "rocket-launch");
+			// Nothing was scaffolded, though --yes would execute in text mode.
+			assert.ok(!existsSync(join(stub.cwd, "rocket-launch")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("text mode prints the welcome banner and the step overview", async () => {
 		const result = await c8WithOptions(
 			{ env: { C8CTL_OUTPUT_MODE: "text" } },
@@ -132,20 +280,10 @@ describe("c8ctl setup", () => {
 		assert.match(result.stdout, /Here's what c8ctl setup will do:/);
 		assert.match(result.stdout, /01\. Check prerequisites/);
 		assert.match(result.stdout, /- Configure the docs MCP server — skipped/);
+		// Without --yes or an interactive selection nothing is executed.
+		assert.match(result.stdout, /Nothing was installed\./);
 		// Non-interactive output is plain: no ANSI escapes on stdout.
 		assert.strictEqual(result.stdout, stripVTControlCharacters(result.stdout));
-	});
-
-	test("--yes plans with the defaults without prompting", async () => {
-		const result = await c8WithOptions(
-			{ env: { C8CTL_OUTPUT_MODE: "text" } },
-			"setup",
-			"--yes",
-		);
-		assert.strictEqual(result.status, 0, result.stderr);
-		assert.doesNotMatch(result.stderr, /What should we set up/);
-		assert.match(result.stdout, /01\. Check prerequisites/);
-		assert.doesNotMatch(result.stdout, /run interactively to choose/);
 	});
 
 	test("--dry-run emits a JSON preview without running anything", async () => {
@@ -155,6 +293,49 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(payload.dryRun, true);
 		assert.strictEqual(payload.command, "setup");
 		assert.ok(Array.isArray(payload.steps));
+	});
+
+	test("--dry-run --blueprint reports the requested blueprint", async () => {
+		const result = await c8("setup", "--dry-run", "--blueprint", "ai-agent");
+		assert.strictEqual(result.status, 0, result.stderr);
+		const payload = JSON.parse(result.stdout);
+		assert.strictEqual(payload.blueprint, "ai-agent");
+	});
+
+	test("an unknown --blueprint id fails and lists the valid ids", async () => {
+		const result = await c8WithOptions(
+			{ env: { C8CTL_OUTPUT_MODE: "text" } },
+			"setup",
+			"--blueprint",
+			"bogus",
+		);
+		assert.strictEqual(result.status, 1, result.stdout);
+		const out = stripVTControlCharacters(result.stdout + result.stderr);
+		assert.match(
+			out,
+			/Unknown blueprint "bogus"\. Available blueprints: rocket-launch, service-worker, ai-agent\./,
+		);
+	});
+
+	test("--no-modeler marks the modeler step skipped", async () => {
+		const result = await c8WithOptions(
+			{ env: { C8CTL_OUTPUT_MODE: "text" } },
+			"setup",
+			"--no-modeler",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /- Install Desktop Modeler — skipped/);
+	});
+
+	test("--no-modeler wins over --modeler", async () => {
+		const result = await c8WithOptions(
+			{ env: { C8CTL_OUTPUT_MODE: "text" } },
+			"setup",
+			"--modeler",
+			"--no-modeler",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /- Install Desktop Modeler — skipped/);
 	});
 
 	test("--help documents the command", async () => {
@@ -170,7 +351,7 @@ describe("c8ctl setup", () => {
 		);
 	});
 
-	test("help setup shows the detailed page with notes", async () => {
+	test("help setup shows the detailed page with notes and flags", async () => {
 		const result = await c8WithOptions(
 			{ env: { C8CTL_OUTPUT_MODE: "text" } },
 			"help",
@@ -179,7 +360,9 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Usage: c8ctl setup/);
 		assert.match(result.stdout, /Nothing is installed without your say\./);
-		assert.match(result.stdout, /Preview: the wizard prints the plan/);
+		assert.match(result.stdout, /\[SUCCESS\]/);
+		assert.match(result.stdout, /--blueprint/);
+		assert.match(result.stdout, /--no-modeler/);
 	});
 
 	test("top-level help lists setup with its example", async () => {
@@ -201,28 +384,335 @@ describe("c8ctl setup", () => {
 		assert.match(result.stdout, /setup/);
 	});
 
-	test("interactive: toggling the cluster off skips its steps", async () => {
-		// Space on the highlighted "Local cluster" row, then Enter.
-		const result = await runInteractive(" \r");
-		assert.strictEqual(result.status, 0, result.stderr);
-		assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
-		assert.ok(
-			result.stderr.includes(BRAND_BLUE),
-			"banner is not brand-colored",
+	test("--yes runs every selected step and reports [SUCCESS] per step", async () => {
+		const capture = join(
+			mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-")),
+			"capture.json",
 		);
-		// stdout is piped here: the plan must stay plain text even though
-		// the session is interactive and the banner on stderr is colored.
-		assert.strictEqual(result.stdout, stripVTControlCharacters(result.stdout));
-		const plan = stripVTControlCharacters(result.stdout);
-		assert.match(plan, /01\. Check prerequisites/);
-		assert.match(plan, /- Install Camunda 8 Run — skipped/);
-		assert.match(plan, /- Start the local cluster — skipped/);
-		assert.match(plan, /02\. Install Desktop Modeler/);
-		assert.match(plan, /Nothing was installed/);
+		const stub = stubbedExecution({ capture });
+		// A preselected tenant must not leak into the local deployment:
+		// setup pins the local cluster's default tenant.
+		stub.options.env.CAMUNDA_DEFAULT_TENANT_ID = "remote-tenant";
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.doesNotMatch(result.stderr, /What should we set up/);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Check prerequisites", "SUCCESS");
+			stepLine(out, "Install Camunda 8 Run", "SUCCESS");
+			stepLine(out, "Start the local cluster", "SUCCESS");
+			stepLine(out, "Install Desktop Modeler", "SUCCESS");
+			stepLine(out, "Create the blueprint project", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
+			stepLine(out, "Open Operate", "SUCCESS");
+			assert.doesNotMatch(out, /Configure the docs MCP server .+ \[/);
+			assert.match(out, /Deployment successful/);
+			assert.match(out, /Process instance created/);
+			assert.match(out, /Setup finished\./);
+			// The project was scaffolded into the working directory.
+			assert.ok(
+				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+				"blueprint was not scaffolded",
+			);
+			// The cluster MCP server was written into the fixture harness
+			// (CLAUDE_CONFIG_DIR is pinned into the fixture home).
+			const mcpConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(isRecord(mcpConfig) && isRecord(mcpConfig.mcpServers));
+			assert.ok(isRecord(mcpConfig.mcpServers.camunda));
+			// The Rocket Launch model needs mission inputs to run through;
+			// setup starts the instance with the blueprint's variables.
+			const request: unknown = JSON.parse(readFileSync(capture, "utf-8"));
+			assert.ok(isRecord(request), "capture is not an object");
+			assert.strictEqual(request.processDefinitionId, "rocket-launch");
+			assert.strictEqual(
+				request.tenantId,
+				"<default>",
+				"a preselected tenant leaked into the local deployment",
+			);
+			assert.deepStrictEqual(request.variables, {
+				missionName: "Apollo",
+				fuelLevel: 80,
+			});
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("a failed step reports [ERROR], skips dependents, and the rest still runs", async () => {
+		const stub = stubbedExecution({ failStep: "install-c8run" });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Install Camunda 8 Run", "ERROR");
+			assert.match(out, /c8ctl cluster install failed \(exit code 1\)\./);
+			// Dependents are skipped with the unmet step named.
+			stepLine(out, "Start the local cluster", "SKIPPED");
+			stepLine(out, "Deploy and start the process", "SKIPPED");
+			stepLine(out, "Configure the cluster MCP server", "SKIPPED");
+			stepLine(out, "Open Operate", "SKIPPED");
+			assert.match(out, /needs: Install Camunda 8 Run/);
+			assert.match(out, /needs: Start the local cluster/);
+			// Unrelated steps still ran.
+			stepLine(out, "Install Desktop Modeler", "SUCCESS");
+			stepLine(out, "Create the blueprint project", "SUCCESS");
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			assert.match(out, /Setup finished with 1 failed step/);
+			// The project exists but was never deployed.
+			assert.ok(
+				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("--yes --docs-mcp also configures the docs MCP server", async () => {
+		const stub = stubbedExecution();
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--docs-mcp",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Configure the docs MCP server", "SUCCESS");
+			const mcpConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(
+				isRecord(mcpConfig) &&
+					isRecord(mcpConfig.mcpServers) &&
+					isRecord(mcpConfig.mcpServers["camunda-docs"]),
+				"docs MCP server was not written",
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("--docs-mcp plans the docs step non-interactively", async () => {
+		const result = await c8WithOptions(
+			{ env: { C8CTL_OUTPUT_MODE: "text" } },
+			"setup",
+			"--docs-mcp",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /\d+\. Configure the docs MCP server/);
+		assert.doesNotMatch(
+			result.stdout,
+			/- Configure the docs MCP server — skipped/,
+		);
+	});
+
+	test("the ai-agent blueprint is deployed but not started, with guidance", async () => {
+		const capture = join(
+			mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-")),
+			"capture.json",
+		);
+		const stub = stubbedExecution({ capture });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"ai-agent",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			assert.match(out, /Deployment successful/);
+			assert.match(out, /deployed but not started/);
+			assert.match(out, /needs an LLM provider/);
+			assert.match(
+				out,
+				/c8ctl create pi --id=ai-agent-chat-with-tools .* --profile local/,
+			);
+			// No process instance was started.
+			assert.ok(
+				!existsSync(capture),
+				"an instance was started despite the missing LLM provider",
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("a failed scaffold skips the deploy step instead of failing it too", async () => {
+		const stub = stubbedExecution();
+		try {
+			// The destination exists and is not empty, so scaffolding refuses.
+			mkdirSync(join(stub.cwd, "rocket-launch"));
+			writeFileSync(join(stub.cwd, "rocket-launch", "README.md"), "occupied\n");
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Create the blueprint project", "ERROR");
+			assert.match(out, /already exists and is not empty/);
+			stepLine(out, "Deploy and start the process", "SKIPPED");
+			assert.match(out, /needs: Create the blueprint project/);
+			// One failed step, not two.
+			assert.match(out, /Setup finished with 1 failed step/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("a failed skills install does not stop the remaining steps", async () => {
+		const stub = stubbedExecution({ failStep: "install-skills" });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Install AI assistant skills", "ERROR");
+			assert.match(out, /GitHub CLI failed to install Camunda skills/);
+			// The steps after it are independent and still succeeded.
+			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
+			stepLine(out, "Open Operate", "SUCCESS");
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive: toggling the cluster off disables the blueprint", async () => {
+		// Space on the highlighted "Local cluster" row, then Enter. The
+		// blueprint option is dependency-disabled, so no blueprint prompt.
+		const stub = stubbedExecution();
+		try {
+			const result = await runInteractive(
+				[{ waitFor: "Docs MCP server", keys: " \r" }],
+				{
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
+			assert.ok(
+				!result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
+				"blueprint prompt should not render when the cluster is off",
+			);
+			assert.match(
+				stripVTControlCharacters(result.stderr),
+				/Starter blueprint.*— needs the local cluster/,
+			);
+			assert.ok(
+				result.stderr.includes(BRAND_BLUE),
+				"banner is not brand-colored",
+			);
+			// stdout is piped here: output must stay plain text even though
+			// the session is interactive and the banner on stderr is colored.
+			assert.strictEqual(
+				result.stdout,
+				stripVTControlCharacters(result.stdout),
+			);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			assert.match(out, /- Install Camunda 8 Run — skipped/);
+			assert.match(out, /- Create the blueprint project — skipped/);
+			stepLine(out, "Install Desktop Modeler", "SUCCESS");
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			// No blueprint project without the cluster.
+			assert.ok(!existsSync(join(stub.cwd, "rocket-launch")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive: --blueprint is ignored when the cluster is deselected", async () => {
+		// The flag cannot resurrect the dependency-disabled blueprint.
+		const stub = stubbedExecution();
+		try {
+			const result = await runInteractive(
+				[{ waitFor: "Docs MCP server", keys: " \r" }],
+				{
+					args: ["--blueprint", "rocket-launch"],
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(
+				stripVTControlCharacters(result.stdout + result.stderr),
+				/--blueprint is ignored: the local cluster is not selected\./,
+			);
+			assert.ok(!existsSync(join(stub.cwd, "rocket-launch")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive: defaults run the whole setup end to end", async () => {
+		const stub = stubbedExecution();
+		try {
+			const result = await runInteractive(
+				[
+					{ waitFor: "Docs MCP server", keys: "\r" },
+					{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\r" },
+				],
+				{
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
+			assert.ok(
+				result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
+				"blueprint prompt not rendered",
+			);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Check prerequisites", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			assert.match(out, /Setup finished\./);
+			assert.ok(
+				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+		} finally {
+			stub.cleanup();
+		}
 	});
 
 	test("interactive terminal with --json never prompts and prints the plan", async () => {
-		const result = await runInteractive("\x1b", ["--json"]);
+		const result = await runInteractive(
+			[{ waitFor: PROMPT_TEXT, keys: "\x1b" }],
+			{ args: ["--json"] },
+		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.doesNotMatch(result.stderr, new RegExp(PROMPT_TEXT));
 		const payload = JSON.parse(result.stdout);
@@ -232,9 +722,21 @@ describe("c8ctl setup", () => {
 	});
 
 	test("interactive: Escape cancels without printing a plan", async () => {
-		const result = await runInteractive("\x1b");
+		const result = await runInteractive([
+			{ waitFor: "Docs MCP server", keys: "\x1b" },
+		]);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Cancelled — nothing was changed\./);
 		assert.doesNotMatch(result.stdout, /Check prerequisites/);
+	});
+
+	test("interactive: Escape at the blueprint choice cancels too", async () => {
+		const result = await runInteractive([
+			{ waitFor: "Docs MCP server", keys: "\r" },
+			{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\x1b" },
+		]);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /Cancelled — nothing was changed\./);
+		assert.doesNotMatch(result.stdout, /Setup finished\./);
 	});
 });

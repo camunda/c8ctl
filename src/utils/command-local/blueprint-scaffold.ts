@@ -29,6 +29,30 @@ export interface SetupBlueprint {
 	readonly description: string;
 	readonly guideUrl: string;
 	readonly source: BlueprintSource;
+	/**
+	 * Directory to deploy, relative to the scaffolded project root. Some
+	 * projects carry several copies of a model (e.g. one per worker
+	 * language); deploying the whole project would deploy the same
+	 * definition twice, which Camunda rejects. Default: the project root.
+	 */
+	readonly deployPath?: string;
+	/**
+	 * The BPMN file whose process setup starts after deploying, relative
+	 * to the scaffolded project root.
+	 */
+	readonly processFile: string;
+	/**
+	 * Variables for the first process instance, where the model needs
+	 * inputs to run through without an incident.
+	 */
+	readonly startVariables?: Record<string, unknown>;
+	/**
+	 * When set, setup deploys the project but does not start an instance:
+	 * the process needs something setup cannot provide (credentials,
+	 * inputs). The note tells the user what to configure and how to
+	 * start it themselves afterwards.
+	 */
+	readonly startNote?: string;
 }
 
 export const SETUP_BLUEPRINTS = [
@@ -44,6 +68,10 @@ export const SETUP_BLUEPRINTS = [
 			ref: "main",
 			path: "1-rocket-launch",
 		},
+		processFile: "rocket-launch.bpmn",
+		// The mission decision reads these; the upstream quick-start's
+		// "full send" launch.
+		startVariables: { missionName: "Apollo", fuelLevel: 80 },
 	},
 	{
 		id: "service-worker",
@@ -56,6 +84,10 @@ export const SETUP_BLUEPRINTS = [
 			ref: "main",
 			path: "2-order-process-with-service-workers",
 		},
+		// The worker implementations each embed a copy of the model; only
+		// the bpmn/ directory is deployed.
+		deployPath: "bpmn",
+		processFile: "bpmn/order-process.bpmn",
 	},
 	{
 		id: "ai-agent",
@@ -69,6 +101,14 @@ export const SETUP_BLUEPRINTS = [
 			ref: "main",
 			path: "solutions/ai-agent-chat-with-tools",
 		},
+		processFile: "ai-agent-chat-with-tools.bpmn",
+		// The model calls an LLM through Camunda-provided connector
+		// secrets that exist only on SaaS, and it expects an initial
+		// input — a fresh local cluster cannot run it as-is.
+		startNote:
+			"needs an LLM provider. Configure the AI Agent connector secrets " +
+			"for your cluster, then start a chat instance with: " +
+			`c8ctl create pi --id=ai-agent-chat-with-tools --variables '{"inputText":"Hello!"}' --profile local`,
 	},
 ] as const satisfies readonly SetupBlueprint[];
 
@@ -144,7 +184,8 @@ interface DownloadedFile {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-function blueprintById(id: string): SetupBlueprint {
+/** The curated blueprint with this id; throws an error listing the valid ids. */
+export function setupBlueprintById(id: string): SetupBlueprint {
 	const blueprint = SETUP_BLUEPRINTS.find((candidate) => candidate.id === id);
 	if (blueprint) return blueprint;
 	const ids = SETUP_BLUEPRINTS.map((candidate) => candidate.id).join(", ");
@@ -386,7 +427,7 @@ export async function scaffoldSetupBlueprint({
 	onProgress,
 	timeoutMs = DEFAULT_TIMEOUT_MS,
 }: ScaffoldSetupBlueprintOptions): Promise<ScaffoldedSetupBlueprint> {
-	const blueprint = blueprintById(id);
+	const blueprint = setupBlueprintById(id);
 	const directory = resolve(cwd, destinationDir ?? blueprint.id);
 	assertDestinationAvailable(directory);
 

@@ -412,6 +412,13 @@ export interface MultiSelectOption<T> {
 	value: T;
 	/** Initially checked (default: false). Also the non-interactive default. */
 	checked?: boolean;
+	/**
+	 * This option depends on other options: while any listed value is
+	 * unchecked, this row is forced off, greyed out with the reason, and
+	 * cannot be toggled. Values are compared with Object.is. Re-checking
+	 * the requirement re-enables the row (still unchecked).
+	 */
+	requires?: readonly { value: T; reason: string }[];
 }
 
 export interface MultiSelectConfig<T> {
@@ -463,6 +470,41 @@ const DEFAULT_MULTISELECT_KEY_HINT =
 	"↑/↓ move · space toggle · a all · enter confirm · esc cancel";
 
 /**
+ * Evaluate a checkbox list with dependencies: an option counts as
+ * checked only when every option it requires is itself effectively
+ * checked. Passes only ever uncheck options, so the fixpoint settles
+ * within options.length iterations even for chains (a needs b, b
+ * needs c).
+ */
+function evaluateChecked<T>(
+	options: ReadonlyArray<MultiSelectOption<T>>,
+	checked: boolean[],
+): { effective: boolean[]; reasons: (string | undefined)[] } {
+	let effective = [...checked];
+	let reasons: (string | undefined)[] = options.map(() => undefined);
+	for (let pass = 0; pass < options.length; pass++) {
+		reasons = options.map((opt) => {
+			const unmet = opt.requires?.find((req) => {
+				const reqIndex = options.findIndex((o) =>
+					Object.is(o.value, req.value),
+				);
+				return reqIndex === -1 || !effective[reqIndex];
+			});
+			return unmet?.reason;
+		});
+		const next = options.map(
+			(_, i) => checked[i] === true && reasons[i] === undefined,
+		);
+		if (next.every((v, i) => v === effective[i])) {
+			effective = next;
+			break;
+		}
+		effective = next;
+	}
+	return { effective, reasons };
+}
+
+/**
  * Present an interactive checkbox list.
  *
  * - **Interactive**: renders one row per option on stderr. Arrow keys
@@ -486,11 +528,18 @@ export async function multiSelect<T>(
 
 	// ── Non-interactive fallback ────────────────────────────────
 	if (!isInteractive({ input, output: out })) {
-		const values = options.filter((opt) => opt.checked).map((opt) => opt.value);
+		const initial = options.map((opt) => opt.checked === true);
+		const { effective, reasons } = evaluateChecked(options, initial);
+		const values = options
+			.filter((_opt, i) => effective[i])
+			.map((opt) => opt.value);
 		const lines: string[] = [`${message} (non-interactive, using defaults)`];
-		for (const opt of options) {
+		for (const [i, opt] of options.entries()) {
 			const desc = opt.description ? ` — ${opt.description}` : "";
-			lines.push(`  ${opt.checked ? "[x]" : "[ ]"} ${opt.label}${desc}`);
+			const reason = reasons[i] ? ` — ${reasons[i]}` : "";
+			lines.push(
+				`  ${effective[i] ? "[x]" : "[ ]"} ${opt.label}${desc}${reason}`,
+			);
 		}
 		lines.push("");
 		lines.push(nonInteractiveHint ?? "Hint: run interactively to choose.");
@@ -506,6 +555,21 @@ export async function multiSelect<T>(
 	return new Promise<MultiSelectResult<T>>((resolve) => {
 		let cursor = 0;
 		const checked = options.map((opt) => opt.checked === true);
+		let state = evaluateChecked(options, checked);
+
+		/**
+		 * Re-evaluate dependencies and persist the result: a disabled row is
+		 * actually cleared, so re-enabling it later does not silently bring
+		 * back a hidden checkmark — not for the initial state, not after a
+		 * toggle, not after select-all.
+		 */
+		function reevaluate(): void {
+			state = evaluateChecked(options, checked);
+			for (let i = 0; i < options.length; i++) {
+				checked[i] = state.effective[i];
+			}
+		}
+		reevaluate();
 
 		// Same wrap accounting as select(): rows wider than the terminal
 		// occupy extra physical lines that CURSOR_UP must traverse.
@@ -515,42 +579,62 @@ export async function multiSelect<T>(
 			Math.max(1, Math.ceil((2 + keyHint.length) / cols));
 		const rowVisibleLength = (i: number): number => {
 			const opt = options[i];
+			const reason = state.reasons[i];
 			// "  ❯ " (4) + "[x] " (4) + label + optional " " + description
+			// + optional " — " + reason
 			return (
 				8 +
 				opt.label.length +
-				(opt.description ? 1 + opt.description.length : 0)
+				(opt.description ? 1 + opt.description.length : 0) +
+				(reason ? 3 + reason.length : 0)
 			);
 		};
-		const physicalLines = options.reduce(
-			(sum, _opt, i) =>
-				sum + Math.max(1, Math.ceil(rowVisibleLength(i) / cols)),
-			0,
-		);
+		// Recomputed per render: dependency reasons appear and disappear
+		// as options are toggled, changing how rows wrap.
+		const physicalLineCount = (): number =>
+			options.reduce(
+				(sum, _opt, i) =>
+					sum + Math.max(1, Math.ceil(rowVisibleLength(i) / cols)),
+				0,
+			);
+		// Cursor rewinds must traverse the *previous* render's line count.
+		let lastRenderedLines = 0;
 
 		function render(firstRender: boolean) {
 			if (!firstRender) {
-				out.write(CURSOR_UP(physicalLines));
+				out.write(CURSOR_UP(lastRenderedLines));
 			}
 			for (let i = 0; i < options.length; i++) {
 				const opt = options[i];
 				const highlighted = i === cursor;
+				const reason = state.reasons[i];
 				const pointer = highlighted ? `${CYAN}❯${RESET}` : " ";
-				const box = checked[i] ? `${CYAN}[x]${RESET}` : "[ ]";
+				const box =
+					state.effective[i] && !reason ? `${CYAN}[x]${RESET}` : "[ ]";
 				const label = highlighted ? `${BOLD}${opt.label}${RESET}` : opt.label;
 				const desc = opt.description ? ` ${DIM}${opt.description}${RESET}` : "";
+				const blocked = reason ? ` ${DIM}— ${reason}${RESET}` : "";
 				out.write(
-					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${box} ${label}${desc}\n`,
+					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${box} ${label}${desc}${blocked}\n`,
 				);
 			}
+			lastRenderedLines = physicalLineCount();
+		}
+
+		/** Re-evaluate dependencies after a toggle, then repaint. */
+		function retoggle(index: number, value?: boolean) {
+			if (state.reasons[index] !== undefined) return;
+			checked[index] = value ?? !checked[index];
+			reevaluate();
+			render(false);
 		}
 
 		function clearMenu() {
-			out.write(CURSOR_UP(physicalLines));
-			for (let i = 0; i < physicalLines; i++) {
+			out.write(CURSOR_UP(lastRenderedLines));
+			for (let i = 0; i < lastRenderedLines; i++) {
 				out.write(`${CLEAR_LINE}\n`);
 			}
-			out.write(CURSOR_UP(physicalLines));
+			out.write(CURSOR_UP(lastRenderedLines));
 		}
 
 		// Print the message header and key hint
@@ -569,7 +653,7 @@ export async function multiSelect<T>(
 		function confirmSelection() {
 			cleanup();
 			clearMenu();
-			const chosen = options.filter((_opt, i) => checked[i]);
+			const chosen = options.filter((_opt, i) => state.effective[i]);
 			const summary =
 				chosen.length > 0
 					? `${CYAN}${chosen.map((opt) => opt.label).join(", ")}${RESET}`
@@ -592,8 +676,7 @@ export async function multiSelect<T>(
 				digit >= 1 &&
 				digit <= Math.min(options.length, MAX_NUMBERED_OPTIONS)
 			) {
-				checked[digit - 1] = !checked[digit - 1];
-				render(false);
+				retoggle(digit - 1);
 			} else if (key.name === "up" || (key.ctrl && key.name === "p")) {
 				cursor = cursor <= 0 ? options.length - 1 : cursor - 1;
 				render(false);
@@ -601,11 +684,17 @@ export async function multiSelect<T>(
 				cursor = cursor >= options.length - 1 ? 0 : cursor + 1;
 				render(false);
 			} else if (key.name === "space") {
-				checked[cursor] = !checked[cursor];
-				render(false);
+				retoggle(cursor);
 			} else if (key.sequence === "a") {
-				const checkAll = checked.some((isChecked) => !isChecked);
-				checked.fill(checkAll);
+				// "All" means every currently enabled option; disabled rows stay
+				// off, and an uncheck-all pass clears even those.
+				const checkAll = state.effective.some((isChecked) => !isChecked);
+				for (let i = 0; i < options.length; i++) {
+					if (!checkAll || state.reasons[i] === undefined) {
+						checked[i] = checkAll;
+					}
+				}
+				reevaluate();
 				render(false);
 			} else if (key.name === "return") {
 				confirmSelection();

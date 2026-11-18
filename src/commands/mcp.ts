@@ -40,7 +40,14 @@ function targets(flags: {
 	return { docs, orchestration, alias };
 }
 
-function connection(profileFlag?: string): Record<string, unknown> {
+/**
+ * The harness connection entry pointing at `c8ctl mcp-proxy` for a
+ * profile. Exported so `c8ctl setup` can wire the cluster MCP server to
+ * the local profile without going through the command wrapper.
+ */
+export function buildMcpConnection(
+	profileFlag?: string,
+): Record<string, unknown> {
 	const selected = profileFlag ?? c8ctl.activeProfile;
 	if (selected === undefined && resolveEnvBaseUrl()) {
 		throw new Error(
@@ -150,7 +157,9 @@ export const installMcpCommand = defineCommand(
 			requested: ctx.positionals,
 			operation: "install",
 			...selected,
-			connection: selected.orchestration ? connection(ctx.profile) : undefined,
+			connection: selected.orchestration
+				? buildMcpConnection(ctx.profile)
+				: undefined,
 		});
 		return applyPlans({ ctx, plans, operation: "install" });
 	},

@@ -1040,11 +1040,21 @@ c8ctl unassign role admin --from-user=john                  # Unassign role from
 
 Guided first-run setup: install a local cluster, a starter blueprint project, and AI assistant tooling — prints the plan before anything runs.
 
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--blueprint` | string |  | Starter blueprint to install: rocket-launch, service-worker, or ai-agent |
+| `--modeler` | boolean |  | Install Desktop Modeler, whatever the selection |
+| `--no-modeler` | boolean |  | Do not install Desktop Modeler |
+| `--docs-mcp` | boolean |  | Also configure the docs MCP server (off unless selected or flagged) |
+
 **Examples:**
 
 ```bash
 c8ctl setup                                                 # Run the guided setup wizard
-c8ctl setup --yes                                           # Plan with the defaults, without prompting
+c8ctl setup --yes                                           # Set up the defaults, without prompting
+c8ctl setup --blueprint rocket-launch                       # Set up the defaults with the Rocket Launch blueprint
 ```
 
 ---
