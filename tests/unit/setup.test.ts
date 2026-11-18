@@ -490,6 +490,30 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("--quiet hides child chatter but keeps failure diagnostics", async () => {
+		const stub = stubbedExecution({ failStep: "install-c8run" });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--quiet",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Install Camunda 8 Run", "ERROR");
+			// The child's stderr is essential: it survives --quiet.
+			assert.match(out, /stubbed cluster failure diagnostics/);
+			// stdout chatter and progress lines do not.
+			assert.doesNotMatch(out, /Downloading Camunda/);
+			assert.doesNotMatch(out, /\/\/>/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("--yes --docs-mcp also configures the docs MCP server", async () => {
 		const stub = stubbedExecution();
 		try {

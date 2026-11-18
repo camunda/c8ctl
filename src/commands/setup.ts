@@ -157,7 +157,9 @@ const CLI_ENTRY = realpathSync(
  * The child's output is streamed through a line filter that drops the
  * download progress lines (`//> 42% …`): the step status line is the
  * progress signal. The child is pinned to text mode so its lines stay
- * plain and filterable no matter the session's output mode.
+ * plain and filterable no matter the session's output mode. stderr is
+ * forwarded as essential: it carries the plugin's failure diagnostics,
+ * which must survive `--quiet`.
  */
 function runClusterSubcommand(
 	ctx: CommandContext,
@@ -174,13 +176,13 @@ function runClusterSubcommand(
 			stdio: ["ignore", "pipe", "pipe"],
 			env: { ...process.env, C8CTL_OUTPUT_MODE: "text" },
 		});
-		const forward = (stream: "stdout" | "stderr") =>
+		const forward = (stream: "stdout" | "stderr", essential: boolean) =>
 			createLineForwarder({
-				write: (line) => ctx.logger.info(line, { stream }),
+				write: (line) => ctx.logger.info(line, { stream, essential }),
 				skip: isClusterProgressLine,
 			});
-		const out = forward("stdout");
-		const err = forward("stderr");
+		const out = forward("stdout", false);
+		const err = forward("stderr", true);
 		child.stdout?.setEncoding("utf-8");
 		child.stderr?.setEncoding("utf-8");
 		child.stdout?.on("data", (chunk: string) => out.push(chunk));
@@ -233,16 +235,14 @@ async function runClusterStart(ctx: CommandContext): Promise<void> {
 }
 
 async function runModelerInstall(ctx: CommandContext): Promise<void> {
-	// Always quiet: the installer and download progress chatter is noise
-	// next to the step report. Failures still throw with diagnostics.
-	const result = await installDesktopModeler({
+	// Always quiet: the installer's progress chatter is noise next to the
+	// step report — the step's status line is the signal. Failures still
+	// throw with diagnostics.
+	await installDesktopModeler({
 		isDryRun: false,
 		logger: ctx.logger,
 		quiet: true,
 	});
-	if (result.kind === "success" || result.kind === "info") {
-		ctx.logger.info(result.message);
-	}
 }
 
 async function runBlueprintScaffold(

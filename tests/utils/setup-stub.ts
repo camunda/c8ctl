@@ -190,7 +190,7 @@ const CLUSTER_CHILD_OUTPUT: Record<string, { stdout: string }> = {
 
 function fakeChild(
 	exitCode: number,
-	{ stdout = "" }: { stdout?: string } = {},
+	{ stdout = "", stderr = "" }: { stdout?: string; stderr?: string } = {},
 ): FakeChild {
 	const child = new FakeChild();
 	// close only after the streams were read to their end, so forwarded
@@ -204,7 +204,7 @@ function fakeChild(
 		child.stdout.on("end", done);
 		child.stderr.on("end", done);
 		child.stdout.end(stdout);
-		child.stderr.end();
+		child.stderr.end(stderr);
 	});
 	return child;
 }
@@ -231,7 +231,13 @@ Object.defineProperty(childProcess, "spawn", {
 				if (subcommand === "install-c8run" && !argv.includes("stable")) {
 					return fakeChild(1);
 				}
-				if (failStep === subcommand) return fakeChild(1);
+				if (failStep === subcommand) {
+					// Like the real plugin: chatter on stdout, diagnostics on stderr.
+					return fakeChild(1, {
+						stdout: CLUSTER_CHILD_OUTPUT[subcommand].stdout,
+						stderr: "stubbed cluster failure diagnostics\n",
+					});
+				}
 				if (subcommand === "start-cluster") clusterRunning = true;
 				return fakeChild(0, CLUSTER_CHILD_OUTPUT[subcommand]);
 			}
