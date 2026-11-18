@@ -171,7 +171,7 @@ function stubbedExecution({
 	capture,
 }: {
 	clusterUp?: boolean;
-	/** Step id whose child process exits 1 (e.g. "install-c8run"). */
+	/** Step id whose child process exits 1 (e.g. "start-cluster"). */
 	failStep?: string;
 	/** File the process-instance request body is captured into. */
 	capture?: string;
@@ -243,7 +243,7 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(payload.command, "setup");
 		assert.strictEqual(payload.preview, true);
 		assert.strictEqual(payload.components.length, 6);
-		assert.strictEqual(payload.steps.length, 9);
+		assert.strictEqual(payload.steps.length, 8);
 		assert.strictEqual(payload.steps[0].title, "Check prerequisites");
 		const docsMcp = payload.components.find(
 			(c: { id: string }) => c.id === "docs-mcp",
@@ -408,7 +408,6 @@ describe("c8ctl setup", () => {
 			assert.doesNotMatch(result.stderr, /What should we set up/);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Check prerequisites", "SUCCESS");
-			stepLine(out, "Install Camunda 8 Run", "SUCCESS");
 			stepLine(out, "Start the local cluster", "SUCCESS");
 			stepLine(out, "Install Desktop Modeler", "SUCCESS");
 			stepLine(out, "Create the blueprint project", "SUCCESS");
@@ -416,14 +415,23 @@ describe("c8ctl setup", () => {
 			stepLine(out, "Install AI assistant skills", "SUCCESS");
 			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
 			assert.doesNotMatch(out, /Configure the docs MCP server .+ \[/);
-			// The c8run download progress percentages are filtered out of the
-			// report; the rest of the child output is streamed through.
+			// Each step announces its title, then collapses to the status line.
+			assert.match(out, /^ {2}Start the local cluster$/m);
+			// Useful lines blend into the report even on success.
+			assert.match(out, /Installing Camunda skills \(camunda\/skills\) for /);
+			assert.match(out, /MCP configuration: /);
+			// Everything else is held back: no c8run chatter, no progress
+			// percentages, no deploy progress, no prerequisite checklist.
 			assert.doesNotMatch(out, /\/\/>/);
-			assert.doesNotMatch(out, /\d+% \(/);
-			assert.match(out, /Downloading Camunda 8\.10 for darwin\.\.\./);
-			assert.match(out, /c8run 8\.10 installed successfully\./);
-			assert.match(out, /Deployment successful/);
-			assert.match(out, /Process instance created/);
+			assert.doesNotMatch(out, /Downloading Camunda/);
+			assert.doesNotMatch(out, /Cluster is ready!/);
+			assert.doesNotMatch(out, /Deploying \d+ resource/);
+			assert.doesNotMatch(out, /Deployment successful/);
+			assert.doesNotMatch(out, /✓ Network access/);
+			assert.match(
+				out,
+				/Operate: http:\/\/localhost:8080\/operate — log in with demo\/demo/,
+			);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
 			assert.ok(
@@ -456,8 +464,8 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("a failed step reports [ERROR], skips dependents, and the rest still runs", async () => {
-		const stub = stubbedExecution({ failStep: "install-c8run" });
+	test("a failed step reports [ERROR] with its buffered output, skips dependents, and the rest still runs", async () => {
+		const stub = stubbedExecution({ failStep: "start-cluster" });
 		try {
 			const result = await c8WithOptions(
 				stub.options,
@@ -468,13 +476,16 @@ describe("c8ctl setup", () => {
 			);
 			assert.strictEqual(result.status, 1, result.stdout);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			stepLine(out, "Install Camunda 8 Run", "ERROR");
-			assert.match(out, /c8ctl cluster install failed \(exit code 1\)\./);
+			stepLine(out, "Start the local cluster", "ERROR");
+			assert.match(out, /c8ctl cluster start failed \(exit code 1\)\./);
+			// The failed step's buffered output is flushed as diagnostics…
+			assert.match(out, /stubbed cluster failure diagnostics/);
+			assert.match(out, /Downloading Camunda 8\.10 for darwin\.\.\./);
+			// …but the percentage spam is filtered even then.
+			assert.doesNotMatch(out, /\/\/>/);
 			// Dependents are skipped with the unmet step named.
-			stepLine(out, "Start the local cluster", "SKIPPED");
 			stepLine(out, "Deploy and start the process", "SKIPPED");
 			stepLine(out, "Configure the cluster MCP server", "SKIPPED");
-			assert.match(out, /needs: Install Camunda 8 Run/);
 			assert.match(out, /needs: Start the local cluster/);
 			// Unrelated steps still ran.
 			stepLine(out, "Install Desktop Modeler", "SUCCESS");
@@ -490,8 +501,8 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("--quiet hides child chatter but keeps failure diagnostics", async () => {
-		const stub = stubbedExecution({ failStep: "install-c8run" });
+	test("--quiet hides step chatter but a failed step still shows its diagnostics", async () => {
+		const stub = stubbedExecution({ failStep: "start-cluster" });
 		try {
 			const result = await c8WithOptions(
 				stub.options,
@@ -503,12 +514,13 @@ describe("c8ctl setup", () => {
 			);
 			assert.strictEqual(result.status, 1, result.stdout);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			stepLine(out, "Install Camunda 8 Run", "ERROR");
-			// The child's stderr is essential: it survives --quiet.
+			stepLine(out, "Start the local cluster", "ERROR");
+			// The failed step's buffered output is essential on failure.
 			assert.match(out, /stubbed cluster failure diagnostics/);
-			// stdout chatter and progress lines do not.
-			assert.doesNotMatch(out, /Downloading Camunda/);
+			assert.match(out, /Downloading Camunda 8\.10/);
 			assert.doesNotMatch(out, /\/\/>/);
+			// Successful steps stay collapsed: no title announcement lines.
+			assert.doesNotMatch(out, /^ {2}Install Desktop Modeler$/m);
 		} finally {
 			stub.cleanup();
 		}
@@ -528,6 +540,12 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(result.status, 0, result.stderr);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Configure the docs MCP server", "SUCCESS");
+			// The sign-in browser window is announced before the first step runs.
+			assert.match(
+				out,
+				/a browser window will open to sign in for the docs MCP server/,
+			);
+			assert.match(out, /requires sign-in on first use/);
 			const mcpConfig: unknown = JSON.parse(
 				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
 			);
@@ -569,7 +587,8 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(result.status, 0, result.stderr);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Deploy and start the process", "SUCCESS");
-			assert.match(out, /Deployment successful/);
+			// The deploy's success render is quiet; the guidance is essential.
+			assert.doesNotMatch(out, /Deployment successful/);
 			assert.match(out, /deployed but not started/);
 			assert.match(out, /needs an LLM provider/);
 			assert.match(
@@ -668,8 +687,11 @@ describe("c8ctl setup", () => {
 			);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			// Deselected steps simply do not run — there is no plan preview.
-			assert.doesNotMatch(out, /Install Camunda 8 Run/);
+			// (The skipped cluster MCP step names its unmet dependency, so
+			// only a step-line-shaped match counts.)
+			assert.doesNotMatch(out, /^ {2}Start the local cluster/m);
 			assert.doesNotMatch(out, /Create the blueprint project/);
+			stepLine(out, "Configure the cluster MCP server", "SKIPPED");
 			stepLine(out, "Install Desktop Modeler", "SUCCESS");
 			stepLine(out, "Install AI assistant skills", "SUCCESS");
 			// No blueprint project without the cluster.
@@ -745,7 +767,7 @@ describe("c8ctl setup", () => {
 		const payload = JSON.parse(result.stdout);
 		assert.strictEqual(payload.command, "setup");
 		assert.strictEqual(payload.preview, true);
-		assert.strictEqual(payload.steps.length, 9);
+		assert.strictEqual(payload.steps.length, 8);
 	});
 
 	test("interactive: Escape cancels without printing a plan", async () => {

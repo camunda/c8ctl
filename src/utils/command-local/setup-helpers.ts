@@ -98,7 +98,7 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 	{
 		id: "docs-mcp",
 		label: "Docs MCP server",
-		why: "Always-current Camunda 8 docs inside your AI assistant",
+		why: "Always-current Camunda 8 docs in your AI assistant (browser sign-in)",
 		defaultSelected: false,
 	},
 ];
@@ -135,7 +135,6 @@ export function defaultSelection(): ReadonlySet<SetupComponentId> {
 
 export type SetupStepId =
 	| "prerequisites"
-	| "install-c8run"
 	| "start-cluster"
 	| "install-modeler"
 	| "scaffold-blueprint"
@@ -169,17 +168,10 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		component: null,
 	},
 	{
-		id: "install-c8run",
-		title: "Install Camunda 8 Run",
-		detail: "download the latest release",
-		component: "cluster",
-	},
-	{
 		id: "start-cluster",
 		title: "Start the local cluster",
-		detail: "wait until it reports healthy",
+		detail: "downloads Camunda 8 Run on first run, waits until healthy",
 		component: "cluster",
-		dependsOn: ["install-c8run"],
 	},
 	{
 		id: "install-modeler",
@@ -216,7 +208,8 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 	{
 		id: "docs-mcp",
 		title: "Configure the docs MCP server",
-		detail: "Camunda 8 documentation in your AI assistant",
+		detail:
+			"Camunda 8 docs in your AI assistant — a browser window opens to sign in",
 		component: "docs-mcp",
 	},
 ];
@@ -267,7 +260,7 @@ const LOGO = [
 	"██║      ╚█████╔╝  ██║         ██║    ██║     ",
 	"██║      ██╔══██╗  ██║         ██║    ██║     ",
 	"╚██████╗ ██████╔╝  ╚██████╗    ██║    ███████╗",
-	" ╚═════╝ ╚═════╝   ╚═════╝    ╚═╝    ╚══════╝",
+	" ╚═════╝ ╚═════╝    ╚═════╝    ╚═╝    ╚══════╝",
 ];
 
 const BANNER_WIDTH = 68;
