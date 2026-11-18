@@ -1044,7 +1044,7 @@ Guided first-run setup: install a local cluster, a starter blueprint project, an
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--blueprint` | string |  | Starter blueprint to install: rocket-launch, service-worker, or ai-agent |
+| `--blueprint` | string |  | Starter blueprint to install: rocket-launch or service-worker |
 | `--modeler` | boolean |  | Install Desktop Modeler, whatever the selection |
 | `--no-modeler` | boolean |  | Do not install Desktop Modeler |
 | `--docs-mcp` | boolean |  | Also configure the docs MCP server (off unless selected or flagged) |

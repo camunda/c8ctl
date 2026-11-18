@@ -1841,8 +1841,9 @@ export const COMMAND_REGISTRY = {
 			"Nothing is installed without your say.",
 			"Each step announces its title and ends in [SUCCESS], [ERROR] or",
 			"[SKIPPED]; a step's own output is shown only when it fails, and a",
-			"failed step does not stop the rest. The blueprint needs the local",
-			"cluster — deselect the cluster and the blueprint option is disabled.",
+			"failed step does not stop the rest. The blueprint and the cluster MCP",
+			"server need the local cluster — deselect the cluster and both options",
+			"are disabled.",
 			"A browser window opens when the local cluster reports healthy; the docs",
 			"MCP server asks you to sign in in a browser on first use — announced",
 			"up front.",
@@ -1854,7 +1855,7 @@ export const COMMAND_REGISTRY = {
 			blueprint: {
 				type: "string",
 				description:
-					"Starter blueprint to install: rocket-launch, service-worker, or ai-agent",
+					"Starter blueprint to install: rocket-launch or service-worker",
 			},
 			modeler: {
 				type: "boolean",

@@ -9,8 +9,10 @@ import { stripVTControlCharacters } from "node:util";
 import {
 	createLineForwarder,
 	defaultSelection,
+	enforceComponentDependencies,
 	formatStepResult,
 	isClusterProgressLine,
+	renderNextSteps,
 	renderWelcomeBanner,
 	SETUP_COMPONENTS,
 	SETUP_STEPS,
@@ -72,6 +74,38 @@ describe("SETUP_STEPS", () => {
 		const ids = SETUP_STEPS.map((s) => s.id);
 		assert.strictEqual(new Set(ids).size, ids.length);
 	});
+
+	test("deploy and start the process is the last step", () => {
+		assert.strictEqual(
+			SETUP_STEPS[SETUP_STEPS.length - 1].id,
+			"deploy-blueprint",
+		);
+	});
+
+	test("a step never runs after one it depends on", () => {
+		const positions = new Map(SETUP_STEPS.map((s, i) => [s.id, i]));
+		for (const step of SETUP_STEPS) {
+			for (const dep of step.dependsOn ?? []) {
+				assert.ok(
+					(positions.get(dep) ?? -1) < (positions.get(step.id) ?? -1),
+					`"${step.id}" must come after "${dep}"`,
+				);
+			}
+		}
+	});
+});
+
+describe("enforceComponentDependencies()", () => {
+	test("deselecting the cluster also drops the blueprint and the cluster MCP server", () => {
+		const selected = new Set(
+			SETUP_COMPONENTS.map((c) => c.id).filter((id) => id !== "cluster"),
+		);
+		const enforced = enforceComponentDependencies(selected);
+		assert.ok(!enforced.has("blueprint"));
+		assert.ok(!enforced.has("cluster-mcp"));
+		assert.ok(enforced.has("modeler"));
+		assert.ok(enforced.has("skills"));
+	});
 });
 
 describe("renderWelcomeBanner()", () => {
@@ -96,6 +130,41 @@ describe("renderWelcomeBanner()", () => {
 			stripVTControlCharacters(banner),
 			renderWelcomeBanner({ color: false }),
 			"colored and plain banners differ beyond styling",
+		);
+	});
+});
+
+describe("renderNextSteps()", () => {
+	const LINES = [
+		"Project: /tmp/demo/rocket-launch",
+		"Guide: https://docs.camunda.io/docs/guides/getting-started-hello-world/",
+		"Operate: http://localhost:8080/operate (demo/demo)",
+	];
+
+	test("plain output has no ANSI escapes and aligned box edges", () => {
+		const box = renderNextSteps(LINES, { color: false });
+		assert.strictEqual(box, stripVTControlCharacters(box));
+		const rows = box.split("\n");
+		const widths = new Set(rows.map((row) => row.length));
+		assert.deepStrictEqual(
+			[...widths],
+			[rows[0].length],
+			`box rows differ in width: ${[...widths].join(", ")}`,
+		);
+		assert.match(box, /╭/);
+		assert.match(box, /╯/);
+		assert.match(box, /What's next/);
+		for (const line of LINES) {
+			assert.ok(box.includes(line), `missing: ${line}`);
+		}
+	});
+
+	test("colored output only styles, never changes the visible text", () => {
+		const colored = renderNextSteps(LINES, { color: true });
+		assert.ok(colored.includes(BRAND_BLUE), "brand color missing");
+		assert.strictEqual(
+			stripVTControlCharacters(colored),
+			renderNextSteps(LINES, { color: false }),
 		);
 	});
 });
@@ -198,8 +267,9 @@ describe("setupPlanPayload()", () => {
 	test("reports the chosen blueprint, null when none was picked", () => {
 		assert.strictEqual(setupPlanPayload(defaultSelection()).blueprint, null);
 		assert.strictEqual(
-			setupPlanPayload(defaultSelection(), { blueprint: "ai-agent" }).blueprint,
-			"ai-agent",
+			setupPlanPayload(defaultSelection(), { blueprint: "service-worker" })
+				.blueprint,
+			"service-worker",
 		);
 	});
 });

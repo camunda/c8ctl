@@ -70,26 +70,21 @@ function resolvedCommitResponse(): BlueprintResponse {
 }
 
 describe("SETUP_BLUEPRINTS", () => {
-	test("contains exactly the three setup projects and their guides", () => {
+	test("contains exactly the two setup projects and their guides", () => {
 		assert.deepStrictEqual(
 			SETUP_BLUEPRINTS.map((blueprint) => blueprint.id),
-			["rocket-launch", "service-worker", "ai-agent"],
+			["rocket-launch", "service-worker"],
 		);
 		assert.deepStrictEqual(
 			SETUP_BLUEPRINTS.map((blueprint) => blueprint.guideUrl),
 			[
 				"https://docs.camunda.io/docs/guides/getting-started-hello-world/",
 				"https://docs.camunda.io/docs/guides/getting-started-example/",
-				"https://docs.camunda.io/docs/guides/getting-started-agentic-orchestration/",
 			],
 		);
 		assert.deepStrictEqual(
 			SETUP_BLUEPRINTS.map((blueprint) => blueprint.source.path),
-			[
-				"1-rocket-launch",
-				"2-order-process-with-service-workers",
-				"solutions/ai-agent-chat-with-tools",
-			],
+			["1-rocket-launch", "2-order-process-with-service-workers"],
 		);
 	});
 });
@@ -258,10 +253,120 @@ describe("scaffoldSetupBlueprint()", () => {
 			(error: unknown) => {
 				assert.ok(error instanceof BlueprintScaffoldError);
 				assert.match(error.message, /Unknown blueprint "unknown"/);
-				assert.match(error.message, /rocket-launch, service-worker, ai-agent/);
+				assert.match(error.message, /rocket-launch, service-worker/);
 				return true;
 			},
 		);
+	});
+
+	test("marks the scaffold with its blueprint id and file list", async () => {
+		const root = tempDir("c8ctl-blueprint-marker-");
+		const destination = join(root, "rocket");
+		const fetch: BlueprintFetch = async (url) => {
+			if (isCommitRequest(url)) {
+				return resolvedCommitResponse();
+			}
+			if (isTreeRequest(url)) {
+				return jsonResponse({
+					truncated: false,
+					tree: [{ path: "1-rocket-launch/README.md", type: "blob" }],
+				});
+			}
+			return fileResponse("# Rocket Launch\n");
+		};
+
+		try {
+			await scaffoldSetupBlueprint({
+				id: "rocket-launch",
+				destinationDir: destination,
+				fetch,
+			});
+			const marker: unknown = JSON.parse(
+				readFileSync(join(destination, ".c8ctl-blueprint.json"), "utf-8"),
+			);
+			assert.deepStrictEqual(marker, {
+				id: "rocket-launch",
+				files: ["README.md"],
+			});
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("reuses an existing scaffold of the same blueprint without fetching", async () => {
+		const root = tempDir("c8ctl-blueprint-reuse-");
+		const destination = join(root, "rocket-launch");
+		mkdirSync(destination, { recursive: true });
+		writeFileSync(join(destination, "README.md"), "# Rocket Launch\n");
+		writeFileSync(
+			join(destination, ".c8ctl-blueprint.json"),
+			JSON.stringify({ id: "rocket-launch", files: ["README.md"] }),
+		);
+		let fetchCount = 0;
+		const fetch: BlueprintFetch = async () => {
+			fetchCount += 1;
+			throw new Error("must not fetch when reusing a scaffold");
+		};
+		const progress: BlueprintProgress[] = [];
+
+		try {
+			const result = await scaffoldSetupBlueprint({
+				id: "rocket-launch",
+				destinationDir: destination,
+				fetch,
+				onProgress: (event) => progress.push(event),
+			});
+			assert.strictEqual(result.directory, destination);
+			assert.deepStrictEqual(result.files, ["README.md"]);
+			assert.strictEqual(fetchCount, 0);
+			assert.strictEqual(
+				readFileSync(join(destination, "README.md"), "utf-8"),
+				"# Rocket Launch\n",
+			);
+			assert.deepStrictEqual(
+				progress.map((event) => event.phase),
+				["complete"],
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("refuses a destination scaffolded from a different blueprint", async () => {
+		const root = tempDir("c8ctl-blueprint-mismatch-");
+		const destination = join(root, "project");
+		mkdirSync(destination, { recursive: true });
+		writeFileSync(
+			join(destination, ".c8ctl-blueprint.json"),
+			JSON.stringify({ id: "service-worker", files: ["README.md"] }),
+		);
+		let fetchCount = 0;
+		const fetch: BlueprintFetch = async () => {
+			fetchCount += 1;
+			return jsonResponse({});
+		};
+
+		try {
+			await assert.rejects(
+				scaffoldSetupBlueprint({
+					id: "rocket-launch",
+					destinationDir: destination,
+					fetch,
+				}),
+				(error: unknown) => {
+					assert.ok(error instanceof BlueprintScaffoldError);
+					assert.match(
+						error.message,
+						/already contains the "service-worker" blueprint/,
+					);
+					assert.match(error.hint ?? "", /--blueprint service-worker/);
+					return true;
+				},
+			);
+			assert.strictEqual(fetchCount, 0);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	test("rejects a non-empty destination before fetching", async () => {

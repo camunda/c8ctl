@@ -78,20 +78,11 @@ const PLOT_DESTINATION_DMN = `<?xml version="1.0" encoding="UTF-8"?>
 </definitions>
 `;
 
-const AI_AGENT_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_2" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="ai-agent-chat-with-tools" isExecutable="true">
-    <bpmn:startEvent id="start" />
-  </bpmn:process>
-</bpmn:definitions>
-`;
-
 /** Blueprint project files, keyed by basename, served from raw.githubusercontent.com. */
 const FILES: Record<string, string> = {
 	"rocket-launch.bpmn": ROCKET_LAUNCH_BPMN,
 	"plot-destination.dmn": PLOT_DESTINATION_DMN,
 	"README.md": "# Blueprint\n",
-	"ai-agent-chat-with-tools.bpmn": AI_AGENT_BPMN,
 };
 
 const TREE = {
@@ -100,12 +91,6 @@ const TREE = {
 		{ path: "1-rocket-launch/rocket-launch.bpmn", type: "blob" },
 		{ path: "1-rocket-launch/plot-destination.dmn", type: "blob" },
 		{ path: "1-rocket-launch/README.md", type: "blob" },
-		{ path: "solutions/ai-agent-chat-with-tools", type: "tree" },
-		{
-			path: "solutions/ai-agent-chat-with-tools/ai-agent-chat-with-tools.bpmn",
-			type: "blob",
-		},
-		{ path: "solutions/ai-agent-chat-with-tools/README.md", type: "blob" },
 	],
 };
 

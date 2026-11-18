@@ -48,6 +48,7 @@ import {
 	isClusterProgressLine,
 	MANUAL_SETUP_LINKS,
 	planMcpConfigs,
+	renderNextSteps,
 	renderWelcomeBanner,
 	runSkillInstall,
 	SETUP_BLUEPRINTS,
@@ -246,10 +247,14 @@ async function runBlueprintScaffold(
 	const id = run.blueprintId ?? SETUP_BLUEPRINTS[0].id;
 	const scaffolded = await scaffoldSetupBlueprint({
 		id,
-		onProgress: (event) => ctx.logger.info(event.message),
+		// The completion line is the step's takeaway — fresh or reused —
+		// so it survives the success collapse; progress chatter does not.
+		onProgress: (event) =>
+			ctx.logger.info(event.message, {
+				essential: event.phase === "complete",
+			}),
 	});
 	run.blueprintDir = scaffolded.directory;
-	ctx.logger.info(`Project ready at ${scaffolded.directory}`);
 }
 
 async function runBlueprintDeploy(
@@ -298,15 +303,6 @@ async function runBlueprintDeploy(
 		suppressSkippedLog: true,
 		logger: ctx.logger,
 	});
-
-	if (blueprint.startNote) {
-		logger.info(
-			`The ${blueprint.name} process is deployed but not started: it ${blueprint.startNote}`,
-			{ essential: true },
-		);
-		logger.info(`Guide: ${blueprint.guideUrl}`, { essential: true });
-		return;
-	}
 
 	const processFile = join(directory, blueprint.processFile);
 	const processId = extractProcessId(readFileSync(processFile, "utf-8"));
@@ -675,30 +671,29 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	const { failures, run } = await executePlan(ctx, selected, blueprintId, {
 		color,
 	});
+
+	// The takeaway of the whole run, boxed so it stands apart from the
+	// step report above it.
+	const nextSteps: string[] = [];
 	if (run.blueprintDir) {
 		const blueprint = setupBlueprintById(
 			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
 		);
-		logger.info(
-			`Your project is at ${run.blueprintDir} — follow the guide: ${blueprint.guideUrl}`,
-			{ essential: true },
-		);
+		nextSteps.push(`Project: ${run.blueprintDir}`);
+		nextSteps.push(`Guide: ${blueprint.guideUrl}`);
 	}
 	if (run.clusterStarted) {
-		logger.info(
-			"Operate: http://localhost:8080/operate — log in with demo/demo",
-			{
-				essential: true,
-			},
-		);
+		nextSteps.push("Operate: http://localhost:8080/operate (demo/demo)");
 	}
+	if (nextSteps.length > 0) {
+		logger.info(`\n${renderNextSteps(nextSteps, { color })}`, {
+			essential: true,
+		});
+	}
+
 	if (failures > 0) {
 		logger.info(
-			`Setup finished with ${failures} failed step(s). Fix the cause and re-run c8ctl setup.`,
-			{ essential: true },
-		);
-		logger.info(
-			"Note: an existing blueprint project directory is kept as-is and blocks re-scaffolding — remove it to scaffold again, or deploy it directly with c8ctl deploy.",
+			`Setup finished with ${failures} failed step(s). Fix the cause and re-run c8ctl setup — finished work is picked up, not repeated.`,
 			{ essential: true },
 		);
 		process.exitCode = 1;

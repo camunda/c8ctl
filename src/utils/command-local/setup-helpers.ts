@@ -94,6 +94,7 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 		label: "Cluster MCP server",
 		why: "Let your AI assistant inspect and operate your cluster",
 		defaultSelected: true,
+		requires: [{ id: "cluster", reason: "needs the local cluster" }],
 	},
 	{
 		id: "docs-mcp",
@@ -182,15 +183,8 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 	{
 		id: "scaffold-blueprint",
 		title: "Create the blueprint project",
-		detail: "Rocket Launch, Service worker, or AI agent",
+		detail: "Rocket Launch or Service worker",
 		component: "blueprint",
-	},
-	{
-		id: "deploy-blueprint",
-		title: "Deploy and start the process",
-		detail: "your first running process instance",
-		component: "blueprint",
-		dependsOn: ["scaffold-blueprint", "start-cluster"],
 	},
 	{
 		id: "install-skills",
@@ -211,6 +205,14 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		detail:
 			"Camunda 8 docs in your AI assistant — browser sign-in on first use",
 		component: "docs-mcp",
+	},
+	{
+		// The finale: everything the deploy needs is in place by now.
+		id: "deploy-blueprint",
+		title: "Deploy and start the process",
+		detail: "your first running process instance",
+		component: "blueprint",
+		dependsOn: ["scaffold-blueprint", "start-cluster"],
 	},
 ];
 
@@ -318,6 +320,34 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 				"Pick what to set up. Nothing runs without your say.".length,
 		),
 		empty,
+		bottom,
+	].join("\n");
+}
+
+// ── Next steps ─────────────────────────────────────────────────────
+
+/**
+ * The boxed completion block after the step report: the takeaway of the
+ * whole run, visually set apart from the status lines so it cannot
+ * blend in. The box is as wide as its longest line; the heading carries
+ * the brand color on a terminal.
+ */
+export function renderNextSteps(
+	lines: readonly string[],
+	{ color }: { color: boolean },
+): string {
+	const s = bannerStyle({ color });
+	const heading = "What's next";
+	const width = Math.max(heading.length, ...lines.map((line) => line.length));
+	const top = `╭${"─".repeat(width + 4)}╮`;
+	const bottom = `╰${"─".repeat(width + 4)}╯`;
+	const row = (text: string, visibleLength: number) =>
+		`│  ${text}${" ".repeat(width - visibleLength)}  │`;
+	return [
+		top,
+		row(`${s.brand}${s.bold}${heading}${s.reset}`, heading.length),
+		row("", 0),
+		...lines.map((line) => row(line, line.length)),
 		bottom,
 	].join("\n");
 }

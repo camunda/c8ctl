@@ -296,10 +296,15 @@ describe("c8ctl setup", () => {
 	});
 
 	test("--dry-run --blueprint reports the requested blueprint", async () => {
-		const result = await c8("setup", "--dry-run", "--blueprint", "ai-agent");
+		const result = await c8(
+			"setup",
+			"--dry-run",
+			"--blueprint",
+			"service-worker",
+		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		const payload = JSON.parse(result.stdout);
-		assert.strictEqual(payload.blueprint, "ai-agent");
+		assert.strictEqual(payload.blueprint, "service-worker");
 	});
 
 	test("an unknown --blueprint id fails and lists the valid ids", async () => {
@@ -313,7 +318,7 @@ describe("c8ctl setup", () => {
 		const out = stripVTControlCharacters(result.stdout + result.stderr);
 		assert.match(
 			out,
-			/Unknown blueprint "bogus"\. Available blueprints: rocket-launch, service-worker, ai-agent\./,
+			/Unknown blueprint "bogus"\. Available blueprints: rocket-launch, service-worker\./,
 		);
 	});
 
@@ -430,9 +435,23 @@ describe("c8ctl setup", () => {
 			assert.doesNotMatch(out, /Deploying \d+ resource/);
 			assert.doesNotMatch(out, /Deployment successful/);
 			assert.doesNotMatch(out, /✓ Network access/);
+			// Deploy and start is the last step of the run.
+			const deployAt = out.indexOf("Deploy and start the process");
+			const clusterMcpAt = out.indexOf("Configure the cluster MCP server");
+			assert.ok(
+				deployAt > clusterMcpAt,
+				"the deploy step must come after the MCP step",
+			);
+			// The completion instructions are a distinct block, not status lines.
+			assert.match(out, /What's next/);
+			assert.match(out, /Project: .*rocket-launch/);
 			assert.match(
 				out,
-				/Operate: http:\/\/localhost:8080\/operate — log in with demo\/demo/,
+				/Guide: https:\/\/docs\.camunda\.io\/docs\/guides\/getting-started-hello-world\//,
+			);
+			assert.match(
+				out,
+				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
 			);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
@@ -593,36 +612,35 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(docsStep.status, "planned");
 	});
 
-	test("the ai-agent blueprint is deployed but not started, with guidance", async () => {
-		const capture = join(
-			mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-")),
-			"capture.json",
-		);
-		const stub = stubbedExecution({ capture });
+	test("a rerun reuses the existing blueprint project instead of failing", async () => {
+		const stub = stubbedExecution();
 		try {
-			const result = await c8WithOptions(
+			const first = await c8WithOptions(
 				stub.options,
 				"setup",
 				"--yes",
 				"--blueprint",
-				"ai-agent",
+				"rocket-launch",
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
-			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			stepLine(out, "Deploy and start the process", "SUCCESS");
-			// The deploy's success render is quiet; the guidance is essential.
-			assert.doesNotMatch(out, /Deployment successful/);
-			assert.match(out, /deployed but not started/);
-			assert.match(out, /needs an LLM provider/);
-			assert.match(
-				out,
-				/c8ctl create pi --id=ai-agent-chat-with-tools .* --profile local/,
-			);
-			// No process instance was started.
+			assert.strictEqual(first.status, 0, first.stderr);
 			assert.ok(
-				!existsSync(capture),
-				"an instance was started despite the missing LLM provider",
+				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 			);
+
+			const second = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(second.status, 0, second.stderr);
+			const out = stripVTControlCharacters(second.stdout + second.stderr);
+			stepLine(out, "Create the blueprint project", "SUCCESS");
+			assert.match(out, /already set up/);
+			// No suffixed copies, ever.
+			assert.ok(!existsSync(join(stub.cwd, "rocket-launch-1")));
+			assert.ok(!existsSync(join(stub.cwd, "rocket-launch-2")));
 		} finally {
 			stub.cleanup();
 		}
@@ -722,6 +740,11 @@ describe("c8ctl setup", () => {
 				stripVTControlCharacters(result.stderr),
 				/Starter blueprint.*— needs the local cluster/,
 			);
+			// The cluster MCP server depends on the cluster the same way.
+			assert.match(
+				stripVTControlCharacters(result.stderr),
+				/Cluster MCP server.*— needs the local cluster/,
+			);
 			assert.ok(
 				result.stderr.includes(BRAND_BLUE),
 				"banner is not brand-colored",
@@ -734,11 +757,9 @@ describe("c8ctl setup", () => {
 			);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			// Deselected steps simply do not run — there is no plan preview.
-			// (The skipped cluster MCP step names its unmet dependency, so
-			// only a step-line-shaped match counts.)
 			assert.doesNotMatch(out, /^ {2}Start the local cluster/m);
 			assert.doesNotMatch(out, /Create the blueprint project/);
-			stepLine(out, "Configure the cluster MCP server", "SKIPPED");
+			assert.doesNotMatch(out, /Configure the cluster MCP server/);
 			stepLine(out, "Install Desktop Modeler", "SUCCESS");
 			stepLine(out, "Install AI assistant skills", "SUCCESS");
 			// No blueprint project without the cluster.
