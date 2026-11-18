@@ -152,7 +152,11 @@ async function runBlueprintDeploy(
 			`Could not reach the local cluster (${health.detail}) — the blueprint was not deployed.`,
 		);
 		logger.info("Start the cluster with: c8ctl cluster start");
-		logger.info(`Then deploy the project with: c8ctl deploy "${deployDir}"`);
+		// Pin the same local profile the healthy path deploys to, so the
+		// recovery cannot land on a remote cluster from the session or env.
+		logger.info(
+			`Then deploy the project with: c8ctl deploy "${deployDir}" --profile local`,
+		);
 		return;
 	}
 

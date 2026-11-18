@@ -365,9 +365,11 @@ describe("c8ctl setup", () => {
 			assert.match(out, /already installed at .*skipping installation/);
 			assert.match(out, /▸ Create the blueprint project/);
 			assert.match(out, /Project ready at /);
-			// The stub cluster is down: deploy degrades to next actions.
+			// The stub cluster is down: deploy degrades to next actions,
+			// pinned to the same local profile the healthy path uses.
 			assert.match(out, /Could not reach the local cluster/);
 			assert.match(out, /c8ctl cluster start/);
+			assert.match(out, /c8ctl deploy ".*rocket-launch" --profile local/);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
 			assert.ok(
