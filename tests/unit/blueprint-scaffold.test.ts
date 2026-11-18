@@ -359,7 +359,7 @@ describe("scaffoldSetupBlueprint()", () => {
 						error.message,
 						/already contains the "service-worker" blueprint/,
 					);
-					assert.match(error.hint ?? "", /--blueprint service-worker/);
+					assert.match(error.hint ?? "", /pick the "service-worker" blueprint/);
 					return true;
 				},
 			);

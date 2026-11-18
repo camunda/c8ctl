@@ -75,11 +75,10 @@ describe("SETUP_STEPS", () => {
 		assert.strictEqual(new Set(ids).size, ids.length);
 	});
 
-	test("deploy and start the process is the last step", () => {
-		assert.strictEqual(
-			SETUP_STEPS[SETUP_STEPS.length - 1].id,
-			"deploy-blueprint",
-		);
+	test("deploy and start the process is the last step, gated on a clean run", () => {
+		const last = SETUP_STEPS[SETUP_STEPS.length - 1];
+		assert.strictEqual(last.id, "deploy-blueprint");
+		assert.strictEqual(last.requiresCleanRun, true);
 	});
 
 	test("a step never runs after one it depends on", () => {

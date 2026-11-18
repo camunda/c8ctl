@@ -155,6 +155,11 @@ export interface SetupStep {
 	 * is reported as skipped with the unmet steps named.
 	 */
 	readonly dependsOn?: readonly SetupStepId[];
+	/**
+	 * When true, the step runs only if every earlier step succeeded —
+	 * for the finale that must not run on a partially broken setup.
+	 */
+	readonly requiresCleanRun?: boolean;
 }
 
 /**
@@ -207,12 +212,14 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		component: "docs-mcp",
 	},
 	{
-		// The finale: everything the deploy needs is in place by now.
+		// The finale: runs last, and only when every earlier step
+		// succeeded — no first process on a partially broken setup.
 		id: "deploy-blueprint",
 		title: "Deploy and start the process",
 		detail: "your first running process instance",
 		component: "blueprint",
 		dependsOn: ["scaffold-blueprint", "start-cluster"],
+		requiresCleanRun: true,
 	},
 ];
 

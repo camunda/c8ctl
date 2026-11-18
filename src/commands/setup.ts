@@ -68,7 +68,6 @@ import { extractProcessId } from "./run.ts";
 
 /** Flags the setup handler reads, as declared in the command registry. */
 interface SetupFlags {
-	readonly blueprint?: string;
 	readonly modeler?: boolean;
 	readonly "no-modeler"?: boolean;
 	readonly "docs-mcp"?: boolean;
@@ -93,8 +92,7 @@ interface SetupRun {
 /**
  * Explicit flags override the checkbox selection: --no-modeler wins.
  * Dependencies are then re-enforced, so a flag cannot resurrect a
- * component whose requirement is deselected (e.g. --blueprint without
- * the local cluster).
+ * component whose requirement is deselected.
  */
 function applyComponentFlags(
 	selected: ReadonlySet<SetupComponentId>,
@@ -103,18 +101,20 @@ function applyComponentFlags(
 	const next = new Set(selected);
 	if (flags["no-modeler"]) next.delete("modeler");
 	else if (flags.modeler) next.add("modeler");
-	if (flags.blueprint !== undefined) next.add("blueprint");
 	if (flags["docs-mcp"]) next.add("docs-mcp");
 	return enforceComponentDependencies(next);
 }
 
-/** The blueprint a non-interactive run would install: the flag, else the first. */
+/**
+ * The blueprint a non-interactive run installs: the first curated one.
+ * Blueprints are deliberately not selectable via a CLI flag — the
+ * wizard prompt is the only choice point.
+ */
 function effectiveBlueprint(
 	selected: ReadonlySet<SetupComponentId>,
-	flags: SetupFlags,
 ): string | undefined {
 	if (!selected.has("blueprint")) return undefined;
-	return flags.blueprint ?? SETUP_BLUEPRINTS[0].id;
+	return SETUP_BLUEPRINTS[0].id;
 }
 
 // ── Step executors ─────────────────────────────────────────────────
@@ -487,14 +487,22 @@ async function executePlan(
 		if (step.component !== null && !selected.has(step.component)) continue;
 
 		const unmet = (step.dependsOn ?? []).filter((dep) => !succeeded.has(dep));
-		if (unmet.length > 0) {
+		// A clean-run step (the deploy finale) also waits for every earlier
+		// step to have succeeded — no first process on a broken setup.
+		const needsCleanRun = step.requiresCleanRun === true && failures > 0;
+		if (unmet.length > 0 || needsCleanRun) {
 			logger.info(formatStepResult(step.title, "skipped", width, { color }), {
 				essential: true,
 			});
 			const names = unmet
 				.map((dep) => SETUP_STEPS.find((s) => s.id === dep)?.title ?? dep)
 				.join(", ");
-			logger.info(`    needs: ${names}`, { essential: true });
+			logger.info(
+				unmet.length > 0
+					? `    needs: ${names}`
+					: "    needs: all previous steps to succeed",
+				{ essential: true },
+			);
 			continue;
 		}
 
@@ -550,6 +558,19 @@ async function executePlan(
 					logger.info(`    ${line}`, { essential: true });
 				}
 			}
+			// Errors may carry a recovery hint (e.g. scaffold errors) — the
+			// message alone is not actionable without it.
+			const hint =
+				error instanceof Error &&
+				"hint" in error &&
+				typeof error.hint === "string"
+					? error.hint
+					: undefined;
+			if (hint) {
+				for (const line of hint.split("\n")) {
+					logger.info(`    ${line}`, { essential: true });
+				}
+			}
 		}
 	}
 	return { failures, run };
@@ -560,17 +581,13 @@ async function executePlan(
 export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	const { logger } = ctx;
 
-	// Validate --blueprint up front, in every mode: an unknown id fails
-	// identically in preview, JSON and execution runs.
-	if (flags.blueprint !== undefined) setupBlueprintById(flags.blueprint);
-
 	// Custom dry-run payload: setup performs local installs, not one API call.
 	if (ctx.isDryRun) {
 		const selected = applyComponentFlags(defaultSelection(), flags);
 		logger.json({
 			dryRun: true,
 			...setupPlanPayload(selected, {
-				blueprint: effectiveBlueprint(selected, flags),
+				blueprint: effectiveBlueprint(selected),
 			}),
 		});
 		return { kind: "none" };
@@ -614,20 +631,10 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		selected = defaultSelection();
 	}
 	selected = applyComponentFlags(selected, flags);
-	if (flags.blueprint !== undefined && !selected.has("blueprint")) {
-		// The flag asked for a blueprint but its dependency was deselected.
-		logger.info("--blueprint is ignored: the local cluster is not selected.", {
-			essential: true,
-		});
-	}
 
 	// Every question comes before any work: pick the blueprint next.
-	let blueprintId = effectiveBlueprint(selected, flags);
-	if (
-		selected.has("blueprint") &&
-		flags.blueprint === undefined &&
-		interactive
-	) {
+	let blueprintId = effectiveBlueprint(selected);
+	if (selected.has("blueprint") && interactive) {
 		const choice = await select({
 			message: "Which starter blueprint should we install?",
 			options: SETUP_BLUEPRINTS.map((b) => ({

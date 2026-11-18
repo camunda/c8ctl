@@ -1829,10 +1829,6 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl setup --yes",
 				description: "Set up the defaults, without prompting",
 			},
-			{
-				command: "c8ctl setup --blueprint rocket-launch",
-				description: "Set up the defaults with the Rocket Launch blueprint",
-			},
 		],
 		helpNotes: [
 			"The wizard offers to start a local cluster (downloading Camunda 8 Run",
@@ -1849,14 +1845,11 @@ export const COMMAND_REGISTRY = {
 			"up front.",
 			"A run without a selection (piped output, CI) installs nothing",
 			"unless you pass --yes; --json prints the plan without executing.",
+			"The starter blueprint is chosen in the wizard; a non-interactive",
+			"--yes run uses Rocket Launch.",
 		],
 		resources: [],
 		flags: {
-			blueprint: {
-				type: "string",
-				description:
-					"Starter blueprint to install: rocket-launch or service-worker",
-			},
 			modeler: {
 				type: "boolean",
 				description: "Install Desktop Modeler, whatever the selection",

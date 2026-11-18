@@ -474,7 +474,7 @@ export async function scaffoldSetupBlueprint({
 		throw new BlueprintScaffoldError(
 			`Blueprint destination ${directory} already contains the "${marker.id}" blueprint.`,
 			{
-				hint: `Remove the directory to start over, or rerun with --blueprint ${marker.id}.`,
+				hint: `Remove the directory to start over, or keep it and pick the "${marker.id}" blueprint in the setup wizard.`,
 			},
 		);
 	}
