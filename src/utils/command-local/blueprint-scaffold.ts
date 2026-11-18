@@ -81,10 +81,12 @@ export const SETUP_BLUEPRINTS = [
 		startVariables: { missionName: "Apollo", fuelLevel: 80 },
 		// Fully automated: setup already deployed and launched an
 		// instance, so the next step is looking at it. The suggestion pins
-		// the local profile — the session's active profile may be remote.
+		// the local profile and its <default> tenant — the session's
+		// active profile and tenant may point elsewhere. The && chain
+		// keeps it one copy-paste line on every shell.
 		nextSteps: () => [
 			"A Rocket Launch instance is already running on the local cluster.",
-			"See it: c8ctl search process-instance --profile local",
+			'See it: c8ctl use tenant "<default>" && c8ctl search process-instance --profile local',
 		],
 	},
 	{

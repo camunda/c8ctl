@@ -431,9 +431,11 @@ describe("c8ctl setup", () => {
 			// The box is actionable: setup already started an instance, and
 			// the box says so and names the command that shows it.
 			assert.match(out, /A Rocket Launch instance is already running/);
+			// Tenant and profile are pinned: a saved session tenant or a
+			// remote active profile must not redirect the suggestion.
 			assert.match(
 				out,
-				/See it: c8ctl search process-instance --profile local/,
+				/See it: c8ctl use tenant "<default>" && c8ctl search process-instance --profile local/,
 			);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
@@ -851,7 +853,7 @@ describe("c8ctl setup", () => {
 			// run instead of leaving the user at a bare Operate link.
 			assert.match(
 				out,
-				/Run your first process: c8ctl run my-process\.bpmn --profile local/,
+				/Run your first process: c8ctl use tenant "<default>" && c8ctl run my-process\.bpmn --profile local/,
 			);
 			assert.match(out, /re-run "c8ctl setup" and pick a starter blueprint/);
 			assert.match(
