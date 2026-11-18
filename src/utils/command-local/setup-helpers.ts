@@ -94,6 +94,7 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 		label: "Cluster MCP server",
 		why: "Let your AI assistant inspect and operate your cluster",
 		defaultSelected: true,
+		requires: [{ id: "cluster", reason: "needs the local cluster" }],
 	},
 	{
 		id: "docs-mcp",
@@ -154,6 +155,11 @@ export interface SetupStep {
 	 * is reported as skipped with the unmet steps named.
 	 */
 	readonly dependsOn?: readonly SetupStepId[];
+	/**
+	 * When true, the step runs only if every earlier step succeeded —
+	 * for the finale that must not run on a partially broken setup.
+	 */
+	readonly requiresCleanRun?: boolean;
 }
 
 /**
@@ -182,15 +188,8 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 	{
 		id: "scaffold-blueprint",
 		title: "Create the blueprint project",
-		detail: "Rocket Launch, Service worker, or AI agent",
+		detail: "Rocket Launch or Service worker",
 		component: "blueprint",
-	},
-	{
-		id: "deploy-blueprint",
-		title: "Deploy and start the process",
-		detail: "your first running process instance",
-		component: "blueprint",
-		dependsOn: ["scaffold-blueprint", "start-cluster"],
 	},
 	{
 		id: "install-skills",
@@ -211,6 +210,16 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		detail:
 			"Camunda 8 docs in your AI assistant — browser sign-in on first use",
 		component: "docs-mcp",
+	},
+	{
+		// The finale: runs last, and only when every earlier step
+		// succeeded — no first process on a partially broken setup.
+		id: "deploy-blueprint",
+		title: "Deploy and start the process",
+		detail: "your first running process instance",
+		component: "blueprint",
+		dependsOn: ["scaffold-blueprint", "start-cluster"],
+		requiresCleanRun: true,
 	},
 ];
 
@@ -318,6 +327,52 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 				"Pick what to set up. Nothing runs without your say.".length,
 		),
 		empty,
+		bottom,
+	].join("\n");
+}
+
+// ── Next steps ─────────────────────────────────────────────────────
+
+/**
+ * The boxed completion block after the step report: the takeaway of the
+ * whole run, visually set apart from the status lines so it cannot
+ * blend in. The box is as wide as its longest line; the heading carries
+ * the brand color on a terminal. When the content would exceed the
+ * terminal's width (`maxWidth`), the borders would wrap — the block
+ * degrades to an unboxed, indented list that keeps long paths and URLs
+ * intact.
+ */
+export function renderNextSteps(
+	lines: readonly string[],
+	{ color, maxWidth }: { color: boolean; maxWidth?: number },
+): string {
+	const s = bannerStyle({ color });
+	const heading = "What's next";
+	const width = Math.max(heading.length, ...lines.map((line) => line.length));
+	// `.length` counts UTF-16 code units, not terminal columns — non-ASCII
+	// content (CJK paths, emoji) would misalign the borders. Box only
+	// printable-ASCII lines; anything wider gets the unboxed fallback.
+	const printableAscii = lines.every((line) =>
+		[...line].every((char) => {
+			const code = char.codePointAt(0) ?? 0;
+			return code >= 0x20 && code <= 0x7e;
+		}),
+	);
+	if (!printableAscii || (maxWidth !== undefined && width + 6 > maxWidth)) {
+		return [
+			`${s.brand}${s.bold}${heading}${s.reset}`,
+			...lines.map((line) => `  ${line}`),
+		].join("\n");
+	}
+	const top = `╭${"─".repeat(width + 4)}╮`;
+	const bottom = `╰${"─".repeat(width + 4)}╯`;
+	const row = (text: string, visibleLength: number) =>
+		`│  ${text}${" ".repeat(width - visibleLength)}  │`;
+	return [
+		top,
+		row(`${s.brand}${s.bold}${heading}${s.reset}`, heading.length),
+		row("", 0),
+		...lines.map((line) => row(line, line.length)),
 		bottom,
 	].join("\n");
 }

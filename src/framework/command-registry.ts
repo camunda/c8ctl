@@ -1829,10 +1829,6 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl setup --yes",
 				description: "Set up the defaults, without prompting",
 			},
-			{
-				command: "c8ctl setup --blueprint rocket-launch",
-				description: "Set up the defaults with the Rocket Launch blueprint",
-			},
 		],
 		helpNotes: [
 			"The wizard offers to start a local cluster (downloading Camunda 8 Run",
@@ -1841,21 +1837,19 @@ export const COMMAND_REGISTRY = {
 			"Nothing is installed without your say.",
 			"Each step announces its title and ends in [SUCCESS], [ERROR] or",
 			"[SKIPPED]; a step's own output is shown only when it fails, and a",
-			"failed step does not stop the rest. The blueprint needs the local",
-			"cluster — deselect the cluster and the blueprint option is disabled.",
+			"failed step does not stop the rest. The blueprint and the cluster MCP",
+			"server need the local cluster — deselect the cluster and both options",
+			"are disabled.",
 			"A browser window opens when the local cluster reports healthy; the docs",
 			"MCP server asks you to sign in in a browser on first use — announced",
 			"up front.",
 			"A run without a selection (piped output, CI) installs nothing",
 			"unless you pass --yes; --json prints the plan without executing.",
+			"The starter blueprint is chosen in the wizard; a non-interactive",
+			"--yes run uses Rocket Launch.",
 		],
 		resources: [],
 		flags: {
-			blueprint: {
-				type: "string",
-				description:
-					"Starter blueprint to install: rocket-launch, service-worker, or ai-agent",
-			},
 			modeler: {
 				type: "boolean",
 				description: "Install Desktop Modeler, whatever the selection",

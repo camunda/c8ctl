@@ -1,15 +1,22 @@
 /**
  * Project scaffolding for `c8ctl setup`.
  *
- * The three blueprints are intentionally curated here and are not exposed as
+ * The blueprints are intentionally curated here and are not exposed as
  * a CLI command. Files are enumerated through GitHub's tree API and each file
  * is downloaded from its raw URL, so setup does not require git.
+ *
+ * Scaffolding is idempotent: a finished scaffold carries a marker file
+ * (`.c8ctl-blueprint.json`) with its blueprint id and file list. A rerun
+ * against the same blueprint reuses the directory without touching the
+ * network; a directory marked with a different blueprint — or a foreign
+ * non-empty directory — is an actionable error, never an overwrite.
  */
 
 import {
 	existsSync,
 	mkdirSync,
 	readdirSync,
+	readFileSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
@@ -46,13 +53,6 @@ export interface SetupBlueprint {
 	 * inputs to run through without an incident.
 	 */
 	readonly startVariables?: Record<string, unknown>;
-	/**
-	 * When set, setup deploys the project but does not start an instance:
-	 * the process needs something setup cannot provide (credentials,
-	 * inputs). The note tells the user what to configure and how to
-	 * start it themselves afterwards.
-	 */
-	readonly startNote?: string;
 }
 
 export const SETUP_BLUEPRINTS = [
@@ -88,27 +88,6 @@ export const SETUP_BLUEPRINTS = [
 		// the bpmn/ directory is deployed.
 		deployPath: "bpmn",
 		processFile: "bpmn/order-process.bpmn",
-	},
-	{
-		id: "ai-agent",
-		name: "AI agent",
-		description: "An agentic chat process with tools and user feedback.",
-		guideUrl:
-			"https://docs.camunda.io/docs/guides/getting-started-agentic-orchestration/",
-		source: {
-			owner: "camunda",
-			repo: "camunda-8-tutorials",
-			ref: "main",
-			path: "solutions/ai-agent-chat-with-tools",
-		},
-		processFile: "ai-agent-chat-with-tools.bpmn",
-		// The model calls an LLM through Camunda-provided connector
-		// secrets that exist only on SaaS, and it expects an initial
-		// input — a fresh local cluster cannot run it as-is.
-		startNote:
-			"needs an LLM provider. Configure the AI Agent connector secrets " +
-			"for your cluster, then start a chat instance with: " +
-			`c8ctl create pi --id=ai-agent-chat-with-tools --variables '{"inputText":"Hello!"}' --profile local`,
 	},
 ] as const satisfies readonly SetupBlueprint[];
 
@@ -374,6 +353,42 @@ function assertDestinationAvailable(directory: string): void {
 	}
 }
 
+// ── Idempotency marker ─────────────────────────────────────────────
+
+/** Written into every finished scaffold; makes a rerun reuse the project. */
+const MARKER_FILE = ".c8ctl-blueprint.json";
+
+interface BlueprintMarker {
+	readonly id: string;
+	readonly files: string[];
+}
+
+function isBlueprintMarker(value: unknown): value is BlueprintMarker {
+	return (
+		isRecord(value) &&
+		typeof value.id === "string" &&
+		Array.isArray(value.files) &&
+		value.files.every((file) => typeof file === "string")
+	);
+}
+
+/**
+ * The marker of a previously scaffolded project, or undefined when the
+ * directory has none (fresh, empty, or foreign). A corrupt marker reads
+ * as no marker: the directory is then foreign and refuses scaffolding.
+ */
+function readMarker(directory: string): BlueprintMarker | undefined {
+	const markerPath = join(directory, MARKER_FILE);
+	if (!existsSync(markerPath)) return undefined;
+	try {
+		const value: unknown = JSON.parse(readFileSync(markerPath, "utf-8"));
+		if (isBlueprintMarker(value)) return { id: value.id, files: value.files };
+	} catch {
+		// Unreadable or invalid JSON — treat the directory as foreign.
+	}
+	return undefined;
+}
+
 function destinationPath(directory: string, relativePath: string): string {
 	return join(directory, ...relativePath.split("/"));
 }
@@ -409,13 +424,27 @@ async function downloadFiles({
 	return files;
 }
 
-function writeFiles(directory: string, files: readonly DownloadedFile[]): void {
+function writeFiles(
+	directory: string,
+	files: readonly DownloadedFile[],
+	blueprint: SetupBlueprint,
+): void {
 	mkdirSync(directory, { recursive: true });
 	for (const file of files) {
 		const destination = destinationPath(directory, file.relativePath);
 		mkdirSync(dirname(destination), { recursive: true });
 		writeFileSync(destination, file.contents, { flag: "wx" });
 	}
+	// The marker goes last: its presence proves the scaffold completed.
+	const marker: BlueprintMarker = {
+		id: blueprint.id,
+		files: files.map((file) => file.relativePath),
+	};
+	writeFileSync(
+		join(directory, MARKER_FILE),
+		`${JSON.stringify(marker, null, 2)}\n`,
+		{ flag: "wx" },
+	);
 }
 
 /** Download one curated setup blueprint into a new or empty directory. */
@@ -429,6 +458,40 @@ export async function scaffoldSetupBlueprint({
 }: ScaffoldSetupBlueprintOptions): Promise<ScaffoldedSetupBlueprint> {
 	const blueprint = setupBlueprintById(id);
 	const directory = resolve(cwd, destinationDir ?? blueprint.id);
+
+	// Idempotent rerun: a directory marked with this blueprint is reused
+	// as-is — no suffixed copies, no network, no overwrite.
+	const marker = readMarker(directory);
+	if (marker) {
+		if (marker.id === blueprint.id) {
+			// A marker alone is not proof of a complete project: a file may
+			// have been deleted since. Refuse to reuse a partial scaffold —
+			// deploying it would fail later with a less obvious error.
+			const missing = marker.files.filter(
+				(file) => !existsSync(destinationPath(directory, file)),
+			);
+			if (missing.length > 0) {
+				throw new BlueprintScaffoldError(
+					`Blueprint project ${directory} is incomplete: ${missing.join(", ")} missing.`,
+					{
+						hint: "Remove the directory and re-run to scaffold the blueprint fresh; existing files are never overwritten.",
+					},
+				);
+			}
+			onProgress?.({
+				phase: "complete",
+				message: `${blueprint.name} is already set up in ${directory}.`,
+				totalFiles: marker.files.length,
+			});
+			return { blueprint, directory, files: marker.files };
+		}
+		throw new BlueprintScaffoldError(
+			`Blueprint destination ${directory} already contains the "${marker.id}" blueprint.`,
+			{
+				hint: `Remove the directory to start over, or keep it and pick the "${marker.id}" blueprint in the setup wizard.`,
+			},
+		);
+	}
 	assertDestinationAvailable(directory);
 
 	onProgress?.({
@@ -477,7 +540,7 @@ export async function scaffoldSetupBlueprint({
 		totalFiles: files.length,
 	});
 	assertDestinationAvailable(directory);
-	writeFiles(directory, downloaded);
+	writeFiles(directory, downloaded, blueprint);
 	onProgress?.({
 		phase: "complete",
 		message: `${blueprint.name} is ready in ${directory}.`,
