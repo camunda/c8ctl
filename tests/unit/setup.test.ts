@@ -545,9 +545,9 @@ describe("c8ctl setup", () => {
 			// The sign-in browser window is announced before the first step runs.
 			assert.match(
 				out,
-				/a browser window will open to sign in for the docs MCP server/,
+				/the docs MCP server needs you to sign in — a browser window will open/,
 			);
-			assert.match(out, /requires sign-in on first use/);
+			assert.match(out, /asks you to sign in in a browser on first use/);
 			const mcpConfig: unknown = JSON.parse(
 				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
 			);

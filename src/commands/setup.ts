@@ -356,9 +356,12 @@ function runMcpInstall(docs: boolean): StepExecutor {
 			});
 		}
 		if (docs) {
-			ctx.logger.info("The docs server requires sign-in on first use.", {
-				essential: true,
-			});
+			ctx.logger.info(
+				"The docs server asks you to sign in in a browser on first use.",
+				{
+					essential: true,
+				},
+			);
 		}
 	};
 }
@@ -652,7 +655,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	// same way a plain "c8ctl cluster start" does.)
 	if (selected.has("docs-mcp")) {
 		logger.info(
-			"Heads up: a browser window will open to sign in for the docs MCP server.",
+			"Heads up: the docs MCP server needs you to sign in — a browser window will open for it.",
 			{ essential: true },
 		);
 	}

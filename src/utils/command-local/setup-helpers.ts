@@ -98,7 +98,7 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 	{
 		id: "docs-mcp",
 		label: "Docs MCP server",
-		why: "Always-current Camunda 8 docs in your AI assistant (browser sign-in)",
+		why: "Always-current Camunda 8 docs in your AI assistant (sign-in opens a browser)",
 		defaultSelected: false,
 	},
 ];
@@ -208,8 +208,7 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 	{
 		id: "docs-mcp",
 		title: "Configure the docs MCP server",
-		detail:
-			"Camunda 8 docs in your AI assistant — a browser window opens to sign in",
+		detail: "Camunda 8 docs in your AI assistant — you sign in in your browser",
 		component: "docs-mcp",
 	},
 ];
