@@ -332,6 +332,50 @@ describe("scaffoldSetupBlueprint()", () => {
 		}
 	});
 
+	test("refuses to reuse an incomplete scaffold and names the missing files", async () => {
+		const root = tempDir("c8ctl-blueprint-incomplete-");
+		const destination = join(root, "rocket-launch");
+		mkdirSync(destination, { recursive: true });
+		writeFileSync(join(destination, "README.md"), "# Rocket Launch\n");
+		writeFileSync(
+			join(destination, ".c8ctl-blueprint.json"),
+			JSON.stringify({
+				id: "rocket-launch",
+				files: ["README.md", "rocket-launch.bpmn"],
+			}),
+		);
+		let fetchCount = 0;
+		const fetch: BlueprintFetch = async () => {
+			fetchCount += 1;
+			return jsonResponse({});
+		};
+
+		try {
+			await assert.rejects(
+				scaffoldSetupBlueprint({
+					id: "rocket-launch",
+					destinationDir: destination,
+					fetch,
+				}),
+				(error: unknown) => {
+					assert.ok(error instanceof BlueprintScaffoldError);
+					assert.match(error.message, /is incomplete/);
+					assert.match(error.message, /rocket-launch\.bpmn/);
+					assert.match(error.hint ?? "", /Remove the directory/);
+					return true;
+				},
+			);
+			assert.strictEqual(fetchCount, 0);
+			// The remaining file is left untouched.
+			assert.strictEqual(
+				readFileSync(join(destination, "README.md"), "utf-8"),
+				"# Rocket Launch\n",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test("refuses a destination scaffolded from a different blueprint", async () => {
 		const root = tempDir("c8ctl-blueprint-mismatch-");
 		const destination = join(root, "project");

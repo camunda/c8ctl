@@ -464,6 +464,20 @@ export async function scaffoldSetupBlueprint({
 	const marker = readMarker(directory);
 	if (marker) {
 		if (marker.id === blueprint.id) {
+			// A marker alone is not proof of a complete project: a file may
+			// have been deleted since. Refuse to reuse a partial scaffold —
+			// deploying it would fail later with a less obvious error.
+			const missing = marker.files.filter(
+				(file) => !existsSync(destinationPath(directory, file)),
+			);
+			if (missing.length > 0) {
+				throw new BlueprintScaffoldError(
+					`Blueprint project ${directory} is incomplete: ${missing.join(", ")} missing.`,
+					{
+						hint: "Remove the directory and re-run to scaffold the blueprint fresh; existing files are never overwritten.",
+					},
+				);
+			}
 			onProgress?.({
 				phase: "complete",
 				message: `${blueprint.name} is already set up in ${directory}.`,
