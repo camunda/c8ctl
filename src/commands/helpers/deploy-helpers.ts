@@ -902,9 +902,18 @@ export async function deployResources(
 		/** Explicit tenant, bypassing session/env resolution. `c8ctl setup`
 		 *  uses it to pin the local cluster's default tenant. */
 		tenantId?: string;
+		/** When true, suppress success-path progress output (the "Deploying…"
+		 *  line, the success confirmation and the deployed-resources table).
+		 *  `c8ctl setup` uses it: the step report is the signal. Failures
+		 *  still render in full. */
+		quiet?: boolean;
+		/** Logger override — defaults to the shared singleton. `c8ctl setup`
+		 *  passes its buffered step logger so failure diagnostics close the
+		 *  step's title line before printing instead of colliding with it. */
+		logger?: ReturnType<typeof getLogger>;
 	},
 ): Promise<void> {
-	const logger = getLogger();
+	const logger = options.logger ?? getLogger();
 	const tenantId = options.tenantId ?? resolveTenantId(options.profile);
 
 	// ─── Pre-API-call validation and preparation ────────────────────────
@@ -998,7 +1007,9 @@ export async function deployResources(
 		throw new SilentError(duplicateIdsMessage);
 	}
 
-	logger.info(`Deploying ${resources.length} resource(s)...`);
+	if (!options.quiet) {
+		logger.info(`Deploying ${resources.length} resource(s)...`);
+	}
 
 	// Create a mapping from definition ID to resource file for later reference
 	const definitionIdToResource = new Map<string, ResourceFile>();
@@ -1116,7 +1127,9 @@ export async function deployResources(
 	}
 	options.signal?.removeEventListener("abort", onAbort);
 
-	logger.success("Deployment successful", result.deploymentKey.toString());
+	if (!options.quiet) {
+		logger.success("Deployment successful", result.deploymentKey.toString());
+	}
 
 	// Group resources by their directory (building block or process application)
 	type ResourceRow = {
@@ -1245,7 +1258,7 @@ export async function deployResources(
 		Key,
 	}));
 
-	if (displayData.length > 0) {
+	if (displayData.length > 0 && !options.quiet) {
 		logger.table(displayData);
 	}
 }

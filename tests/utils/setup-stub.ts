@@ -17,9 +17,9 @@
  *    (Builtin fs is patched before the CLI's imports load, and
  *    syncBuiltinESMExports() publishes the patches to named ESM imports.)
  *
- * Child processes: `c8ctl cluster install|start` self-invocations are
- * faked (a successful `start` flips the health endpoint to UP), `gh`
- * skill installs report success, and browser openers exit quietly.
+ * Child processes: the `c8ctl cluster start` self-invocation is faked (a
+ * successful `start` flips the health endpoint to UP), `gh` skill
+ * installs report success, and browser openers exit quietly.
  * `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process exit
  * 1 so failure handling is exercised. Everything else passes through.
  *
@@ -31,7 +31,9 @@
  *   C8CTL_SETUP_STUB_CAPTURE=file — the process-instance creation request
  *                                   body is written to this file.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
- *                                   (e.g. "install-c8run", "install-skills").
+ *                                   (e.g. "start-cluster", "install-skills").
+ *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
+ *                                   warning on stderr while succeeding.
  */
 
 import childProcess from "node:child_process";
@@ -39,6 +41,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { basename } from "node:path";
+import { PassThrough } from "node:stream";
 
 // ── Desktop Modeler looks installed ────────────────────────────────
 // macOS and Windows look the app up at fixed paths. The Linux lookup
@@ -164,17 +167,48 @@ let clusterRunning = clusterUpAtBoot;
 class FakeChild extends EventEmitter {
 	pid = 123456;
 	stdin = null;
-	stdout = null;
-	stderr = null;
+	stdout = new PassThrough();
+	stderr = new PassThrough();
 	unref(): void {}
 	kill(): boolean {
 		return true;
 	}
 }
 
-function fakeChild(exitCode: number): FakeChild {
+/** What the fake `cluster start` child prints on its streams. */
+const CLUSTER_CHILD_OUTPUT = {
+	stdout:
+		'Resolved alias "stable" → 8.10\n' +
+		"Downloading Camunda 8.10 for darwin...\n" +
+		"//> 5% (43.0 MB / 860.6 MB) at 10.0 MB/s, ETA 1m 22s\n" +
+		"//> 100% (860.6 MB / 860.6 MB) at 10.8 MB/s\n" +
+		"c8run 8.10 installed successfully.\n" +
+		"Starting Camunda 8 local cluster...\n" +
+		"Cluster is ready!\n",
+};
+
+/** A plugin warning that a successful `cluster start` can still print. */
+const CLUSTER_CHILD_WARNING =
+	"Could not persist the durable cluster PID record (disk full); the cluster is still tracked via its markers and pidfiles.\n";
+
+function fakeChild(
+	exitCode: number,
+	{ stdout = "", stderr = "" }: { stdout?: string; stderr?: string } = {},
+): FakeChild {
 	const child = new FakeChild();
-	process.nextTick(() => child.emit("close", exitCode, null));
+	// close only after the streams were read to their end, so forwarded
+	// output can never race the step's status line.
+	let open = 2;
+	const done = () => {
+		open -= 1;
+		if (open === 0) child.emit("close", exitCode, null);
+	};
+	process.nextTick(() => {
+		child.stdout.on("end", done);
+		child.stderr.on("end", done);
+		child.stdout.end(stdout);
+		child.stderr.end(stderr);
+	});
 	return child;
 }
 
@@ -187,23 +221,27 @@ Object.defineProperty(childProcess, "spawn", {
 		const argv = [command, ...(Array.isArray(rest[0]) ? rest[0] : [])].map(
 			String,
 		);
-		// setup self-invokes the cluster plugin for install/start.
+		// setup self-invokes the cluster plugin to start the cluster.
 		if (argv.includes("cluster")) {
-			const subcommand = argv.includes("install")
-				? "install-c8run"
-				: argv.includes("start")
-					? "start-cluster"
-					: undefined;
-			if (subcommand !== undefined) {
-				// The real plugin exits 1 when install has no version argument;
-				// mirror that so a missing version fails the test, not the user.
-				if (subcommand === "install-c8run" && !argv.includes("stable")) {
-					return fakeChild(1);
+			if (argv.includes("start")) {
+				if (failStep === "start-cluster") {
+					// Like the real plugin: chatter on stdout, diagnostics on stderr.
+					return fakeChild(1, {
+						stdout: CLUSTER_CHILD_OUTPUT.stdout,
+						stderr: "stubbed cluster failure diagnostics\n",
+					});
 				}
-				if (failStep === subcommand) return fakeChild(1);
-				if (subcommand === "start-cluster") clusterRunning = true;
-				return fakeChild(0);
+				clusterRunning = true;
+				return fakeChild(0, {
+					...CLUSTER_CHILD_OUTPUT,
+					...(process.env.C8CTL_SETUP_STUB_CLUSTER_WARN === "1"
+						? { stderr: CLUSTER_CHILD_WARNING }
+						: {}),
+				});
 			}
+			// setup must not self-invoke anything but `cluster start` —
+			// a first-run install is part of start.
+			return fakeChild(1);
 		}
 		// Browser openers: open (macOS), xdg-open (Linux), cmd.exe /c start.
 		if (["open", "xdg-open", "cmd.exe"].includes(basename(String(command)))) {
@@ -270,6 +308,16 @@ globalThis.fetch = async (
 	// The Orchestration Cluster API of the built-in local profile, which
 	// setup's deploy step pins explicitly.
 	if (url === "http://localhost:8080/v2/deployments") {
+		if (failStep === "deploy-blueprint") {
+			return json(
+				{
+					title: "INVALID_ARGUMENT",
+					detail: "stubbed invalid deployment",
+					status: 400,
+				},
+				400,
+			);
+		}
 		return json(DEPLOYMENT_RESULT);
 	}
 	if (url === "http://localhost:8080/v2/process-instances") {

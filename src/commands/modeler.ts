@@ -64,6 +64,17 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Progress chatter that `quiet` suppresses (download and install
+ * announcements); warnings and failure diagnostics still surface.
+ */
+function reportProgress(
+	{ logger, quiet }: Pick<CommandContext, "logger" | "quiet">,
+	message: string,
+): void {
+	if (!quiet) logger.info(message);
+}
+
 function manualDownloadError(message: string): Error {
 	return new Error(`${message}. Download manually from ${MANUAL_DOWNLOAD_URL}`);
 }
@@ -322,7 +333,7 @@ async function downloadArchive({
 		clearTimeout(stallTimer);
 	}
 
-	if (!live) {
+	if (!live && !quiet) {
 		logger.info(`Downloaded ${(received / 1_048_576).toFixed(1)} MB.`);
 	}
 }
@@ -346,7 +357,10 @@ async function downloadLatestRelease({
 	const version = latestStableModelerVersion(await fetchReleaseIndex(signal));
 	const name = archiveName(version);
 	const archivePath = join(dir, name);
-	logger.info(`Downloading Camunda Modeler ${version} for ${platform}...`);
+	reportProgress(
+		{ logger, quiet },
+		`Downloading Camunda Modeler ${version} for ${platform}...`,
+	);
 	await downloadArchive({
 		url: new URL(`${version}/${name}`, MODELER_RELEASE_URL).toString(),
 		destination: archivePath,
@@ -396,7 +410,10 @@ async function installFromOfficialDownload({
 		// and a failed or rejected extraction never leaves a partial bundle.
 		const stagingDir = mkdtempSync(join(applicationsDir, ".c8ctl-modeler-"));
 		try {
-			logger.info(`Installing Camunda Modeler to ${destination}...`);
+			reportProgress(
+				{ logger, quiet },
+				`Installing Camunda Modeler to ${destination}...`,
+			);
 			runCommand("ditto", ["-x", "-k", archivePath, stagingDir], {
 				failureMessage: "Could not extract Camunda Modeler",
 				quiet,
@@ -542,7 +559,10 @@ function installOnWindows({
 			};
 		}
 
-		logger.info("Installing Camunda Modeler with winget...");
+		reportProgress(
+			{ logger, quiet },
+			"Installing Camunda Modeler with winget...",
+		);
 		// winget picks the build for this machine, verifies its checksum, and
 		// lists it under Installed apps, so `winget upgrade` can update it.
 		// User scope needs no administrator rights, whatever winget's settings prefer.
@@ -665,13 +685,17 @@ async function installOnLinux({
 	}
 
 	if (process.getuid?.() !== 0) {
-		logger.info(
+		reportProgress(
+			{ logger, quiet },
 			`Installing to ${LINUX_INSTALL_ROOT} needs root privileges; sudo may ask for your password.`,
 		);
 	}
 	runAsRoot(["true"], "Could not get root privileges", quiet);
 
-	logger.info("Checking for the latest stable Camunda Modeler release...");
+	reportProgress(
+		{ logger, quiet },
+		"Checking for the latest stable Camunda Modeler release...",
+	);
 	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
 	const controller = new AbortController();
 	let interruptedSignal: NodeJS.Signals | undefined;
@@ -695,7 +719,10 @@ async function installOnLinux({
 		const releaseDir = `camunda-modeler-${version}-linux-x64`;
 		const installDir = join(LINUX_INSTALL_ROOT, releaseDir);
 		const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
-		logger.info(`Installing Camunda Modeler to ${installDir}...`);
+		reportProgress(
+			{ logger, quiet },
+			`Installing Camunda Modeler to ${installDir}...`,
+		);
 		// Remove stale links before extraction and recreate the launcher last.
 		runAsRoot(["rm", "-f", launcher], `Could not remove ${launcher}`, quiet);
 		runAsRoot(
@@ -778,7 +805,7 @@ export async function installDesktopModeler(
 			};
 		}
 
-		ctx.logger.info("Installing Camunda Modeler with Homebrew...");
+		reportProgress(ctx, "Installing Camunda Modeler with Homebrew...");
 		runCommand("brew", ["install", "--cask", "camunda-modeler"], {
 			failureMessage: "Homebrew could not install Camunda Modeler",
 			quiet: ctx.quiet,
@@ -805,12 +832,16 @@ export async function installDesktopModeler(
 		};
 	}
 	if (applicationsDir !== SYSTEM_APPLICATIONS_DIR) {
-		ctx.logger.info(
+		reportProgress(
+			ctx,
 			`${SYSTEM_APPLICATIONS_DIR} is not writable; installing to ${applicationsDir} instead.`,
 		);
 	}
 
-	ctx.logger.info("Checking for the latest stable Camunda Modeler release...");
+	reportProgress(
+		ctx,
+		"Checking for the latest stable Camunda Modeler release...",
+	);
 	const { version, destination } = await installFromOfficialDownload({
 		applicationsDir,
 		logger: ctx.logger,

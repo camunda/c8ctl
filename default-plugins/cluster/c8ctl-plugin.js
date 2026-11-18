@@ -1578,12 +1578,27 @@ export async function ensureC8RunInstalled(config) {
 
 const STARTUP_SUMMARY_MARKER = '- Operate:';
 
-function extractStartupSummary(rawOutput) {
+/**
+ * c8run's zerolog console lines (`9:57AM INF …`). The summary is printed
+ * as soon as Camunda is healthy, but the captured output continues with
+ * these log lines while the Connectors runtime still starts. Cut there —
+ * printing them after the summary looks like the cluster started twice.
+ */
+const C8RUN_LOG_LINE =
+  /^\d{1,2}:\d{2}(?::\d{2})?(?:AM|PM)?\s+(?:DBG|INF|WRN|ERR|FTL|PNC|TRC)\s/;
+
+export function extractStartupSummary(rawOutput) {
   const startIndex = rawOutput.indexOf(STARTUP_SUMMARY_MARKER);
   if (startIndex === -1) {
     return null;
   }
-  return rawOutput.slice(startIndex).trim();
+  const lines = rawOutput.slice(startIndex).split('\n');
+  const summaryLines = [];
+  for (const line of lines) {
+    if (C8RUN_LOG_LINE.test(line.trimStart())) break;
+    summaryLines.push(line);
+  }
+  return summaryLines.join('\n').trim();
 }
 
 async function waitForClusterReady(maxWaitMs = CLUSTER_STARTUP_TIMEOUT_MS) {

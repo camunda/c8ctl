@@ -1815,8 +1815,7 @@ export const COMMAND_REGISTRY = {
 		description: "Guided first-run setup for local Camunda 8 development",
 		helpDescription:
 			"Guided first-run setup: install a local cluster, a starter " +
-			"blueprint project, and AI assistant tooling — prints the plan " +
-			"before anything runs.",
+			"blueprint project, and AI assistant tooling.",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show setup details",
 		mutating: true,
@@ -1836,15 +1835,19 @@ export const COMMAND_REGISTRY = {
 			},
 		],
 		helpNotes: [
-			"The wizard offers to install Camunda 8 Run and start a local cluster,",
-			"install Desktop Modeler, create a starter project from a blueprint,",
-			"deploy and run it, and set up AI assistant skills and MCP servers.",
+			"The wizard offers to start a local cluster (downloading Camunda 8 Run",
+			"on first run), install Desktop Modeler, create a starter project from a",
+			"blueprint, deploy and run it, and set up AI assistant tooling.",
 			"Nothing is installed without your say.",
-			"Steps report [SUCCESS], [ERROR] or [SKIPPED] in order; a failed step",
-			"does not stop the rest. The blueprint needs the local cluster —",
-			"deselect the cluster and the blueprint option is disabled.",
-			"Non-interactive runs (piped output, CI, --json) print the plan only;",
-			"pass --yes to execute it with the defaults.",
+			"Each step announces its title and ends in [SUCCESS], [ERROR] or",
+			"[SKIPPED]; a step's own output is shown only when it fails, and a",
+			"failed step does not stop the rest. The blueprint needs the local",
+			"cluster — deselect the cluster and the blueprint option is disabled.",
+			"A browser window opens when the local cluster reports healthy; the docs",
+			"MCP server asks you to sign in in a browser on first use — announced",
+			"up front.",
+			"A run without a selection (piped output, CI) installs nothing",
+			"unless you pass --yes; --json prints the plan without executing.",
 		],
 		resources: [],
 		flags: {

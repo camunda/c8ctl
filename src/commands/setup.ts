@@ -2,19 +2,22 @@
  * `c8ctl setup` — guided first-run setup for local Camunda 8 development.
  *
  * Prints the welcome banner, asks what to set up (checkbox list with
- * dependencies plus a blueprint choice), shows the tailored plan, then
- * runs every selected step. Each step ends in a `[SUCCESS]`, `[ERROR]`
- * or `[SKIPPED]` line in an aligned column; a failed step prints its
- * error on the following lines and the remaining steps still run. Steps
- * whose dependencies failed are skipped with the unmet steps named.
+ * dependencies plus a blueprint choice), then runs every selected step.
+ * Each step ends in a `[SUCCESS]`, `[ERROR]` or `[SKIPPED]` line in an
+ * aligned column (green, red and dim on a terminal); a failed step
+ * prints its error on the following lines and the remaining steps still
+ * run. Steps whose dependencies failed are skipped with the unmet steps
+ * named.
+ *
+ * The browser opens once: c8run itself opens it when the cluster
+ * reports healthy, exactly as on a plain `c8ctl cluster start`.
  *
  * Execution needs a go-ahead: an interactive selection or `--yes`. A
- * piped run without `--yes` and JSON mode print the plan only, so a
- * script never installs software by accident.
+ * piped run without `--yes` and JSON mode print the plan payload only,
+ * so a script never installs software by accident.
  *
  * Streams: the banner, prompts and progress are UI chrome on stderr; the
- * plan, the step report and the JSON payload are the command's answer on
- * stdout.
+ * step report and the JSON payload are the command's answer on stdout.
  */
 
 import { spawn } from "node:child_process";
@@ -24,7 +27,7 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, DEFAULT_PROFILE } from "../core/index.ts";
+import { createClient, DEFAULT_PROFILE, SilentError } from "../core/index.ts";
 import {
 	type CommandContext,
 	defineCommand,
@@ -36,15 +39,15 @@ import {
 	CAMUNDA_SKILLS_REPOSITORY,
 	checkLocalClusterHealth,
 	checkPrerequisites,
+	createLineForwarder,
 	defaultSelection,
-	deriveAppUrl,
 	detectInstalledHarnesses,
 	enforceComponentDependencies,
 	formatStepResult,
+	formatStepStatusSuffix,
+	isClusterProgressLine,
 	MANUAL_SETUP_LINKS,
-	openUrl,
 	planMcpConfigs,
-	renderSetupPlan,
 	renderWelcomeBanner,
 	runSkillInstall,
 	SETUP_BLUEPRINTS,
@@ -82,6 +85,8 @@ const LOCAL_TENANT_ID = "<default>";
 interface SetupRun {
 	blueprintId: string | undefined;
 	blueprintDir?: string;
+	/** Set when the cluster step succeeded — drives the final Operate hint. */
+	clusterStarted?: boolean;
 }
 
 /**
@@ -146,56 +151,71 @@ const CLI_ENTRY = realpathSync(
 );
 
 /**
- * The cluster commands live in the built-in cluster plugin, which owns
- * process exit on failure — so setup runs them as child processes and
- * maps the exit code onto the step result. `install` requires an
- * explicit version (the plugin exits 1 without one); `start` defaults
- * to the same "stable" alias on its own.
+ * The cluster command lives in the built-in cluster plugin, which owns
+ * process exit on failure — so setup runs it as a child process and maps
+ * the exit code onto the step result. `cluster start` downloads Camunda 8
+ * Run on first run, so this one step covers install and start.
+ *
+ * The child's stdout is streamed through a line filter that drops the
+ * download progress lines (`//> 42% …`) and feeds the step's output
+ * buffer (via ctx.logger) — it surfaces only when the step fails.
+ * stderr passes through immediately: the plugin's warnings and failure
+ * diagnostics are actionable either way. The child is pinned to text
+ * mode so its lines stay plain and filterable no matter the session's
+ * output mode.
  */
-function runClusterSubcommand(subcommand: "install" | "start"): Promise<void> {
-	const args = [
-		CLI_ENTRY,
-		"cluster",
-		subcommand,
-		...(subcommand === "install" ? ["stable"] : []),
-	];
+function spawnClusterStart(ctx: CommandContext): Promise<void> {
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(process.execPath, args, {
-			stdio: "inherit",
+		const child = spawn(process.execPath, [CLI_ENTRY, "cluster", "start"], {
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, C8CTL_OUTPUT_MODE: "text" },
 		});
+		const forward = (stream: "stdout" | "stderr", essential: boolean) =>
+			createLineForwarder({
+				write: (line) => ctx.logger.info(line, { stream, essential }),
+				skip: isClusterProgressLine,
+			});
+		const out = forward("stdout", false);
+		const err = forward("stderr", true);
+		child.stdout?.setEncoding("utf-8");
+		child.stderr?.setEncoding("utf-8");
+		child.stdout?.on("data", (chunk: string) => out.push(chunk));
+		child.stderr?.on("data", (chunk: string) => err.push(chunk));
 		child.on("error", (error) =>
 			rejectPromise(
-				new Error(
-					`Could not run c8ctl cluster ${subcommand}: ${error.message}`,
-				),
+				new Error(`Could not run c8ctl cluster start: ${error.message}`),
 			),
 		);
 		child.on("close", (code) => {
+			out.flush();
+			err.flush();
 			if (code === 0) {
 				resolvePromise();
 			} else {
 				rejectPromise(
-					new Error(`c8ctl cluster ${subcommand} failed (exit code ${code}).`),
+					new Error(`c8ctl cluster start failed (exit code ${code}).`),
 				);
 			}
 		});
 	});
 }
 
-async function runClusterInstall(): Promise<void> {
-	await runClusterSubcommand("install");
-}
-
 /** c8run's launcher exits before the services report healthy — poll for it. */
 const CLUSTER_HEALTH_TIMEOUT_MS = 120_000;
 const CLUSTER_HEALTH_POLL_MS = 2_000;
 
-async function runClusterStart(ctx: CommandContext): Promise<void> {
-	await runClusterSubcommand("start");
+async function runClusterStart(
+	ctx: CommandContext,
+	run: SetupRun,
+): Promise<void> {
+	await spawnClusterStart(ctx);
 	const deadline = Date.now() + CLUSTER_HEALTH_TIMEOUT_MS;
 	for (;;) {
 		const health = await checkLocalClusterHealth();
-		if (health.healthy) return;
+		if (health.healthy) {
+			run.clusterStarted = true;
+			return;
+		}
 		if (Date.now() >= deadline) {
 			throw new Error(
 				`The cluster did not become healthy within ${CLUSTER_HEALTH_TIMEOUT_MS / 1000}s (${health.detail}). Check: c8ctl cluster status`,
@@ -209,14 +229,14 @@ async function runClusterStart(ctx: CommandContext): Promise<void> {
 }
 
 async function runModelerInstall(ctx: CommandContext): Promise<void> {
-	const result = await installDesktopModeler({
+	// Always quiet: the installer's progress chatter is noise next to the
+	// step report — the step's status line is the signal. Failures still
+	// throw with diagnostics.
+	await installDesktopModeler({
 		isDryRun: false,
 		logger: ctx.logger,
-		quiet: ctx.quiet,
+		quiet: true,
 	});
-	if (result.kind === "success" || result.kind === "info") {
-		ctx.logger.info(result.message);
-	}
 }
 
 async function runBlueprintScaffold(
@@ -271,13 +291,20 @@ async function runBlueprintDeploy(
 		basePath: directory,
 		verbose: ctx.verbose,
 		tenantId: LOCAL_TENANT_ID,
+		// The step report is the signal; its progress render is noise here.
+		// The step's buffered logger routes failure diagnostics through the
+		// title-closing hook instead of colliding with the open title line.
+		quiet: true,
+		suppressSkippedLog: true,
+		logger: ctx.logger,
 	});
 
 	if (blueprint.startNote) {
 		logger.info(
 			`The ${blueprint.name} process is deployed but not started: it ${blueprint.startNote}`,
+			{ essential: true },
 		);
-		logger.info(`Guide: ${blueprint.guideUrl}`);
+		logger.info(`Guide: ${blueprint.guideUrl}`, { essential: true });
 		return;
 	}
 
@@ -305,12 +332,14 @@ async function runSkillsInstall(ctx: CommandContext): Promise<void> {
 	if (harnesses.length === 0) {
 		ctx.logger.info(
 			`No supported AI coding harness detected — nothing to install into. ${NO_HARNESS_HINT}`,
+			{ essential: true },
 		);
 		return;
 	}
 	for (const harness of harnesses) {
 		ctx.logger.info(
 			`Installing Camunda skills (${CAMUNDA_SKILLS_REPOSITORY}) for ${harness}…`,
+			{ essential: true },
 		);
 		runSkillInstall(harness);
 	}
@@ -328,10 +357,17 @@ function runMcpInstall(docs: boolean): StepExecutor {
 		});
 		for (const plan of plans) {
 			writeMcpConfig(plan);
-			ctx.logger.info(`MCP configuration: ${plan.harness} (${plan.path})`);
+			ctx.logger.info(`MCP configuration: ${plan.harness} (${plan.path})`, {
+				essential: true,
+			});
 		}
 		if (docs) {
-			ctx.logger.info("The docs server requires sign-in on first use.");
+			ctx.logger.info(
+				"The docs server asks you to sign in in a browser on first use.",
+				{
+					essential: true,
+				},
+			);
 		}
 	};
 }
@@ -353,6 +389,7 @@ function guardedMcpInstall(docs: boolean): StepExecutor {
 			if (isNoHarnessError(error)) {
 				ctx.logger.info(
 					`No supported AI coding harness detected — nothing to configure. ${NO_HARNESS_HINT}`,
+					{ essential: true },
 				);
 				return;
 			}
@@ -361,25 +398,8 @@ function guardedMcpInstall(docs: boolean): StepExecutor {
 	};
 }
 
-async function runOpenOperate(ctx: CommandContext): Promise<void> {
-	const url = deriveAppUrl("http://localhost:8080/v2", "operate");
-	if (!url) {
-		throw new Error("Could not derive the Operate URL.");
-	}
-	const health = await checkLocalClusterHealth();
-	if (!health.healthy) {
-		ctx.logger.info(
-			`The cluster is not reachable — open ${url} once it is up (demo/demo).`,
-		);
-		return;
-	}
-	ctx.logger.info(`Opening Operate at ${url} — log in with demo/demo`);
-	openUrl(url);
-}
-
 const STEP_EXECUTORS: Record<SetupStepId, StepExecutor> = {
 	prerequisites: runPrerequisites,
-	"install-c8run": runClusterInstall,
 	"start-cluster": runClusterStart,
 	"install-modeler": runModelerInstall,
 	"scaffold-blueprint": runBlueprintScaffold,
@@ -387,22 +407,79 @@ const STEP_EXECUTORS: Record<SetupStepId, StepExecutor> = {
 	"install-skills": runSkillsInstall,
 	"cluster-mcp": guardedMcpInstall(false),
 	"docs-mcp": guardedMcpInstall(true),
-	"open-operate": runOpenOperate,
 };
 
 // ── The step runner ────────────────────────────────────────────────
 
+/** A step's non-essential progress output, held back until it fails. */
+interface BufferedLine {
+	readonly message: string;
+	readonly stream?: "stdout" | "stderr" | undefined;
+}
+
 /**
- * Run every selected step in plan order. Each step ends in an aligned
- * status line; a failure prints the error underneath and the remaining
- * steps still run. Steps whose dependencies did not succeed are skipped
- * with the unmet steps named. Returns the failed-step count and the
- * state steps handed along (e.g. the scaffolded project directory).
+ * A ctx whose logger buffers non-essential info output: on success the
+ * buffer is dropped and the step collapses to its status line; on
+ * failure the buffer is flushed above the error. Essential lines,
+ * warnings and errors pass through immediately — `onPassthrough` runs
+ * first, so the step's title line can be closed before they print.
+ */
+function withBufferedOutput(
+	ctx: CommandContext,
+	buffer: BufferedLine[],
+	onPassthrough: () => void,
+): CommandContext {
+	const { logger } = ctx;
+	const bufferedLogger = Object.create(logger, {
+		info: {
+			value: (
+				message: string,
+				options?: { stream?: "stdout" | "stderr"; essential?: boolean },
+			) => {
+				if (options?.essential) {
+					onPassthrough();
+					logger.info(message, options);
+				} else {
+					buffer.push({ message, stream: options?.stream });
+				}
+			},
+		},
+		warn: {
+			value: (message: string) => {
+				onPassthrough();
+				logger.warn(message);
+			},
+		},
+		error: {
+			value: (message: string, error?: Error) => {
+				onPassthrough();
+				logger.error(message, error);
+			},
+		},
+		success: {
+			value: (message: string, key?: string | number) => {
+				onPassthrough();
+				logger.success(message, key);
+			},
+		},
+	});
+	return { ...ctx, logger: bufferedLogger };
+}
+
+/**
+ * Run every selected step in plan order. Each step announces its title
+ * and the status tag completes the same line — unless the step printed
+ * essential output in between, in which case the status gets its own
+ * line. Step output is buffered and shown only when the step fails,
+ * followed by the error. Steps whose dependencies did not succeed are
+ * skipped with the unmet steps named. Returns the failed-step count and
+ * the state steps handed along (e.g. the scaffolded project directory).
  */
 async function executePlan(
 	ctx: CommandContext,
 	selected: ReadonlySet<SetupComponentId>,
 	blueprintId: string | undefined,
+	{ color }: { color: boolean },
 ): Promise<{ failures: number; run: SetupRun }> {
 	const { logger } = ctx;
 	const run: SetupRun = { blueprintId };
@@ -415,7 +492,7 @@ async function executePlan(
 
 		const unmet = (step.dependsOn ?? []).filter((dep) => !succeeded.has(dep));
 		if (unmet.length > 0) {
-			logger.info(formatStepResult(step.title, "skipped", width), {
+			logger.info(formatStepResult(step.title, "skipped", width, { color }), {
 				essential: true,
 			});
 			const names = unmet
@@ -425,20 +502,57 @@ async function executePlan(
 			continue;
 		}
 
+		// The title line stays open: the status tag completes it. Essential
+		// step output closes it first, so it never garbles mid-line.
+		let titleOpen = false;
+		if (!ctx.quiet) {
+			process.stdout.write(`  ${step.title}`);
+			titleOpen = true;
+		}
+		const closeTitle = () => {
+			if (titleOpen) {
+				process.stdout.write("\n");
+				titleOpen = false;
+			}
+		};
+		const reportStatus = (status: "success" | "error") => {
+			if (titleOpen) {
+				process.stdout.write(
+					`${formatStepStatusSuffix(step.title, status, width, { color })}\n`,
+				);
+				titleOpen = false;
+			} else {
+				logger.info(formatStepResult(step.title, status, width, { color }), {
+					essential: true,
+				});
+			}
+		};
+
+		const buffered: BufferedLine[] = [];
 		try {
-			await STEP_EXECUTORS[step.id](ctx, run);
+			await STEP_EXECUTORS[step.id](
+				withBufferedOutput(ctx, buffered, closeTitle),
+				run,
+			);
 			succeeded.add(step.id);
-			logger.info(formatStepResult(step.title, "success", width), {
-				essential: true,
-			});
+			reportStatus("success");
 		} catch (error) {
 			failures += 1;
-			logger.info(formatStepResult(step.title, "error", width), {
-				essential: true,
-			});
-			const message = error instanceof Error ? error.message : String(error);
-			for (const line of message.split("\n")) {
-				logger.info(`    ${line}`, { essential: true });
+			reportStatus("error");
+			// The step failed — its buffered progress is now the diagnostics.
+			for (const line of buffered) {
+				logger.info(`    ${line.message}`, {
+					stream: line.stream,
+					essential: true,
+				});
+			}
+			// A SilentError was already rendered in full by its helper
+			// (e.g. the deploy diagnostics) — don't print the summary again.
+			if (!(error instanceof SilentError)) {
+				const message = error instanceof Error ? error.message : String(error);
+				for (const line of message.split("\n")) {
+					logger.info(`    ${line}`, { essential: true });
+				}
 			}
 		}
 	}
@@ -469,9 +583,9 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	const jsonMode = logger.mode === "json";
 	// JSON mode never prompts: the plan payload must not block on a TTY menu.
 	const interactive = !jsonMode && isInteractive() && !ctx.yes && !ctx.quiet;
-	// The plan goes to stdout — color it only when stdout is a terminal,
-	// so `c8ctl setup > plan.txt` stays plain text.
-	const planColor = process.stdout.isTTY === true;
+	// The step report goes to stdout — color its status tags only when
+	// stdout is a terminal, so piped output stays plain text.
+	const color = process.stdout.isTTY === true;
 
 	// The banner is UI chrome: hidden by --quiet, omitted in JSON mode.
 	if (!jsonMode && !ctx.quiet) {
@@ -537,18 +651,30 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		logger.json(setupPlanPayload(selected, { blueprint: blueprintId }));
 		return { kind: "none" };
 	}
-	logger.output(renderSetupPlan(selected, { color: planColor }));
 
 	// Without an interactive selection or --yes there is no go-ahead:
-	// print the plan and stop, so a piped run never installs anything.
+	// stop before any work, so a piped run never installs anything.
 	if (!interactive && !ctx.yes) {
 		logger.info(
-			'Nothing was installed. Run "c8ctl setup --yes" to execute this plan, or run interactively to choose what gets installed.',
+			'Nothing was installed. Run "c8ctl setup --yes" to set everything up, or run interactively to choose what gets installed.',
 		);
 		return { kind: "none" };
 	}
 
-	const { failures, run } = await executePlan(ctx, selected, blueprintId);
+	// No surprise browser windows: the docs MCP sign-in opens one when
+	// the assistant first connects, so say so before the first step runs.
+	// (The cluster start opens Operate the same way a plain "c8ctl
+	// cluster start" does.)
+	if (selected.has("docs-mcp")) {
+		logger.info(
+			"Heads up: the docs MCP server needs you to sign in — your AI assistant will open a browser window for it when it connects.",
+			{ essential: true },
+		);
+	}
+
+	const { failures, run } = await executePlan(ctx, selected, blueprintId, {
+		color,
+	});
 	if (run.blueprintDir) {
 		const blueprint = setupBlueprintById(
 			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
@@ -556,6 +682,14 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		logger.info(
 			`Your project is at ${run.blueprintDir} — follow the guide: ${blueprint.guideUrl}`,
 			{ essential: true },
+		);
+	}
+	if (run.clusterStarted) {
+		logger.info(
+			"Operate: http://localhost:8080/operate — log in with demo/demo",
+			{
+				essential: true,
+			},
 		);
 	}
 	if (failures > 0) {
