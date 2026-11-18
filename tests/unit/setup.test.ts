@@ -415,9 +415,11 @@ describe("c8ctl setup", () => {
 			stepLine(out, "Install AI assistant skills", "SUCCESS");
 			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
 			assert.doesNotMatch(out, /Configure the docs MCP server .+ \[/);
-			// Each step announces its title, then collapses to the status line.
-			assert.match(out, /^ {2}Start the local cluster$/m);
-			// Useful lines blend into the report even on success.
+			// A step without additional info collapses to a single line…
+			assert.doesNotMatch(out, /^ {2}Start the local cluster$/m);
+			// …while a step with useful lines shows them between its title
+			// and its status line.
+			assert.match(out, /^ {2}Install AI assistant skills$/m);
 			assert.match(out, /Installing Camunda skills \(camunda\/skills\) for /);
 			assert.match(out, /MCP configuration: /);
 			// Everything else is held back: no c8run chatter, no progress

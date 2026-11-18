@@ -234,12 +234,12 @@ const STATUS_COLORS: Record<SetupStepStatus, string> = {
 };
 
 /**
- * One finished step, aligned for a wizard report: the title followed by
- * a dot leader and the status tag in a fixed column. `width` is the
- * longest title in the plan, so the tags line up. With `color`, the tag
- * is green on success, red on error and dim when skipped.
+ * The tail of a finished step's line: a dot leader and the status tag.
+ * `width` is the longest title in the plan, so the tags line up. With
+ * `color`, the tag is green on success, red on error and dim when
+ * skipped.
  */
-export function formatStepResult(
+export function formatStepStatusSuffix(
 	title: string,
 	status: SetupStepStatus,
 	width: number,
@@ -248,7 +248,20 @@ export function formatStepResult(
 	const dots = ".".repeat(Math.max(2, width - title.length + 2));
 	const tag = STATUS_TAGS[status];
 	const styled = color ? `${STATUS_COLORS[status]}${tag}${RESET}` : tag;
-	return `  ${title} ${dots} ${styled}`;
+	return ` ${dots} ${styled}`;
+}
+
+/**
+ * One finished step, aligned for a wizard report: the title followed by
+ * the status suffix (`formatStepStatusSuffix`).
+ */
+export function formatStepResult(
+	title: string,
+	status: SetupStepStatus,
+	width: number,
+	{ color }: { color: boolean },
+): string {
+	return `  ${title}${formatStepStatusSuffix(title, status, width, { color })}`;
 }
 
 // ── Welcome banner ─────────────────────────────────────────────────

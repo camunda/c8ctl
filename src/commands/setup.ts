@@ -44,6 +44,7 @@ import {
 	detectInstalledHarnesses,
 	enforceComponentDependencies,
 	formatStepResult,
+	formatStepStatusSuffix,
 	isClusterProgressLine,
 	MANUAL_SETUP_LINKS,
 	planMcpConfigs,
@@ -410,11 +411,13 @@ interface BufferedLine {
  * A ctx whose logger buffers non-essential info output: on success the
  * buffer is dropped and the step collapses to its status line; on
  * failure the buffer is flushed above the error. Essential lines,
- * warnings and errors pass through immediately.
+ * warnings and errors pass through immediately — `onPassthrough` runs
+ * first, so the step's title line can be closed before they print.
  */
 function withBufferedOutput(
 	ctx: CommandContext,
 	buffer: BufferedLine[],
+	onPassthrough: () => void,
 ): CommandContext {
 	const { logger } = ctx;
 	const bufferedLogger = Object.create(logger, {
@@ -424,10 +427,29 @@ function withBufferedOutput(
 				options?: { stream?: "stdout" | "stderr"; essential?: boolean },
 			) => {
 				if (options?.essential) {
+					onPassthrough();
 					logger.info(message, options);
 				} else {
 					buffer.push({ message, stream: options?.stream });
 				}
+			},
+		},
+		warn: {
+			value: (message: string) => {
+				onPassthrough();
+				logger.warn(message);
+			},
+		},
+		error: {
+			value: (message: string, error?: Error) => {
+				onPassthrough();
+				logger.error(message, error);
+			},
+		},
+		success: {
+			value: (message: string, key?: string | number) => {
+				onPassthrough();
+				logger.success(message, key);
 			},
 		},
 	});
@@ -435,12 +457,13 @@ function withBufferedOutput(
 }
 
 /**
- * Run every selected step in plan order. Each step announces its title,
- * then ends in an aligned status line; step output is buffered and shown
- * only when the step fails, followed by the error. Steps whose
- * dependencies did not succeed are skipped with the unmet steps named.
- * Returns the failed-step count and the state steps handed along (e.g.
- * the scaffolded project directory).
+ * Run every selected step in plan order. Each step announces its title
+ * and the status tag completes the same line — unless the step printed
+ * essential output in between, in which case the status gets its own
+ * line. Step output is buffered and shown only when the step fails,
+ * followed by the error. Steps whose dependencies did not succeed are
+ * skipped with the unmet steps named. Returns the failed-step count and
+ * the state steps handed along (e.g. the scaffolded project directory).
  */
 async function executePlan(
 	ctx: CommandContext,
@@ -469,19 +492,43 @@ async function executePlan(
 			continue;
 		}
 
-		logger.info(`  ${step.title}`);
+		// The title line stays open: the status tag completes it. Essential
+		// step output closes it first, so it never garbles mid-line.
+		let titleOpen = false;
+		if (!ctx.quiet) {
+			process.stdout.write(`  ${step.title}`);
+			titleOpen = true;
+		}
+		const closeTitle = () => {
+			if (titleOpen) {
+				process.stdout.write("\n");
+				titleOpen = false;
+			}
+		};
+		const reportStatus = (status: "success" | "error") => {
+			if (titleOpen) {
+				process.stdout.write(
+					`${formatStepStatusSuffix(step.title, status, width, { color })}\n`,
+				);
+				titleOpen = false;
+			} else {
+				logger.info(formatStepResult(step.title, status, width, { color }), {
+					essential: true,
+				});
+			}
+		};
+
 		const buffered: BufferedLine[] = [];
 		try {
-			await STEP_EXECUTORS[step.id](withBufferedOutput(ctx, buffered), run);
+			await STEP_EXECUTORS[step.id](
+				withBufferedOutput(ctx, buffered, closeTitle),
+				run,
+			);
 			succeeded.add(step.id);
-			logger.info(formatStepResult(step.title, "success", width, { color }), {
-				essential: true,
-			});
+			reportStatus("success");
 		} catch (error) {
 			failures += 1;
-			logger.info(formatStepResult(step.title, "error", width, { color }), {
-				essential: true,
-			});
+			reportStatus("error");
 			// The step failed — its buffered progress is now the diagnostics.
 			for (const line of buffered) {
 				logger.info(`    ${line.message}`, {
