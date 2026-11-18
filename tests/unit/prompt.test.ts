@@ -486,6 +486,75 @@ describe("multiSelect()", () => {
 			/at least one option/,
 		);
 	});
+
+	describe("option dependencies (requires)", () => {
+		const DEPENDENT_OPTIONS = [
+			{ label: "Cluster", value: "cluster", checked: true },
+			{
+				label: "Blueprint",
+				value: "blueprint",
+				checked: true,
+				requires: [{ value: "cluster", reason: "needs the local cluster" }],
+			},
+		];
+
+		test("unchecking the requirement forces the dependent off and shows why", async () => {
+			const io = fakeTTY();
+			// Space on the highlighted "Cluster" row unchecks it.
+			type(io, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, []);
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/Blueprint.*— needs the local cluster/,
+			);
+		});
+
+		test("a blocked option cannot be toggled until its requirement is back", async () => {
+			const io = fakeTTY();
+			// Cluster off; Blueprint toggle attempt (blocked); Cluster on;
+			// Blueprint toggle (works now).
+			type(io, " ", DOWN, " ", UP, " ", DOWN, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Cluster", value: "cluster", checked: true },
+					{
+						label: "Blueprint",
+						value: "blueprint",
+						requires: [{ value: "cluster", reason: "needs the local cluster" }],
+					},
+				],
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "blueprint"]);
+		});
+
+		test("non-interactive drops options whose requirement is not pre-checked", async () => {
+			const result = await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Cluster", value: "cluster" },
+					{
+						label: "Blueprint",
+						value: "blueprint",
+						checked: true,
+						requires: [{ value: "cluster", reason: "needs the local cluster" }],
+					},
+				],
+				io: fakePipe(),
+			});
+			assert.ok(!result.interactive);
+			assert.deepStrictEqual(result.values, []);
+			assert.match(result.hint, /Blueprint.*needs the local cluster/);
+		});
+	});
 });
 
 describe("createPromptSession()", () => {

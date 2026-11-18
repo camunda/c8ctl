@@ -51,6 +51,12 @@ export interface SetupComponent {
 	readonly why: string;
 	/** Pre-checked state, also the non-interactive and --yes default. */
 	readonly defaultSelected: boolean;
+	/**
+	 * Components this one cannot work without: while any of them is
+	 * deselected, this option is greyed out with the reason and forced
+	 * off.
+	 */
+	readonly requires?: readonly { id: SetupComponentId; reason: string }[];
 }
 
 /**
@@ -75,6 +81,7 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 		label: "Starter blueprint",
 		why: "A working example project, deployed and started for you",
 		defaultSelected: true,
+		requires: [{ id: "cluster", reason: "needs the local cluster" }],
 	},
 	{
 		id: "skills",
@@ -98,9 +105,21 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 
 /** Selected component ids when the wizard cannot ask (non-TTY, --yes). */
 export function defaultSelection(): ReadonlySet<SetupComponentId> {
-	return new Set(
+	const selected = new Set(
 		SETUP_COMPONENTS.filter((c) => c.defaultSelected).map((c) => c.id),
 	);
+	// A component whose requirements are not selected cannot run; each
+	// pass only ever removes, so this settles quickly even for chains.
+	for (let changed = true; changed; ) {
+		changed = false;
+		for (const c of SETUP_COMPONENTS) {
+			if (selected.has(c.id) && c.requires?.some((r) => !selected.has(r.id))) {
+				selected.delete(c.id);
+				changed = true;
+			}
+		}
+	}
+	return selected;
 }
 
 // ── The ordered plan ───────────────────────────────────────────────
@@ -123,6 +142,11 @@ export interface SetupStep {
 	readonly detail: string;
 	/** The component this step belongs to; null = always runs. */
 	readonly component: SetupComponentId | null;
+	/**
+	 * Steps that must have succeeded for this step to run; otherwise it
+	 * is reported as skipped with the unmet steps named.
+	 */
+	readonly dependsOn?: readonly SetupStepId[];
 }
 
 /**
@@ -147,6 +171,7 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		title: "Start the local cluster",
 		detail: "wait until it reports healthy",
 		component: "cluster",
+		dependsOn: ["install-c8run"],
 	},
 	{
 		id: "install-modeler",
@@ -165,6 +190,7 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		title: "Deploy and start the process",
 		detail: "your first running process instance",
 		component: "blueprint",
+		dependsOn: ["start-cluster"],
 	},
 	{
 		id: "install-skills",
@@ -177,6 +203,7 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		title: "Configure the cluster MCP server",
 		detail: "connect your AI assistant to the cluster",
 		component: "cluster-mcp",
+		dependsOn: ["start-cluster"],
 	},
 	{
 		id: "docs-mcp",
@@ -189,8 +216,33 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		title: "Open Operate",
 		detail: "http://localhost:8080/operate — log in with demo/demo",
 		component: "cluster",
+		dependsOn: ["start-cluster"],
 	},
 ];
+
+// ── Step results ───────────────────────────────────────────────────
+
+export type SetupStepStatus = "success" | "error" | "skipped";
+
+const STATUS_TAGS: Record<SetupStepStatus, string> = {
+	success: "[SUCCESS]",
+	error: "[ERROR]",
+	skipped: "[SKIPPED]",
+};
+
+/**
+ * One finished step, aligned for a wizard report: the title followed by
+ * a dot leader and the status tag in a fixed column. `width` is the
+ * longest title in the plan, so the tags line up.
+ */
+export function formatStepResult(
+	title: string,
+	status: SetupStepStatus,
+	width: number,
+): string {
+	const dots = ".".repeat(Math.max(2, width - title.length + 2));
+	return `  ${title} ${dots} ${STATUS_TAGS[status]}`;
+}
 
 // ── Welcome banner ─────────────────────────────────────────────────
 

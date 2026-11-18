@@ -1,9 +1,10 @@
 /**
  * Behavioural tests for `c8ctl setup`: registration, welcome + plan
  * output, --dry-run, help, completion, the interactive prompts driven
- * through a fake TTY, and execution of the wired-up steps (Desktop
- * Modeler install, blueprint scaffold + deploy) against the offline
- * stub in tests/utils/setup-stub.ts.
+ * through a fake TTY (including the cluster→blueprint dependency), and
+ * full execution of every step against the offline stub in
+ * tests/utils/setup-stub.ts (cluster child processes, GitHub, the
+ * Orchestration Cluster API, Modeler detection, gh, browser).
  */
 
 import assert from "node:assert";
@@ -154,17 +155,29 @@ function runInteractive(
 }
 
 /**
- * An offline execution sandbox for `c8ctl setup --yes`: a temp working
- * directory for the scaffolded project, a fake `camunda-modeler` on PATH
- * (the Linux installed-lookup; macOS/Windows detection is patched in the
- * stub itself), and the fetch/fs stub preload.
+ * An offline execution sandbox for `c8ctl setup --yes`:
+ * - a temp working directory the blueprint project is scaffolded into
+ * - a fake `camunda-modeler` executable (the Linux installed-lookup;
+ *   macOS/Windows detection is patched in the stub itself)
+ * - a fixture HOME with a `.claude` directory, so harness detection
+ *   finds Claude Code and every harness config root (HOME, USERPROFILE,
+ *   APPDATA, XDG_CONFIG_HOME) points into the fixture — a harness found
+ *   on the host PATH can never write to a real user config
+ * - the fetch/fs/child-process stub preload
  */
 function stubbedExecution({
 	clusterUp = false,
+	failStep,
+	capture,
 }: {
 	clusterUp?: boolean;
+	/** Step id whose child process exits 1 (e.g. "install-c8run"). */
+	failStep?: string;
+	/** File the process-instance request body is captured into. */
+	capture?: string;
 } = {}): {
 	cwd: string;
+	home: string;
 	options: {
 		cwd: string;
 		nodeArgs: string[];
@@ -174,23 +187,47 @@ function stubbedExecution({
 } {
 	const cwd = mkdtempSync(join(tmpdir(), "c8ctl-setup-run-"));
 	const bin = join(cwd, "bin");
+	const home = join(cwd, "home");
+	mkdirSync(join(home, ".claude"), { recursive: true });
 	mkdirSync(bin);
 	const fakeModeler = join(bin, "camunda-modeler");
 	writeFileSync(fakeModeler, "#!/bin/sh\n");
 	chmodSync(fakeModeler, 0o755);
 	return {
 		cwd,
+		home,
 		options: {
 			cwd,
 			nodeArgs: ["--import", SETUP_STUB],
 			env: {
 				C8CTL_OUTPUT_MODE: "text",
 				PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+				HOME: home,
+				USERPROFILE: home,
+				APPDATA: join(home, "AppData", "Roaming"),
+				XDG_CONFIG_HOME: join(home, ".config"),
 				...(clusterUp ? { C8CTL_SETUP_STUB_CLUSTER: "up" } : {}),
+				...(failStep ? { C8CTL_SETUP_STUB_FAIL: failStep } : {}),
+				...(capture ? { C8CTL_SETUP_STUB_CAPTURE: capture } : {}),
 			},
 		},
 		cleanup: () => rmSync(cwd, { recursive: true, force: true }),
 	};
+}
+
+/** Every step title followed by its status tag. */
+function stepLine(
+	out: string,
+	title: string,
+	tag: "SUCCESS" | "ERROR" | "SKIPPED",
+): void {
+	assert.match(
+		out,
+		new RegExp(
+			`${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\.+ \\[${tag}\\]`,
+		),
+		`expected "${title} … [${tag}]" in:\n${out}`,
+	);
 }
 
 describe("c8ctl setup", () => {
@@ -318,6 +355,7 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Usage: c8ctl setup/);
 		assert.match(result.stdout, /Nothing is installed without your say\./);
+		assert.match(result.stdout, /\[SUCCESS\]/);
 		assert.match(result.stdout, /--blueprint/);
 		assert.match(result.stdout, /--no-modeler/);
 	});
@@ -341,8 +379,12 @@ describe("c8ctl setup", () => {
 		assert.match(result.stdout, /setup/);
 	});
 
-	test("--yes executes the plan: prerequisites, modeler, blueprint", async () => {
-		const stub = stubbedExecution();
+	test("--yes runs every selected step and reports [SUCCESS] per step", async () => {
+		const capture = join(
+			mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-")),
+			"capture.json",
+		);
+		const stub = stubbedExecution({ capture });
 		try {
 			const result = await c8WithOptions(
 				stub.options,
@@ -354,56 +396,30 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(result.status, 0, result.stderr);
 			assert.doesNotMatch(result.stderr, /What should we set up/);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			assert.match(out, /▸ Check prerequisites/);
-			assert.match(out, /✓ Node\.js version/);
-			// Steps that are not wired up yet say so instead of running.
-			assert.match(
-				out,
-				/Install Camunda 8 Run — setup can't do this step yet; skipped\./,
-			);
-			assert.match(out, /▸ Install Desktop Modeler/);
-			assert.match(out, /already installed at .*skipping installation/);
-			assert.match(out, /▸ Create the blueprint project/);
-			assert.match(out, /Project ready at /);
-			// The stub cluster is down: deploy degrades to next actions,
-			// pinned to the same local profile the healthy path uses.
-			assert.match(out, /Could not reach the local cluster/);
-			assert.match(out, /c8ctl cluster start/);
-			assert.match(out, /c8ctl deploy ".*rocket-launch" --profile local/);
+			stepLine(out, "Check prerequisites", "SUCCESS");
+			stepLine(out, "Install Camunda 8 Run", "SUCCESS");
+			stepLine(out, "Start the local cluster", "SUCCESS");
+			stepLine(out, "Install Desktop Modeler", "SUCCESS");
+			stepLine(out, "Create the blueprint project", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
+			stepLine(out, "Open Operate", "SUCCESS");
+			assert.doesNotMatch(out, /Configure the docs MCP server .+ \[/);
+			assert.match(out, /Deployment successful/);
+			assert.match(out, /Process instance created/);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
 			assert.ok(
 				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 				"blueprint was not scaffolded",
 			);
-		} finally {
-			stub.cleanup();
-		}
-	});
-
-	test("--yes deploys the blueprint and starts a process instance when the cluster is up", async () => {
-		const stub = stubbedExecution({ clusterUp: true });
-		const capture = join(stub.cwd, "capture.json");
-		try {
-			const result = await c8WithOptions(
-				{
-					...stub.options,
-					env: {
-						...stub.options.env,
-						C8CTL_SETUP_STUB_CAPTURE: capture,
-					},
-				},
-				"setup",
-				"--yes",
-				"--blueprint",
-				"rocket-launch",
+			// The cluster MCP server was written into the fixture harness.
+			const mcpConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude.json"), "utf-8"),
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
-			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			assert.match(out, /Deployment successful/);
-			assert.match(out, /Process instance created/);
-			assert.match(out, /2251799813686751/);
-			assert.match(out, /Setup finished\./);
+			assert.ok(isRecord(mcpConfig) && isRecord(mcpConfig.mcpServers));
+			assert.ok(isRecord(mcpConfig.mcpServers.camunda));
 			// The Rocket Launch model needs mission inputs to run through;
 			// setup starts the instance with the blueprint's variables.
 			const request: unknown = JSON.parse(readFileSync(capture, "utf-8"));
@@ -418,14 +434,114 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("interactive: toggling the cluster off skips its steps", async () => {
-		// Space on the highlighted "Local cluster" row, Enter to confirm,
-		// then Enter again to accept the default blueprint.
+	test("a failed step reports [ERROR], skips dependents, and the rest still runs", async () => {
+		const stub = stubbedExecution({ failStep: "install-c8run" });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Install Camunda 8 Run", "ERROR");
+			assert.match(out, /c8ctl cluster install failed \(exit code 1\)\./);
+			// Dependents are skipped with the unmet step named.
+			stepLine(out, "Start the local cluster", "SKIPPED");
+			stepLine(out, "Deploy and start the process", "SKIPPED");
+			stepLine(out, "Configure the cluster MCP server", "SKIPPED");
+			stepLine(out, "Open Operate", "SKIPPED");
+			assert.match(out, /needs: Install Camunda 8 Run/);
+			assert.match(out, /needs: Start the local cluster/);
+			// Unrelated steps still ran.
+			stepLine(out, "Install Desktop Modeler", "SUCCESS");
+			stepLine(out, "Create the blueprint project", "SUCCESS");
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			assert.match(out, /Setup finished with 1 failed step/);
+			// The project exists but was never deployed.
+			assert.ok(
+				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("a failed skills install does not stop the remaining steps", async () => {
+		const stub = stubbedExecution({ failStep: "install-skills" });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Install AI assistant skills", "ERROR");
+			assert.match(out, /GitHub CLI failed to install Camunda skills/);
+			// The steps after it are independent and still succeeded.
+			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
+			stepLine(out, "Open Operate", "SUCCESS");
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive: toggling the cluster off disables the blueprint", async () => {
+		// Space on the highlighted "Local cluster" row, then Enter. The
+		// blueprint option is dependency-disabled, so no blueprint prompt.
+		const stub = stubbedExecution();
+		try {
+			const result = await runInteractive(
+				[{ waitFor: "Docs MCP server", keys: " \r" }],
+				{
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
+			assert.ok(
+				!result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
+				"blueprint prompt should not render when the cluster is off",
+			);
+			assert.match(
+				stripVTControlCharacters(result.stderr),
+				/Starter blueprint.*— needs the local cluster/,
+			);
+			assert.ok(
+				result.stderr.includes(BRAND_BLUE),
+				"banner is not brand-colored",
+			);
+			// stdout is piped here: output must stay plain text even though
+			// the session is interactive and the banner on stderr is colored.
+			assert.strictEqual(
+				result.stdout,
+				stripVTControlCharacters(result.stdout),
+			);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			assert.match(out, /- Install Camunda 8 Run — skipped/);
+			assert.match(out, /- Create the blueprint project — skipped/);
+			stepLine(out, "Install Desktop Modeler", "SUCCESS");
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			// No blueprint project without the cluster.
+			assert.ok(!existsSync(join(stub.cwd, "rocket-launch")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive: defaults run the whole setup end to end", async () => {
 		const stub = stubbedExecution();
 		try {
 			const result = await runInteractive(
 				[
-					{ waitFor: "Docs MCP server", keys: " \r" },
+					{ waitFor: "Docs MCP server", keys: "\r" },
 					{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\r" },
 				],
 				{
@@ -440,23 +556,13 @@ describe("c8ctl setup", () => {
 				result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
 				"blueprint prompt not rendered",
 			);
-			assert.ok(
-				result.stderr.includes(BRAND_BLUE),
-				"banner is not brand-colored",
-			);
-			// stdout is piped here: output must stay plain text even though
-			// the session is interactive and the banner on stderr is colored.
-			assert.strictEqual(
-				result.stdout,
-				stripVTControlCharacters(result.stdout),
-			);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			assert.match(out, /01\. Check prerequisites/);
-			assert.match(out, /- Install Camunda 8 Run — skipped/);
-			assert.match(out, /- Start the local cluster — skipped/);
-			assert.match(out, /02\. Install Desktop Modeler/);
-			// With the go-ahead given, the selected steps executed.
+			stepLine(out, "Check prerequisites", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
 			assert.match(out, /Setup finished\./);
+			assert.ok(
+				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
 		} finally {
 			stub.cleanup();
 		}

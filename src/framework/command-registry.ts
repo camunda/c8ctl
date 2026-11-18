@@ -1840,9 +1840,11 @@ export const COMMAND_REGISTRY = {
 			"install Desktop Modeler, create a starter project from a blueprint,",
 			"deploy and run it, and set up AI assistant skills and MCP servers.",
 			"Nothing is installed without your say.",
+			"Steps report [SUCCESS], [ERROR] or [SKIPPED] in order; a failed step",
+			"does not stop the rest. The blueprint needs the local cluster —",
+			"deselect the cluster and the blueprint option is disabled.",
 			"Non-interactive runs (piped output, CI, --json) print the plan only;",
 			"pass --yes to execute it with the defaults.",
-			"Some steps are not wired up yet and are reported as skipped.",
 		],
 		resources: [],
 		flags: {

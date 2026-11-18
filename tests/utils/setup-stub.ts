@@ -17,17 +17,28 @@
  *    (Builtin fs is patched before the CLI's imports load, and
  *    syncBuiltinESMExports() publishes the patches to named ESM imports.)
  *
+ * Child processes: `c8ctl cluster install|start` self-invocations are
+ * faked (a successful `start` flips the health endpoint to UP), `gh`
+ * skill installs report success, and browser openers exit quietly.
+ * `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process exit
+ * 1 so failure handling is exercised. Everything else passes through.
+ *
  * Env:
- *   C8CTL_SETUP_STUB_CLUSTER=up   — the health endpoint reports UP and
- *                                   the SDK deploy/instance endpoints
- *                                   answer; any other value (default)
- *                                   makes the cluster unreachable.
+ *   C8CTL_SETUP_STUB_CLUSTER=up   — the health endpoint reports UP from
+ *                                   the start (before any `cluster
+ *                                   start`); any other value starts it
+ *                                   down.
  *   C8CTL_SETUP_STUB_CAPTURE=file — the process-instance creation request
  *                                   body is written to this file.
+ *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
+ *                                   (e.g. "install-c8run", "install-skills").
  */
 
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
+import { basename } from "node:path";
 
 // ── Desktop Modeler looks installed ────────────────────────────────
 // macOS and Windows look the app up at fixed paths. The Linux lookup
@@ -125,7 +136,79 @@ function json(body: unknown, status = 200): Response {
 	return Response.json(body, { status });
 }
 
-const clusterUp = process.env.C8CTL_SETUP_STUB_CLUSTER === "up";
+const clusterUpAtBoot = process.env.C8CTL_SETUP_STUB_CLUSTER === "up";
+const failStep = process.env.C8CTL_SETUP_STUB_FAIL;
+
+/**
+ * Flipped by a successful fake `cluster start`; the health endpoint
+ * follows it, so the setup flow observes a cluster that actually came up.
+ */
+let clusterRunning = clusterUpAtBoot;
+
+// ── Child processes ────────────────────────────────────────────────
+
+class FakeChild extends EventEmitter {
+	pid = 123456;
+	stdin = null;
+	stdout = null;
+	stderr = null;
+	unref(): void {}
+	kill(): boolean {
+		return true;
+	}
+}
+
+function fakeChild(exitCode: number): FakeChild {
+	const child = new FakeChild();
+	process.nextTick(() => child.emit("close", exitCode, null));
+	return child;
+}
+
+// defineProperty replaces the functions without a static type check on
+// the stand-ins — no `as` assertions needed for the overloaded originals.
+const realSpawn = childProcess.spawn;
+Object.defineProperty(childProcess, "spawn", {
+	value: (...args: unknown[]) => {
+		const [command, rest] = [args[0], args.slice(1)];
+		const argv = [command, ...(Array.isArray(rest[0]) ? rest[0] : [])].map(
+			String,
+		);
+		// setup self-invokes the cluster plugin for install/start.
+		if (argv.includes("cluster")) {
+			const subcommand = argv.includes("install")
+				? "install-c8run"
+				: argv.includes("start")
+					? "start-cluster"
+					: undefined;
+			if (subcommand !== undefined) {
+				if (failStep === subcommand) return fakeChild(1);
+				if (subcommand === "start-cluster") clusterRunning = true;
+				return fakeChild(0);
+			}
+		}
+		// Browser openers: open (macOS), xdg-open (Linux), cmd.exe /c start.
+		if (["open", "xdg-open", "cmd.exe"].includes(basename(String(command)))) {
+			return fakeChild(0);
+		}
+		return Reflect.apply(realSpawn, childProcess, args);
+	},
+});
+
+const realSpawnSync = childProcess.spawnSync;
+Object.defineProperty(childProcess, "spawnSync", {
+	value: (...args: unknown[]) => {
+		// Skills install through the GitHub CLI (`gh skill install …`).
+		if (basename(String(args[0])) === "gh") {
+			if (failStep === "install-skills") {
+				return { status: 1, stdout: "", stderr: "stubbed gh failure" };
+			}
+			return { status: 0, stdout: "", stderr: "" };
+		}
+		return Reflect.apply(realSpawnSync, childProcess, args);
+	},
+});
+
+syncBuiltinESMExports();
 
 globalThis.fetch = async (
 	input: string | URL | Request,
@@ -155,9 +238,9 @@ globalThis.fetch = async (
 			: new Response(contents, { status: 200 });
 	}
 
-	// Local cluster health.
+	// Local cluster health — UP once the fake `cluster start` ran.
 	if (url.startsWith("http://localhost:9600/")) {
-		if (!clusterUp) {
+		if (!clusterRunning) {
 			throw Object.assign(new Error("connect ECONNREFUSED"), {
 				code: "ECONNREFUSED",
 			});

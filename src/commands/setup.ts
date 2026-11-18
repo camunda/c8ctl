@@ -1,20 +1,25 @@
 /**
  * `c8ctl setup` — guided first-run setup for local Camunda 8 development.
  *
- * Prints the welcome banner, asks what to set up (checkbox list plus a
- * blueprint choice), shows the tailored plan, then executes it. Steps
- * that are not wired up yet are reported as skipped.
+ * Prints the welcome banner, asks what to set up (checkbox list with
+ * dependencies plus a blueprint choice), shows the tailored plan, then
+ * runs every selected step. Each step ends in a `[SUCCESS]`, `[ERROR]`
+ * or `[SKIPPED]` line in an aligned column; a failed step prints its
+ * error on the following lines and the remaining steps still run. Steps
+ * whose dependencies failed are skipped with the unmet steps named.
  *
  * Execution needs a go-ahead: an interactive selection or `--yes`. A
  * piped run without `--yes` and JSON mode print the plan only, so a
  * script never installs software by accident.
  *
  * Streams: the banner, prompts and progress are UI chrome on stderr; the
- * plan and the JSON payload are the command's answer on stdout.
+ * plan, the step report and the JSON payload are the command's answer on
+ * stdout.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
+import { extname, join, resolve } from "node:path";
 import {
 	ProcessDefinitionId,
 	TenantId,
@@ -23,7 +28,6 @@ import {
 	createClient,
 	DEFAULT_PROFILE,
 	resolveTenantId,
-	SilentError,
 } from "../core/index.ts";
 import {
 	type CommandContext,
@@ -33,12 +37,19 @@ import {
 	select,
 } from "../framework/index.ts";
 import {
+	CAMUNDA_SKILLS_REPOSITORY,
 	checkLocalClusterHealth,
 	checkPrerequisites,
 	defaultSelection,
-	formatPrerequisiteFailures,
+	deriveAppUrl,
+	detectInstalledHarnesses,
+	formatStepResult,
+	MANUAL_SETUP_LINKS,
+	openUrl,
+	planMcpConfigs,
 	renderSetupPlan,
 	renderWelcomeBanner,
+	runSkillInstall,
 	SETUP_BLUEPRINTS,
 	SETUP_COMPONENTS,
 	SETUP_STEPS,
@@ -47,8 +58,10 @@ import {
 	scaffoldSetupBlueprint,
 	setupBlueprintById,
 	setupPlanPayload,
+	writeMcpConfig,
 } from "../utils/index.ts";
 import { deployResources } from "./helpers/deploy-helpers.ts";
+import { buildMcpConnection } from "./mcp.ts";
 import { installDesktopModeler } from "./modeler.ts";
 import { extractProcessId } from "./run.ts";
 
@@ -88,7 +101,10 @@ function effectiveBlueprint(
 
 // ── Step executors ─────────────────────────────────────────────────
 
-type StepExecutor = (ctx: CommandContext, run: SetupRun) => Promise<void>;
+type StepExecutor = (
+	ctx: CommandContext,
+	run: SetupRun,
+) => Promise<void> | void;
 
 async function runPrerequisites(ctx: CommandContext): Promise<void> {
 	const results = await checkPrerequisites();
@@ -97,9 +113,78 @@ async function runPrerequisites(ctx: CommandContext): Promise<void> {
 			`  ${result.ok ? "✓" : "✗"} ${result.title}: ${result.detail}`,
 		);
 	}
-	if (results.some((result) => !result.ok)) {
-		ctx.logger.error(formatPrerequisiteFailures(results));
-		throw new SilentError("c8ctl setup prerequisites are not met");
+	const failed = results.filter((result) => !result.ok);
+	if (failed.length > 0) {
+		throw new Error(
+			[
+				...failed.map(
+					(result) =>
+						`${result.title}: ${result.detail}${result.hint ? ` ${result.hint}` : ""}`,
+				),
+				"To set up Camunda by hand instead:",
+				...MANUAL_SETUP_LINKS.map((link) => `${link.label}: ${link.url}`),
+			].join("\n"),
+		);
+	}
+}
+
+/** The CLI's own entry point, for self-invoking plugin commands. */
+const CLI_ENTRY = realpathSync(
+	resolve(import.meta.dirname, `../index${extname(import.meta.filename)}`),
+);
+
+/**
+ * The cluster commands live in the built-in cluster plugin, which owns
+ * process exit on failure — so setup runs them as child processes and
+ * maps the exit code onto the step result.
+ */
+function runClusterSubcommand(subcommand: "install" | "start"): Promise<void> {
+	return new Promise((resolvePromise, rejectPromise) => {
+		const child = spawn(process.execPath, [CLI_ENTRY, "cluster", subcommand], {
+			stdio: "inherit",
+		});
+		child.on("error", (error) =>
+			rejectPromise(
+				new Error(
+					`Could not run c8ctl cluster ${subcommand}: ${error.message}`,
+				),
+			),
+		);
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolvePromise();
+			} else {
+				rejectPromise(
+					new Error(`c8ctl cluster ${subcommand} failed (exit code ${code}).`),
+				);
+			}
+		});
+	});
+}
+
+async function runClusterInstall(): Promise<void> {
+	await runClusterSubcommand("install");
+}
+
+/** c8run's launcher exits before the services report healthy — poll for it. */
+const CLUSTER_HEALTH_TIMEOUT_MS = 120_000;
+const CLUSTER_HEALTH_POLL_MS = 2_000;
+
+async function runClusterStart(ctx: CommandContext): Promise<void> {
+	await runClusterSubcommand("start");
+	const deadline = Date.now() + CLUSTER_HEALTH_TIMEOUT_MS;
+	for (;;) {
+		const health = await checkLocalClusterHealth();
+		if (health.healthy) return;
+		if (Date.now() >= deadline) {
+			throw new Error(
+				`The cluster did not become healthy within ${CLUSTER_HEALTH_TIMEOUT_MS / 1000}s (${health.detail}). Check: c8ctl cluster status`,
+			);
+		}
+		ctx.logger.info("  Waiting for the cluster to become healthy…");
+		await new Promise((resolveWait) =>
+			setTimeout(resolveWait, CLUSTER_HEALTH_POLL_MS),
+		);
 	}
 }
 
@@ -109,9 +194,7 @@ async function runModelerInstall(ctx: CommandContext): Promise<void> {
 		logger: ctx.logger,
 		quiet: ctx.quiet,
 	});
-	if (result.kind === "success") {
-		ctx.logger.success(result.message);
-	} else if (result.kind === "info") {
+	if (result.kind === "success" || result.kind === "info") {
 		ctx.logger.info(result.message);
 	}
 }
@@ -126,7 +209,7 @@ async function runBlueprintScaffold(
 		onProgress: (event) => ctx.logger.info(event.message),
 	});
 	run.blueprintDir = scaffolded.directory;
-	ctx.logger.success(`Project ready at ${scaffolded.directory}`);
+	ctx.logger.info(`Project ready at ${scaffolded.directory}`);
 }
 
 async function runBlueprintDeploy(
@@ -141,23 +224,21 @@ async function runBlueprintDeploy(
 	if (!directory) {
 		throw new Error("The blueprint project was not created.");
 	}
-
 	const deployDir = join(directory, blueprint.deployPath ?? ".");
 
-	// Deploying needs a running cluster. Rather than failing on a
-	// connection error, say what to do and leave the project in place.
+	// The cluster was started moments ago; re-check so a cluster that
+	// died in between gets a next action instead of a connection dump.
 	const health = await checkLocalClusterHealth();
 	if (!health.healthy) {
-		logger.warn(
-			`Could not reach the local cluster (${health.detail}) — the blueprint was not deployed.`,
+		throw new Error(
+			[
+				`Could not reach the local cluster (${health.detail}).`,
+				"Start it with: c8ctl cluster start",
+				// Pin the same local profile the healthy path deploys to, so the
+				// recovery cannot land on a remote cluster from the session or env.
+				`Then deploy the project with: c8ctl deploy "${deployDir}" --profile local`,
+			].join("\n"),
 		);
-		logger.info("Start the cluster with: c8ctl cluster start");
-		// Pin the same local profile the healthy path deploys to, so the
-		// recovery cannot land on a remote cluster from the session or env.
-		logger.info(
-			`Then deploy the project with: c8ctl deploy "${deployDir}" --profile local`,
-		);
-		return;
 	}
 
 	// Both mutations target the cluster the health check just probed: the
@@ -183,43 +264,155 @@ async function runBlueprintDeploy(
 			variables: blueprint.startVariables,
 		}),
 	});
-	logger.success("Process instance created", created.processInstanceKey);
+	logger.info(`Process instance created: ${created.processInstanceKey}`);
 }
 
-const STEP_EXECUTORS: Partial<Record<SetupStepId, StepExecutor>> = {
+const NO_HARNESS_HINT =
+	"Install Claude Code, GitHub Copilot CLI or Cursor, then re-run c8ctl setup.";
+
+async function runSkillsInstall(ctx: CommandContext): Promise<void> {
+	const harnesses = detectInstalledHarnesses();
+	if (harnesses.length === 0) {
+		ctx.logger.info(
+			`No supported AI coding harness detected — nothing to install into. ${NO_HARNESS_HINT}`,
+		);
+		return;
+	}
+	for (const harness of harnesses) {
+		ctx.logger.info(
+			`Installing Camunda skills (${CAMUNDA_SKILLS_REPOSITORY}) for ${harness}…`,
+		);
+		runSkillInstall(harness);
+	}
+}
+
+function runMcpInstall(docs: boolean): StepExecutor {
+	return (ctx) => {
+		const plans = planMcpConfigs({
+			requested: [],
+			operation: "install",
+			docs,
+			orchestration: !docs,
+			alias: "camunda",
+			connection: docs ? undefined : buildMcpConnection(DEFAULT_PROFILE),
+		});
+		for (const plan of plans) {
+			writeMcpConfig(plan);
+			ctx.logger.info(`MCP configuration: ${plan.harness} (${plan.path})`);
+		}
+		if (docs) {
+			ctx.logger.info("The docs server requires sign-in on first use.");
+		}
+	};
+}
+
+/** planMcpConfigs throws this when the machine has no known harness. */
+function isNoHarnessError(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		error.message.startsWith("No supported MCP harness was detected")
+	);
+}
+
+function guardedMcpInstall(docs: boolean): StepExecutor {
+	const executor = runMcpInstall(docs);
+	return async (ctx, run) => {
+		try {
+			await executor(ctx, run);
+		} catch (error) {
+			if (isNoHarnessError(error)) {
+				ctx.logger.info(
+					`No supported AI coding harness detected — nothing to configure. ${NO_HARNESS_HINT}`,
+				);
+				return;
+			}
+			throw error;
+		}
+	};
+}
+
+async function runOpenOperate(ctx: CommandContext): Promise<void> {
+	const url = deriveAppUrl("http://localhost:8080/v2", "operate");
+	if (!url) {
+		throw new Error("Could not derive the Operate URL.");
+	}
+	const health = await checkLocalClusterHealth();
+	if (!health.healthy) {
+		ctx.logger.info(
+			`The cluster is not reachable — open ${url} once it is up (demo/demo).`,
+		);
+		return;
+	}
+	ctx.logger.info(`Opening Operate at ${url} — log in with demo/demo`);
+	openUrl(url);
+}
+
+const STEP_EXECUTORS: Record<SetupStepId, StepExecutor> = {
 	prerequisites: runPrerequisites,
+	"install-c8run": runClusterInstall,
+	"start-cluster": runClusterStart,
 	"install-modeler": runModelerInstall,
 	"scaffold-blueprint": runBlueprintScaffold,
 	"deploy-blueprint": runBlueprintDeploy,
+	"install-skills": runSkillsInstall,
+	"cluster-mcp": guardedMcpInstall(false),
+	"docs-mcp": guardedMcpInstall(true),
+	"open-operate": runOpenOperate,
 };
 
+// ── The step runner ────────────────────────────────────────────────
+
+/**
+ * Run every selected step in plan order. Each step ends in an aligned
+ * status line; a failure prints the error underneath and the remaining
+ * steps still run. Steps whose dependencies did not succeed are skipped
+ * with the unmet steps named. Returns the failed-step count and the
+ * state steps handed along (e.g. the scaffolded project directory).
+ */
 async function executePlan(
 	ctx: CommandContext,
 	selected: ReadonlySet<SetupComponentId>,
 	blueprintId: string | undefined,
-): Promise<void> {
+): Promise<{ failures: number; run: SetupRun }> {
 	const { logger } = ctx;
 	const run: SetupRun = { blueprintId };
+	const succeeded = new Set<SetupStepId>();
+	let failures = 0;
+	const width = Math.max(...SETUP_STEPS.map((step) => step.title.length));
+
 	for (const step of SETUP_STEPS) {
 		if (step.component !== null && !selected.has(step.component)) continue;
-		const executor = STEP_EXECUTORS[step.id];
-		if (!executor) {
-			logger.info(`${step.title} — setup can't do this step yet; skipped.`);
+
+		const unmet = (step.dependsOn ?? []).filter((dep) => !succeeded.has(dep));
+		if (unmet.length > 0) {
+			logger.info(formatStepResult(step.title, "skipped", width), {
+				essential: true,
+			});
+			const names = unmet
+				.map((dep) => SETUP_STEPS.find((s) => s.id === dep)?.title ?? dep)
+				.join(", ");
+			logger.info(`    needs: ${names}`, { essential: true });
 			continue;
 		}
-		logger.info(`▸ ${step.title}`);
-		await executor(ctx, run);
-	}
 
-	logger.success("Setup finished.");
-	if (run.blueprintDir) {
-		const blueprint = setupBlueprintById(
-			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
-		);
-		logger.info(
-			`Your project is at ${run.blueprintDir} — follow the guide: ${blueprint.guideUrl}`,
-		);
+		try {
+			await STEP_EXECUTORS[step.id](ctx, run);
+			succeeded.add(step.id);
+			logger.info(formatStepResult(step.title, "success", width), {
+				essential: true,
+			});
+		} catch (error) {
+			failures += 1;
+			logger.info(formatStepResult(step.title, "error", width), {
+				essential: true,
+			});
+			const message = error instanceof Error ? error.message : String(error);
+			for (const line of message.split("\n")) {
+				logger.info(`    ${line}`, { essential: true });
+			}
+		}
 	}
+	return { failures, run };
 }
 
 // ── The command ────────────────────────────────────────────────────
@@ -269,6 +462,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 				description: c.why,
 				value: c.id,
 				checked: c.defaultSelected,
+				requires: c.requires?.map((r) => ({ value: r.id, reason: r.reason })),
 			})),
 		});
 		if (result.cancelled) {
@@ -318,6 +512,25 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		return { kind: "none" };
 	}
 
-	await executePlan(ctx, selected, blueprintId);
+	const { failures, run } = await executePlan(ctx, selected, blueprintId);
+	if (run.blueprintDir) {
+		const blueprint = setupBlueprintById(
+			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
+		);
+		logger.info(
+			`Your project is at ${run.blueprintDir} — follow the guide: ${blueprint.guideUrl}`,
+			{ essential: true },
+		);
+	}
+	if (failures > 0) {
+		logger.info(
+			`Setup finished with ${failures} failed step(s). Fix the cause and re-run c8ctl setup — completed steps are detected and skipped.`,
+			{ essential: true },
+		);
+		process.exitCode = 1;
+		return { kind: "none" };
+	}
+
+	logger.success("Setup finished.");
 	return { kind: "none" };
 });
