@@ -693,9 +693,10 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		nextSteps.push("Operate: http://localhost:8080/operate (demo/demo)");
 	}
 	if (nextSteps.length > 0) {
-		logger.info(`\n${renderNextSteps(nextSteps, { color })}`, {
-			essential: true,
-		});
+		logger.info(
+			`\n${renderNextSteps(nextSteps, { color, maxWidth: process.stdout.columns || undefined })}`,
+			{ essential: true },
+		);
 	}
 
 	if (failures > 0) {

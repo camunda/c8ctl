@@ -337,15 +337,24 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
  * The boxed completion block after the step report: the takeaway of the
  * whole run, visually set apart from the status lines so it cannot
  * blend in. The box is as wide as its longest line; the heading carries
- * the brand color on a terminal.
+ * the brand color on a terminal. When the content would exceed the
+ * terminal's width (`maxWidth`), the borders would wrap — the block
+ * degrades to an unboxed, indented list that keeps long paths and URLs
+ * intact.
  */
 export function renderNextSteps(
 	lines: readonly string[],
-	{ color }: { color: boolean },
+	{ color, maxWidth }: { color: boolean; maxWidth?: number },
 ): string {
 	const s = bannerStyle({ color });
 	const heading = "What's next";
 	const width = Math.max(heading.length, ...lines.map((line) => line.length));
+	if (maxWidth !== undefined && width + 6 > maxWidth) {
+		return [
+			`${s.brand}${s.bold}${heading}${s.reset}`,
+			...lines.map((line) => `  ${line}`),
+		].join("\n");
+	}
 	const top = `╭${"─".repeat(width + 4)}╮`;
 	const bottom = `╰${"─".repeat(width + 4)}╯`;
 	const row = (text: string, visibleLength: number) =>

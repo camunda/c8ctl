@@ -166,6 +166,21 @@ describe("renderNextSteps()", () => {
 			renderNextSteps(LINES, { color: false }),
 		);
 	});
+
+	test("falls back to an unboxed block when the content exceeds the width budget", () => {
+		const fallback = renderNextSteps(LINES, { color: false, maxWidth: 40 });
+		assert.doesNotMatch(fallback, /[╭╮╰╯│]/);
+		assert.match(fallback, /What's next/);
+		// Long paths and URLs stay intact — nothing is wrapped or truncated.
+		for (const line of LINES) {
+			assert.ok(fallback.includes(line), `missing: ${line}`);
+		}
+	});
+
+	test("fits the box when the budget allows it", () => {
+		const boxed = renderNextSteps(LINES, { color: false, maxWidth: 200 });
+		assert.match(boxed, /╭/);
+	});
 });
 
 describe("formatStepResult()", () => {
