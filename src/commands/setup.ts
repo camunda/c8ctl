@@ -156,11 +156,13 @@ const CLI_ENTRY = realpathSync(
  * the exit code onto the step result. `cluster start` downloads Camunda 8
  * Run on first run, so this one step covers install and start.
  *
- * The child's output is streamed through a line filter that drops the
+ * The child's stdout is streamed through a line filter that drops the
  * download progress lines (`//> 42% …`) and feeds the step's output
- * buffer (via ctx.logger) — it surfaces only when the step fails. The
- * child is pinned to text mode so its lines stay plain and filterable no
- * matter the session's output mode.
+ * buffer (via ctx.logger) — it surfaces only when the step fails.
+ * stderr passes through immediately: the plugin's warnings and failure
+ * diagnostics are actionable either way. The child is pinned to text
+ * mode so its lines stay plain and filterable no matter the session's
+ * output mode.
  */
 function spawnClusterStart(ctx: CommandContext): Promise<void> {
 	return new Promise((resolvePromise, rejectPromise) => {
@@ -168,13 +170,13 @@ function spawnClusterStart(ctx: CommandContext): Promise<void> {
 			stdio: ["ignore", "pipe", "pipe"],
 			env: { ...process.env, C8CTL_OUTPUT_MODE: "text" },
 		});
-		const forward = (stream: "stdout" | "stderr") =>
+		const forward = (stream: "stdout" | "stderr", essential: boolean) =>
 			createLineForwarder({
-				write: (line) => ctx.logger.info(line, { stream }),
+				write: (line) => ctx.logger.info(line, { stream, essential }),
 				skip: isClusterProgressLine,
 			});
-		const out = forward("stdout");
-		const err = forward("stderr");
+		const out = forward("stdout", false);
+		const err = forward("stderr", true);
 		child.stdout?.setEncoding("utf-8");
 		child.stderr?.setEncoding("utf-8");
 		child.stdout?.on("data", (chunk: string) => out.push(chunk));
@@ -327,6 +329,7 @@ async function runSkillsInstall(ctx: CommandContext): Promise<void> {
 	if (harnesses.length === 0) {
 		ctx.logger.info(
 			`No supported AI coding harness detected — nothing to install into. ${NO_HARNESS_HINT}`,
+			{ essential: true },
 		);
 		return;
 	}
@@ -383,6 +386,7 @@ function guardedMcpInstall(docs: boolean): StepExecutor {
 			if (isNoHarnessError(error)) {
 				ctx.logger.info(
 					`No supported AI coding harness detected — nothing to configure. ${NO_HARNESS_HINT}`,
+					{ essential: true },
 				);
 				return;
 			}
@@ -650,12 +654,13 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		return { kind: "none" };
 	}
 
-	// No surprise browser windows: the docs MCP sign-in opens one, so say
-	// so before the first step runs. (The cluster start opens Operate the
-	// same way a plain "c8ctl cluster start" does.)
+	// No surprise browser windows: the docs MCP sign-in opens one when
+	// the assistant first connects, so say so before the first step runs.
+	// (The cluster start opens Operate the same way a plain "c8ctl
+	// cluster start" does.)
 	if (selected.has("docs-mcp")) {
 		logger.info(
-			"Heads up: the docs MCP server needs you to sign in — a browser window will open for it.",
+			"Heads up: the docs MCP server needs you to sign in — your AI assistant will open a browser window for it when it connects.",
 			{ essential: true },
 		);
 	}

@@ -466,6 +466,27 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("a cluster warning on stderr shows even though the step succeeds", async () => {
+		const stub = stubbedExecution();
+		stub.options.env.C8CTL_SETUP_STUB_CLUSTER_WARN = "1";
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Start the local cluster", "SUCCESS");
+			// stderr passes through: the warning is not buffered away.
+			assert.match(out, /Could not persist the durable cluster PID record/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("a failed step reports [ERROR] with its buffered output, skips dependents, and the rest still runs", async () => {
 		const stub = stubbedExecution({ failStep: "start-cluster" });
 		try {
@@ -545,7 +566,7 @@ describe("c8ctl setup", () => {
 			// The sign-in browser window is announced before the first step runs.
 			assert.match(
 				out,
-				/the docs MCP server needs you to sign in — a browser window will open/,
+				/the docs MCP server needs you to sign in — your AI assistant will open a browser window/,
 			);
 			assert.match(out, /asks you to sign in in a browser on first use/);
 			const mcpConfig: unknown = JSON.parse(

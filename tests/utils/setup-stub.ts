@@ -32,6 +32,8 @@
  *                                   body is written to this file.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "install-skills").
+ *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
+ *                                   warning on stderr while succeeding.
  */
 
 import childProcess from "node:child_process";
@@ -185,6 +187,10 @@ const CLUSTER_CHILD_OUTPUT = {
 		"Cluster is ready!\n",
 };
 
+/** A plugin warning that a successful `cluster start` can still print. */
+const CLUSTER_CHILD_WARNING =
+	"Could not persist the durable cluster PID record (disk full); the cluster is still tracked via its markers and pidfiles.\n";
+
 function fakeChild(
 	exitCode: number,
 	{ stdout = "", stderr = "" }: { stdout?: string; stderr?: string } = {},
@@ -226,7 +232,12 @@ Object.defineProperty(childProcess, "spawn", {
 					});
 				}
 				clusterRunning = true;
-				return fakeChild(0, CLUSTER_CHILD_OUTPUT);
+				return fakeChild(0, {
+					...CLUSTER_CHILD_OUTPUT,
+					...(process.env.C8CTL_SETUP_STUB_CLUSTER_WARN === "1"
+						? { stderr: CLUSTER_CHILD_WARNING }
+						: {}),
+				});
 			}
 			// setup must not self-invoke anything but `cluster start` —
 			// a first-run install is part of start.
