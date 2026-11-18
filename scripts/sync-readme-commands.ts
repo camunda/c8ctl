@@ -277,6 +277,12 @@ export function generateCommandContent(
 			lines.push("");
 		}
 
+		// Docs-only notes (e.g. an exit-code table) — not part of help.
+		if (def.docsNotes && def.docsNotes.length > 0) {
+			lines.push(...def.docsNotes);
+			lines.push("");
+		}
+
 		lines.push("---");
 		lines.push("");
 	}

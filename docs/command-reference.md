@@ -1055,6 +1055,13 @@ c8ctl setup                                                 # Run the guided set
 c8ctl setup --yes                                           # Set up the defaults, without prompting
 ```
 
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every selected step succeeded — or nothing was changed on purpose: the wizard was cancelled, or a non-interactive run without `--yes` printed the plan without installing. Re-running after a successful setup exits `0` again: finished work is reused, and the blueprint is deployed and started once more so there is always a running instance. |
+| `1` | One or more steps failed. The other steps still ran; steps depending on a failed one were skipped. Fix the reported cause and re-run — finished work is picked up, not repeated. |
+
 ---
 
 ### `watch`

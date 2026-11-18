@@ -18,6 +18,12 @@
  *
  * Streams: the banner, prompts and progress are UI chrome on stderr; the
  * step report and the JSON payload are the command's answer on stdout.
+ *
+ * Exit codes: 0 when every selected step succeeded, or when nothing was
+ * changed on purpose (the wizard was cancelled, or a piped run without
+ * --yes printed the plan and installed nothing); 1 when any step failed
+ * — the other steps still ran, and re-running picks up finished work
+ * instead of repeating it.
  */
 
 import { spawn } from "node:child_process";

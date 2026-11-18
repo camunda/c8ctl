@@ -163,6 +163,12 @@ export interface CommandDef {
 	 * [mcp-path] values and connection precedence).
 	 */
 	helpNotes?: readonly string[];
+	/**
+	 * Extra Markdown lines rendered only on the generated docs page
+	 * (docs/command-reference.md), after the examples — for content that
+	 * has no place in terminal help (e.g. an exit-code table).
+	 */
+	docsNotes?: readonly string[];
 }
 
 // ─── Resource Aliases ────────────────────────────────────────────────────────
@@ -1847,6 +1853,18 @@ export const COMMAND_REGISTRY = {
 			"unless you pass --yes; --json prints the plan without executing.",
 			"The starter blueprint is chosen in the wizard; a non-interactive",
 			"--yes run uses Rocket Launch.",
+			"Exit code 0: every selected step succeeded, or nothing was changed",
+			"on purpose (wizard cancelled, or a piped run without --yes printed",
+			"the plan). Exit code 1: a step failed — fix the cause and re-run;",
+			"finished work is picked up, not repeated.",
+		],
+		docsNotes: [
+			"**Exit codes:**",
+			"",
+			"| Code | Meaning |",
+			"|------|---------|",
+			"| `0` | Every selected step succeeded — or nothing was changed on purpose: the wizard was cancelled, or a non-interactive run without `--yes` printed the plan without installing. Re-running after a successful setup exits `0` again: finished work is reused, and the blueprint is deployed and started once more so there is always a running instance. |",
+			"| `1` | One or more steps failed. The other steps still ran; steps depending on a failed one were skipped. Fix the reported cause and re-run — finished work is picked up, not repeated. |",
 		],
 		resources: [],
 		flags: {
