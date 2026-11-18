@@ -680,14 +680,20 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	});
 
 	// The takeaway of the whole run, boxed so it stands apart from the
-	// step report above it.
+	// step report above it. A blueprint owns its actionable lines (what
+	// the run left behind, what to do with it); without one but with a
+	// running cluster, point at the first process run instead.
 	const nextSteps: string[] = [];
 	if (run.blueprintDir) {
 		const blueprint = setupBlueprintById(
 			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
 		);
+		nextSteps.push(...blueprint.nextSteps(run.blueprintDir));
 		nextSteps.push(`Project: ${run.blueprintDir}`);
 		nextSteps.push(`Guide: ${blueprint.guideUrl}`);
+	} else if (run.clusterStarted) {
+		nextSteps.push("Run your first process: c8ctl run my-process.bpmn");
+		nextSteps.push('Or re-run "c8ctl setup" and pick a starter blueprint.');
 	}
 	if (run.clusterStarted) {
 		nextSteps.push("Operate: http://localhost:8080/operate (demo/demo)");

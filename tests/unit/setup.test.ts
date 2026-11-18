@@ -428,6 +428,10 @@ describe("c8ctl setup", () => {
 				out,
 				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
 			);
+			// The box is actionable: setup already started an instance, and
+			// the box says so and names the command that shows it.
+			assert.match(out, /A Rocket Launch instance is already running/);
+			assert.match(out, /See it: c8ctl search process-instance/);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
 			assert.ok(
@@ -773,5 +777,77 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Cancelled — nothing was changed\./);
 		assert.doesNotMatch(result.stdout, /Setup finished\./);
+	});
+
+	test("interactive: the service worker blueprint ends with worker instructions", async () => {
+		const stub = stubbedExecution();
+		try {
+			const result = await runInteractive(
+				[
+					{ waitFor: "Docs MCP server", keys: "\r" },
+					// Down past "Rocket Launch" to "Service worker", then Enter.
+					{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\x1b[B\r" },
+				],
+				{
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Create the blueprint project", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			assert.ok(
+				existsSync(
+					join(stub.cwd, "service-worker", "bpmn", "order-process.bpmn"),
+				),
+				"service-worker blueprint was not scaffolded",
+			);
+			// The instance stalls at its service task until a worker connects —
+			// the closing box must say so and hand over the commands.
+			assert.match(out, /The order process waits for a worker/);
+			assert.match(out, /cd .*service-worker\/nodejs/);
+			assert.match(out, /npm install && npm start/);
+			assert.match(
+				out,
+				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive: without a blueprint the box suggests the first run", async () => {
+		const stub = stubbedExecution();
+		try {
+			const result = await runInteractive(
+				// Down, down to "Starter blueprint", space to deselect, Enter.
+				[{ waitFor: "Docs MCP server", keys: "\x1b[B\x1b[B \r" }],
+				{
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(
+				!result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
+				"blueprint prompt should not render when the blueprint is off",
+			);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Start the local cluster", "SUCCESS");
+			assert.doesNotMatch(out, /Create the blueprint project/);
+			// No blueprint, but the cluster runs: point at the first process
+			// run instead of leaving the user at a bare Operate link.
+			assert.match(out, /Run your first process: c8ctl run my-process\.bpmn/);
+			assert.match(out, /re-run "c8ctl setup" and pick a starter blueprint/);
+			assert.match(
+				out,
+				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
+			);
+		} finally {
+			stub.cleanup();
+		}
 	});
 });
