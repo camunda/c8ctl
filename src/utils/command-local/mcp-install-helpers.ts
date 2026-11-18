@@ -41,7 +41,7 @@ interface McpHarness {
 
 export interface McpChange {
 	server: string;
-	status: "installed" | "removed" | "unchanged" | "absent";
+	status: "installed" | "updated" | "removed" | "unchanged" | "absent";
 	config?: Record<string, unknown>;
 }
 
@@ -183,6 +183,14 @@ function isOrchestrationEntry(entry: unknown): boolean {
 	);
 }
 
+function isDocsEntry(entry: unknown): boolean {
+	if (!isRecord(entry)) return false;
+	return (
+		entry.url === DOCS_URL ||
+		(Array.isArray(entry.args) && entry.args.includes(DOCS_URL))
+	);
+}
+
 function readOptionalFile(path: string): string | undefined {
 	try {
 		return readFileSync(path, "utf8");
@@ -287,20 +295,34 @@ export function planMcpConfigs({
 				operation === "uninstall" && !entry.docs
 					? isOrchestrationEntry(current)
 					: matchesServerConfig(current, entry.config);
-			if (present && !matches) {
+			// An entry c8ctl installed earlier can drift when the install
+			// moved (another Node, a global vs. checkout install, a renamed
+			// profile): it is still ours, so install updates it in place
+			// instead of blocking a re-run. A foreign entry under the same
+			// name still conflicts.
+			const owned = entry.docs
+				? isDocsEntry(current)
+				: isOrchestrationEntry(current);
+			if (present && !matches && !(operation === "install" && owned)) {
 				throw new Error(
 					`MCP entry '${entry.name}' conflicts in ${path}. Inspect it before changing it${entry.docs ? "." : ", or choose another --alias."}`,
 				);
 			}
 			const status =
 				operation === "install"
-					? present
-						? "unchanged"
-						: "installed"
+					? !present
+						? "installed"
+						: matches
+							? "unchanged"
+							: "updated"
 					: present
 						? "removed"
 						: "absent";
-			if (status === "installed" || status === "removed") {
+			if (
+				status === "installed" ||
+				status === "updated" ||
+				status === "removed"
+			) {
 				content = applyEdits(
 					content,
 					modify(
@@ -379,7 +401,10 @@ export function writeMcpConfig(
 ): void {
 	if (
 		!plan.changes.some(
-			(change) => change.status === "installed" || change.status === "removed",
+			(change) =>
+				change.status === "installed" ||
+				change.status === "updated" ||
+				change.status === "removed",
 		)
 	)
 		return;

@@ -266,6 +266,77 @@ test("repeat installation preserves client-added tool restrictions and uninstall
 	assert.deepEqual(serversAt(s.paths["github-copilot"], "github-copilot"), {});
 });
 
+test("a drifted c8ctl-managed entry is updated on re-install; a foreign entry still conflicts", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	const installed = await s.run("mcp", "install", "claude-code");
+	assert.equal(installed.status, 0, installed.stderr);
+	const current = serversAt(s.paths["claude-code"], "claude-code").camunda;
+
+	// Drift the entry the way a moved install does — another Node and
+	// script path — while keeping the c8ctl orchestration shape.
+	const drifted: unknown = JSON.parse(
+		readFileSync(s.paths["claude-code"], "utf8"),
+	);
+	assert.ok(isRecord(drifted) && isRecord(drifted.mcpServers));
+	const camunda = drifted.mcpServers.camunda;
+	assert.ok(isRecord(camunda) && Array.isArray(camunda.args));
+	camunda.command = "/usr/local/bin/node";
+	camunda.args[0] = "/usr/local/lib/node_modules/@camunda8/cli/dist/index.js";
+	delete camunda.type;
+	s.write("claude-code", JSON.stringify(drifted));
+
+	const updated = await s.run("mcp", "install", "claude-code");
+	assert.equal(updated.status, 0, updated.stderr);
+	const items = parseJson(updated);
+	assert.ok(Array.isArray(items));
+	assert.deepEqual(
+		items.map((item: unknown) => {
+			assert.ok(isRecord(item));
+			return item.status;
+		}),
+		["updated"],
+	);
+	assert.deepEqual(
+		serversAt(s.paths["claude-code"], "claude-code").camunda,
+		current,
+	);
+
+	// A foreign entry under the same name is never clobbered.
+	const foreign = JSON.stringify({
+		mcpServers: { camunda: { command: "other-tool", args: ["serve"] } },
+	});
+	s.write("claude-code", foreign);
+	const conflict = await s.run("mcp", "install", "claude-code");
+	assert.equal(conflict.status, 1, conflict.stderr);
+	assert.match(conflict.stderr, /conflicts/);
+	assert.equal(readFileSync(s.paths["claude-code"], "utf8"), foreign);
+});
+
+test("a drifted docs entry is updated on re-install", async (t) => {
+	const s = sandbox(t);
+	const installed = await s.run("mcp", "install", "cursor", "--docs");
+	assert.equal(installed.status, 0, installed.stderr);
+	const current = serversAt(s.paths.cursor, "cursor")["camunda-docs"];
+
+	// An older install wrote the npx/mcp-remote form of the docs entry.
+	const drifted: unknown = JSON.parse(readFileSync(s.paths.cursor, "utf8"));
+	assert.ok(isRecord(drifted) && isRecord(drifted.mcpServers));
+	drifted.mcpServers["camunda-docs"] = {
+		command: "npx",
+		args: ["-y", "mcp-remote", DOCS_URL],
+	};
+	s.write("cursor", JSON.stringify(drifted));
+
+	const updated = await s.run("mcp", "install", "cursor", "--docs");
+	assert.equal(updated.status, 0, updated.stderr);
+	assert.deepEqual(
+		serversAt(s.paths.cursor, "cursor")["camunda-docs"],
+		current,
+	);
+});
+
 test("docs dry-run needs no connection and does not expose unrelated config secrets", async (t) => {
 	const s = sandbox(t);
 	s.write(
