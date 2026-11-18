@@ -136,11 +136,19 @@ const CLI_ENTRY = realpathSync(
 /**
  * The cluster commands live in the built-in cluster plugin, which owns
  * process exit on failure — so setup runs them as child processes and
- * maps the exit code onto the step result.
+ * maps the exit code onto the step result. `install` requires an
+ * explicit version (the plugin exits 1 without one); `start` defaults
+ * to the same "stable" alias on its own.
  */
 function runClusterSubcommand(subcommand: "install" | "start"): Promise<void> {
+	const args = [
+		CLI_ENTRY,
+		"cluster",
+		subcommand,
+		...(subcommand === "install" ? ["stable"] : []),
+	];
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(process.execPath, [CLI_ENTRY, "cluster", subcommand], {
+		const child = spawn(process.execPath, args, {
 			stdio: "inherit",
 		});
 		child.on("error", (error) =>

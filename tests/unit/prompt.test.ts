@@ -536,6 +536,19 @@ describe("multiSelect()", () => {
 			assert.deepStrictEqual(result.values, ["cluster", "blueprint"]);
 		});
 
+		test("a re-enabled row stays unchecked — disabling clears the checkmark", async () => {
+			const io = fakeTTY();
+			// Cluster off (Blueprint force-unchecked), Cluster back on, Enter.
+			type(io, " ", " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster"]);
+		});
+
 		test("non-interactive drops options whose requirement is not pre-checked", async () => {
 			const result = await multiSelect({
 				message: "Pick",

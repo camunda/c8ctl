@@ -557,6 +557,20 @@ export async function multiSelect<T>(
 		const checked = options.map((opt) => opt.checked === true);
 		let state = evaluateChecked(options, checked);
 
+		/**
+		 * Re-evaluate dependencies and persist the result: a disabled row is
+		 * actually cleared, so re-enabling it later does not silently bring
+		 * back a hidden checkmark — not for the initial state, not after a
+		 * toggle, not after select-all.
+		 */
+		function reevaluate(): void {
+			state = evaluateChecked(options, checked);
+			for (let i = 0; i < options.length; i++) {
+				checked[i] = state.effective[i];
+			}
+		}
+		reevaluate();
+
 		// Same wrap accounting as select(): rows wider than the terminal
 		// occupy extra physical lines that CURSOR_UP must traverse.
 		const cols = out.columns || 80;
@@ -611,7 +625,7 @@ export async function multiSelect<T>(
 		function retoggle(index: number, value?: boolean) {
 			if (state.reasons[index] !== undefined) return;
 			checked[index] = value ?? !checked[index];
-			state = evaluateChecked(options, checked);
+			reevaluate();
 			render(false);
 		}
 
@@ -680,7 +694,7 @@ export async function multiSelect<T>(
 						checked[i] = checkAll;
 					}
 				}
-				state = evaluateChecked(options, checked);
+				reevaluate();
 				render(false);
 			} else if (key.name === "return") {
 				confirmSelection();

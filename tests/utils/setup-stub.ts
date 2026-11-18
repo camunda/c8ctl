@@ -181,6 +181,11 @@ Object.defineProperty(childProcess, "spawn", {
 					? "start-cluster"
 					: undefined;
 			if (subcommand !== undefined) {
+				// The real plugin exits 1 when install has no version argument;
+				// mirror that so a missing version fails the test, not the user.
+				if (subcommand === "install-c8run" && !argv.includes("stable")) {
+					return fakeChild(1);
+				}
 				if (failStep === subcommand) return fakeChild(1);
 				if (subcommand === "start-cluster") clusterRunning = true;
 				return fakeChild(0);

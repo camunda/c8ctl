@@ -190,7 +190,7 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		title: "Deploy and start the process",
 		detail: "your first running process instance",
 		component: "blueprint",
-		dependsOn: ["start-cluster"],
+		dependsOn: ["scaffold-blueprint", "start-cluster"],
 	},
 	{
 		id: "install-skills",

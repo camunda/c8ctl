@@ -206,6 +206,11 @@ function stubbedExecution({
 				USERPROFILE: home,
 				APPDATA: join(home, "AppData", "Roaming"),
 				XDG_CONFIG_HOME: join(home, ".config"),
+				// These take precedence over HOME in the MCP helper — pin them
+				// into the fixture as well, or a developer who exports them
+				// would have their real harness config rewritten by the test.
+				CLAUDE_CONFIG_DIR: join(home, ".claude"),
+				COPILOT_HOME: join(home, ".copilot"),
 				...(clusterUp ? { C8CTL_SETUP_STUB_CLUSTER: "up" } : {}),
 				...(failStep ? { C8CTL_SETUP_STUB_FAIL: failStep } : {}),
 				...(capture ? { C8CTL_SETUP_STUB_CAPTURE: capture } : {}),
@@ -414,9 +419,10 @@ describe("c8ctl setup", () => {
 				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 				"blueprint was not scaffolded",
 			);
-			// The cluster MCP server was written into the fixture harness.
+			// The cluster MCP server was written into the fixture harness
+			// (CLAUDE_CONFIG_DIR is pinned into the fixture home).
 			const mcpConfig: unknown = JSON.parse(
-				readFileSync(join(stub.home, ".claude.json"), "utf-8"),
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
 			);
 			assert.ok(isRecord(mcpConfig) && isRecord(mcpConfig.mcpServers));
 			assert.ok(isRecord(mcpConfig.mcpServers.camunda));
@@ -464,6 +470,32 @@ describe("c8ctl setup", () => {
 			assert.ok(
 				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("a failed scaffold skips the deploy step instead of failing it too", async () => {
+		const stub = stubbedExecution();
+		try {
+			// The destination exists and is not empty, so scaffolding refuses.
+			mkdirSync(join(stub.cwd, "rocket-launch"));
+			writeFileSync(join(stub.cwd, "rocket-launch", "README.md"), "occupied\n");
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Create the blueprint project", "ERROR");
+			assert.match(out, /already exists and is not empty/);
+			stepLine(out, "Deploy and start the process", "SKIPPED");
+			assert.match(out, /needs: Create the blueprint project/);
+			// One failed step, not two.
+			assert.match(out, /Setup finished with 1 failed step/);
 		} finally {
 			stub.cleanup();
 		}
