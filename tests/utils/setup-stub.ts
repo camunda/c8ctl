@@ -39,6 +39,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { basename } from "node:path";
+import { PassThrough } from "node:stream";
 
 // ── Desktop Modeler looks installed ────────────────────────────────
 // macOS and Windows look the app up at fixed paths. The Linux lookup
@@ -164,17 +165,47 @@ let clusterRunning = clusterUpAtBoot;
 class FakeChild extends EventEmitter {
 	pid = 123456;
 	stdin = null;
-	stdout = null;
-	stderr = null;
+	stdout = new PassThrough();
+	stderr = new PassThrough();
 	unref(): void {}
 	kill(): boolean {
 		return true;
 	}
 }
 
-function fakeChild(exitCode: number): FakeChild {
+/** What the fake `cluster install|start` children print on their streams. */
+const CLUSTER_CHILD_OUTPUT: Record<string, { stdout: string }> = {
+	"install-c8run": {
+		stdout:
+			'Resolved alias "stable" → 8.10\n' +
+			"Downloading Camunda 8.10 for darwin...\n" +
+			"//> 5% (43.0 MB / 860.6 MB) at 10.0 MB/s, ETA 1m 22s\n" +
+			"//> 100% (860.6 MB / 860.6 MB) at 10.8 MB/s\n" +
+			"c8run 8.10 installed successfully.\n",
+	},
+	"start-cluster": {
+		stdout: "Starting Camunda 8 local cluster...\n" + "Cluster is ready!\n",
+	},
+};
+
+function fakeChild(
+	exitCode: number,
+	{ stdout = "" }: { stdout?: string } = {},
+): FakeChild {
 	const child = new FakeChild();
-	process.nextTick(() => child.emit("close", exitCode, null));
+	// close only after the streams were read to their end, so forwarded
+	// output can never race the step's status line.
+	let open = 2;
+	const done = () => {
+		open -= 1;
+		if (open === 0) child.emit("close", exitCode, null);
+	};
+	process.nextTick(() => {
+		child.stdout.on("end", done);
+		child.stderr.on("end", done);
+		child.stdout.end(stdout);
+		child.stderr.end();
+	});
 	return child;
 }
 
@@ -202,7 +233,7 @@ Object.defineProperty(childProcess, "spawn", {
 				}
 				if (failStep === subcommand) return fakeChild(1);
 				if (subcommand === "start-cluster") clusterRunning = true;
-				return fakeChild(0);
+				return fakeChild(0, CLUSTER_CHILD_OUTPUT[subcommand]);
 			}
 		}
 		// Browser openers: open (macOS), xdg-open (Linux), cmd.exe /c start.

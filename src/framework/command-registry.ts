@@ -1815,8 +1815,7 @@ export const COMMAND_REGISTRY = {
 		description: "Guided first-run setup for local Camunda 8 development",
 		helpDescription:
 			"Guided first-run setup: install a local cluster, a starter " +
-			"blueprint project, and AI assistant tooling — prints the plan " +
-			"before anything runs.",
+			"blueprint project, and AI assistant tooling.",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show setup details",
 		mutating: true,
@@ -1843,8 +1842,9 @@ export const COMMAND_REGISTRY = {
 			"Steps report [SUCCESS], [ERROR] or [SKIPPED] in order; a failed step",
 			"does not stop the rest. The blueprint needs the local cluster —",
 			"deselect the cluster and the blueprint option is disabled.",
-			"Non-interactive runs (piped output, CI, --json) print the plan only;",
-			"pass --yes to execute it with the defaults.",
+			"The browser opens once the local cluster reports healthy.",
+			"A run without a selection (piped output, CI) installs nothing",
+			"unless you pass --yes; --json prints the plan without executing.",
 		],
 		resources: [],
 		flags: {

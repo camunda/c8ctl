@@ -7,8 +7,10 @@ import assert from "node:assert";
 import { describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import {
+	createLineForwarder,
 	defaultSelection,
-	renderSetupPlan,
+	formatStepResult,
+	isClusterProgressLine,
 	renderWelcomeBanner,
 	SETUP_COMPONENTS,
 	SETUP_STEPS,
@@ -98,47 +100,81 @@ describe("renderWelcomeBanner()", () => {
 	});
 });
 
-describe("renderSetupPlan()", () => {
-	test("numbers every step when nothing is skipped", () => {
-		const all = new Set(SETUP_COMPONENTS.map((c) => c.id));
-		const plan = renderSetupPlan(all, { color: false });
-		for (const [i, step] of SETUP_STEPS.entries()) {
-			assert.ok(
-				plan.includes(`${String(i + 1).padStart(2, "0")}. ${step.title}`),
-				`step ${i + 1} missing`,
-			);
-		}
-		assert.doesNotMatch(plan, /skipped/);
-	});
-
-	test("unselected components are listed as skipped, keeping order", () => {
-		const plan = renderSetupPlan(new Set(), { color: false });
-		assert.match(plan, /01\. Check prerequisites/);
-		assert.match(plan, /- Install Camunda 8 Run — skipped/);
-		assert.match(plan, /- Open Operate — skipped/);
-		// The always-run steps are the only numbered ones left.
-		assert.doesNotMatch(plan, /02\./);
-	});
-
-	test("default selection skips only the docs MCP step", () => {
-		const plan = renderSetupPlan(defaultSelection(), { color: false });
-		assert.match(plan, /- Configure the docs MCP server — skipped/);
-		assert.match(plan, /Configure the cluster MCP server/);
-		assert.doesNotMatch(plan, /- Configure the cluster MCP server — skipped/);
-	});
-
-	test("colored output styles step numbers in the brand color", () => {
-		const plan = renderSetupPlan(defaultSelection(), { color: true });
-		assert.ok(plan.includes(BRAND_BLUE), "brand color missing");
+describe("formatStepResult()", () => {
+	test("plain output aligns the tags in one column", () => {
+		const width = "Start the local cluster".length;
+		const success = formatStepResult("Check prerequisites", "success", width, {
+			color: false,
+		});
+		const skipped = formatStepResult(
+			"Start the local cluster",
+			"skipped",
+			width,
+			{ color: false },
+		);
+		assert.strictEqual(success, stripVTControlCharacters(success));
 		assert.strictEqual(
-			stripVTControlCharacters(plan),
-			renderSetupPlan(defaultSelection(), { color: false }),
+			success.indexOf("[SUCCESS]"),
+			skipped.indexOf("[SKIPPED]"),
 		);
 	});
 
-	test("the plan is the contract: no preview note, execution follows", () => {
-		const plan = renderSetupPlan(defaultSelection(), { color: false });
-		assert.doesNotMatch(plan, /Nothing was installed/);
+	test("colored output paints success green, error red and skipped dim", () => {
+		const success = formatStepResult("A", "success", 3, { color: true });
+		const error = formatStepResult("A", "error", 3, { color: true });
+		const skipped = formatStepResult("A", "skipped", 3, { color: true });
+		assert.ok(success.includes("\x1b[32m[SUCCESS]\x1b[0m"), success);
+		assert.ok(error.includes("\x1b[31m[ERROR]\x1b[0m"), error);
+		assert.ok(skipped.includes("\x1b[2m[SKIPPED]\x1b[0m"), skipped);
+		// Styling must not change the visible text.
+		assert.strictEqual(
+			stripVTControlCharacters(success),
+			formatStepResult("A", "success", 3, { color: false }),
+		);
+	});
+});
+
+describe("isClusterProgressLine()", () => {
+	test("matches the cluster plugin's download progress lines", () => {
+		assert.ok(
+			isClusterProgressLine(
+				"//> 42% (360.7 MB / 860.6 MB) at 10.8 MB/s, ETA 40s",
+			),
+		);
+		assert.ok(
+			isClusterProgressLine("  //> 360.7 MB (total size unknown) at 10.8 MB/s"),
+		);
+	});
+
+	test("keeps regular child output", () => {
+		assert.ok(!isClusterProgressLine("Downloading Camunda 8.10 for darwin..."));
+		assert.ok(!isClusterProgressLine("c8run 8.10 installed successfully."));
+		assert.ok(!isClusterProgressLine(""));
+	});
+});
+
+describe("createLineForwarder()", () => {
+	test("forwards lines and drops skipped ones", () => {
+		const written: string[] = [];
+		const forwarder = createLineForwarder({
+			write: (line) => written.push(line),
+			skip: isClusterProgressLine,
+		});
+		forwarder.push("Downloading c8run...\n//> 5% (43 MB)\nDone.\n");
+		assert.deepStrictEqual(written, ["Downloading c8run...", "Done."]);
+	});
+
+	test("buffers partial lines across chunks and flushes the tail", () => {
+		const written: string[] = [];
+		const forwarder = createLineForwarder({
+			write: (line) => written.push(line),
+			skip: isClusterProgressLine,
+		});
+		forwarder.push("partial");
+		assert.deepStrictEqual(written, []);
+		forwarder.push(" line\n//> tail without newline");
+		forwarder.flush();
+		assert.deepStrictEqual(written, ["partial line"]);
 	});
 });
 

@@ -142,8 +142,7 @@ export type SetupStepId =
 	| "deploy-blueprint"
 	| "install-skills"
 	| "cluster-mcp"
-	| "docs-mcp"
-	| "open-operate";
+	| "docs-mcp";
 
 export interface SetupStep {
 	readonly id: SetupStepId;
@@ -220,13 +219,6 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 		detail: "Camunda 8 documentation in your AI assistant",
 		component: "docs-mcp",
 	},
-	{
-		id: "open-operate",
-		title: "Open Operate",
-		detail: "http://localhost:8080/operate — log in with demo/demo",
-		component: "cluster",
-		dependsOn: ["start-cluster"],
-	},
 ];
 
 // ── Step results ───────────────────────────────────────────────────
@@ -239,18 +231,31 @@ const STATUS_TAGS: Record<SetupStepStatus, string> = {
 	skipped: "[SKIPPED]",
 };
 
+const GREEN = `${ESC}32m`;
+const RED = `${ESC}31m`;
+
+const STATUS_COLORS: Record<SetupStepStatus, string> = {
+	success: GREEN,
+	error: RED,
+	skipped: DIM,
+};
+
 /**
  * One finished step, aligned for a wizard report: the title followed by
  * a dot leader and the status tag in a fixed column. `width` is the
- * longest title in the plan, so the tags line up.
+ * longest title in the plan, so the tags line up. With `color`, the tag
+ * is green on success, red on error and dim when skipped.
  */
 export function formatStepResult(
 	title: string,
 	status: SetupStepStatus,
 	width: number,
+	{ color }: { color: boolean },
 ): string {
 	const dots = ".".repeat(Math.max(2, width - title.length + 2));
-	return `  ${title} ${dots} ${STATUS_TAGS[status]}`;
+	const tag = STATUS_TAGS[status];
+	const styled = color ? `${STATUS_COLORS[status]}${tag}${RESET}` : tag;
+	return `  ${title} ${dots} ${styled}`;
 }
 
 // ── Welcome banner ─────────────────────────────────────────────────
@@ -311,38 +316,53 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 	].join("\n");
 }
 
-// ── Plan rendering ─────────────────────────────────────────────────
+// ── Cluster child-process output ─────────────────────────────────
 
 /**
- * The tailored step plan for a selection: chosen steps numbered with
- * their detail, unchosen steps dimmed and marked as skipped.
+ * The cluster plugin reports download progress as `//> 42% (…) at …`
+ * lines. Setup streams the child's output live, minus this noise — the
+ * step's own status line is the progress signal.
  */
-export function renderSetupPlan(
-	selected: ReadonlySet<SetupComponentId>,
-	{ color }: { color: boolean },
-): string {
-	const s = bannerStyle({ color });
-	const lines: string[] = [
-		"",
-		`  ${s.bold}Here's what c8ctl setup will do:${s.reset}`,
-		"",
-	];
-	let n = 0;
-	for (const step of SETUP_STEPS) {
-		const included = step.component === null || selected.has(step.component);
-		if (included) {
-			n += 1;
-			lines.push(
-				`   ${s.brand}${String(n).padStart(2, "0")}.${s.reset} ${s.bold}${step.title}${s.reset}`,
-			);
-			lines.push(`       ${s.dim}${step.detail}${s.reset}`);
-		} else {
-			lines.push(`   ${s.dim}  - ${step.title} — skipped${s.reset}`);
-		}
-	}
-	lines.push("");
-	return lines.join("\n");
+export function isClusterProgressLine(line: string): boolean {
+	return line.trimStart().startsWith("//>");
 }
+
+/**
+ * Incremental line forwarder over child-process chunks: buffers partial
+ * lines across pushes, drops lines `skip` rejects, and passes the rest
+ * to `write`. `flush` emits a trailing unterminated line.
+ */
+export function createLineForwarder({
+	write,
+	skip,
+}: {
+	write: (line: string) => void;
+	skip: (line: string) => boolean;
+}): { push: (chunk: string) => void; flush: () => void } {
+	let pending = "";
+	const emit = (line: string) => {
+		if (!skip(line)) write(line);
+	};
+	return {
+		push(chunk) {
+			pending += chunk;
+			let newline = pending.indexOf("\n");
+			while (newline !== -1) {
+				emit(pending.slice(0, newline));
+				pending = pending.slice(newline + 1);
+				newline = pending.indexOf("\n");
+			}
+		},
+		flush() {
+			if (pending.length > 0) {
+				emit(pending);
+				pending = "";
+			}
+		},
+	};
+}
+
+// ── Plan rendering ─────────────────────────────────────────────────
 
 /** Structured plan for JSON output mode and --dry-run. */
 export function setupPlanPayload(

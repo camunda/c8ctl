@@ -243,7 +243,7 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(payload.command, "setup");
 		assert.strictEqual(payload.preview, true);
 		assert.strictEqual(payload.components.length, 6);
-		assert.strictEqual(payload.steps.length, 10);
+		assert.strictEqual(payload.steps.length, 9);
 		assert.strictEqual(payload.steps[0].title, "Check prerequisites");
 		const docsMcp = payload.components.find(
 			(c: { id: string }) => c.id === "docs-mcp",
@@ -270,18 +270,18 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("text mode prints the welcome banner and the step overview", async () => {
+	test("text mode prints the welcome banner and stops without a go-ahead", async () => {
 		const result = await c8WithOptions(
 			{ env: { C8CTL_OUTPUT_MODE: "text" } },
 			"setup",
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Welcome to Camunda 8!/);
-		assert.match(result.stdout, /Here's what c8ctl setup will do:/);
-		assert.match(result.stdout, /01\. Check prerequisites/);
-		assert.match(result.stdout, /- Configure the docs MCP server — skipped/);
+		// No plan preview: the step report is the only step listing.
+		assert.doesNotMatch(result.stdout, /Here's what c8ctl setup will do/);
 		// Without --yes or an interactive selection nothing is executed.
 		assert.match(result.stdout, /Nothing was installed\./);
+		assert.match(result.stdout, /c8ctl setup --yes/);
 		// Non-interactive output is plain: no ANSI escapes on stdout.
 		assert.strictEqual(result.stdout, stripVTControlCharacters(result.stdout));
 	});
@@ -317,25 +317,28 @@ describe("c8ctl setup", () => {
 		);
 	});
 
-	test("--no-modeler marks the modeler step skipped", async () => {
-		const result = await c8WithOptions(
-			{ env: { C8CTL_OUTPUT_MODE: "text" } },
-			"setup",
-			"--no-modeler",
-		);
+	test("--no-modeler deselects the modeler component", async () => {
+		const result = await c8("setup", "--no-modeler");
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout, /- Install Desktop Modeler — skipped/);
+		const payload = JSON.parse(result.stdout);
+		const modeler = payload.components.find(
+			(c: { id: string }) => c.id === "modeler",
+		);
+		assert.strictEqual(modeler.selected, false);
+		const modelerStep = payload.steps.find(
+			(s: { title: string }) => s.title === "Install Desktop Modeler",
+		);
+		assert.strictEqual(modelerStep.status, "skipped");
 	});
 
 	test("--no-modeler wins over --modeler", async () => {
-		const result = await c8WithOptions(
-			{ env: { C8CTL_OUTPUT_MODE: "text" } },
-			"setup",
-			"--modeler",
-			"--no-modeler",
-		);
+		const result = await c8("setup", "--modeler", "--no-modeler");
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout, /- Install Desktop Modeler — skipped/);
+		const payload = JSON.parse(result.stdout);
+		const modeler = payload.components.find(
+			(c: { id: string }) => c.id === "modeler",
+		);
+		assert.strictEqual(modeler.selected, false);
 	});
 
 	test("--help documents the command", async () => {
@@ -412,8 +415,13 @@ describe("c8ctl setup", () => {
 			stepLine(out, "Deploy and start the process", "SUCCESS");
 			stepLine(out, "Install AI assistant skills", "SUCCESS");
 			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
-			stepLine(out, "Open Operate", "SUCCESS");
 			assert.doesNotMatch(out, /Configure the docs MCP server .+ \[/);
+			// The c8run download progress percentages are filtered out of the
+			// report; the rest of the child output is streamed through.
+			assert.doesNotMatch(out, /\/\/>/);
+			assert.doesNotMatch(out, /\d+% \(/);
+			assert.match(out, /Downloading Camunda 8\.10 for darwin\.\.\./);
+			assert.match(out, /c8run 8\.10 installed successfully\./);
 			assert.match(out, /Deployment successful/);
 			assert.match(out, /Process instance created/);
 			assert.match(out, /Setup finished\./);
@@ -466,7 +474,6 @@ describe("c8ctl setup", () => {
 			stepLine(out, "Start the local cluster", "SKIPPED");
 			stepLine(out, "Deploy and start the process", "SKIPPED");
 			stepLine(out, "Configure the cluster MCP server", "SKIPPED");
-			stepLine(out, "Open Operate", "SKIPPED");
 			assert.match(out, /needs: Install Camunda 8 Run/);
 			assert.match(out, /needs: Start the local cluster/);
 			// Unrelated steps still ran.
@@ -512,17 +519,13 @@ describe("c8ctl setup", () => {
 	});
 
 	test("--docs-mcp plans the docs step non-interactively", async () => {
-		const result = await c8WithOptions(
-			{ env: { C8CTL_OUTPUT_MODE: "text" } },
-			"setup",
-			"--docs-mcp",
-		);
+		const result = await c8("setup", "--docs-mcp");
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout, /\d+\. Configure the docs MCP server/);
-		assert.doesNotMatch(
-			result.stdout,
-			/- Configure the docs MCP server — skipped/,
+		const payload = JSON.parse(result.stdout);
+		const docsStep = payload.steps.find(
+			(s: { title: string }) => s.title === "Configure the docs MCP server",
 		);
+		assert.strictEqual(docsStep.status, "planned");
 	});
 
 	test("the ai-agent blueprint is deployed but not started, with guidance", async () => {
@@ -601,7 +604,6 @@ describe("c8ctl setup", () => {
 			assert.match(out, /GitHub CLI failed to install Camunda skills/);
 			// The steps after it are independent and still succeeded.
 			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
-			stepLine(out, "Open Operate", "SUCCESS");
 		} finally {
 			stub.cleanup();
 		}
@@ -641,8 +643,9 @@ describe("c8ctl setup", () => {
 				stripVTControlCharacters(result.stdout),
 			);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			assert.match(out, /- Install Camunda 8 Run — skipped/);
-			assert.match(out, /- Create the blueprint project — skipped/);
+			// Deselected steps simply do not run — there is no plan preview.
+			assert.doesNotMatch(out, /Install Camunda 8 Run/);
+			assert.doesNotMatch(out, /Create the blueprint project/);
 			stepLine(out, "Install Desktop Modeler", "SUCCESS");
 			stepLine(out, "Install AI assistant skills", "SUCCESS");
 			// No blueprint project without the cluster.
@@ -718,7 +721,7 @@ describe("c8ctl setup", () => {
 		const payload = JSON.parse(result.stdout);
 		assert.strictEqual(payload.command, "setup");
 		assert.strictEqual(payload.preview, true);
-		assert.strictEqual(payload.steps.length, 10);
+		assert.strictEqual(payload.steps.length, 9);
 	});
 
 	test("interactive: Escape cancels without printing a plan", async () => {
