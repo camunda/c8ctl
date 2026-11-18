@@ -183,12 +183,51 @@ function isOrchestrationEntry(entry: unknown): boolean {
 	);
 }
 
-function isDocsEntry(entry: unknown): boolean {
-	if (!isRecord(entry)) return false;
-	return (
-		entry.url === DOCS_URL ||
-		(Array.isArray(entry.args) && entry.args.some((arg) => arg === DOCS_URL))
-	);
+/**
+ * Rewrite only the fields c8ctl manages in an owned entry, so
+ * client-added keys (a `tools` allowlist, extra env vars) and JSONC
+ * comments survive a drift update.
+ */
+function updateManagedEntry({
+	content,
+	path,
+	current,
+	expected,
+}: {
+	content: string;
+	path: string[];
+	current: Record<string, unknown>;
+	expected: Record<string, unknown>;
+}): string {
+	const formattingOptions = {
+		insertSpaces: true,
+		tabSize: 2,
+		eol: content.includes("\r\n") ? "\r\n" : "\n",
+	};
+	const edit = (keyPath: string[], value: unknown): void => {
+		content = applyEdits(
+			content,
+			modify(content, keyPath, value, { formattingOptions }),
+		);
+	};
+	for (const [key, value] of Object.entries(expected)) {
+		const currentEnv = isRecord(current.env) ? current.env : undefined;
+		if (key === "env" && isRecord(value) && currentEnv) {
+			for (const [envKey, envValue] of Object.entries(value)) {
+				if (!isDeepStrictEqual(currentEnv[envKey], envValue)) {
+					edit([...path, "env", envKey], envValue);
+				}
+			}
+			continue;
+		}
+		if (!isDeepStrictEqual(current[key], value)) edit([...path, key], value);
+	}
+	// The harness transport type is the only managed key an older install
+	// could have written that the current shape no longer sets.
+	if (Object.hasOwn(current, "type") && !Object.hasOwn(expected, "type")) {
+		edit([...path, "type"], undefined);
+	}
+	return content;
 }
 
 function readOptionalFile(path: string): string | undefined {
@@ -299,10 +338,9 @@ export function planMcpConfigs({
 			// moved (another Node, a global vs. checkout install, a renamed
 			// profile): it is still ours, so install updates it in place
 			// instead of blocking a re-run. A foreign entry under the same
-			// name still conflicts.
-			const owned = entry.docs
-				? isDocsEntry(current)
-				: isOrchestrationEntry(current);
+			// name still conflicts. The docs entry carries no local paths,
+			// so only the orchestration entry can drift this way.
+			const owned = !entry.docs && isOrchestrationEntry(current);
 			if (present && !matches && !(operation === "install" && owned)) {
 				throw new Error(
 					`MCP entry '${entry.name}' conflicts in ${path}. Inspect it before changing it${entry.docs ? "." : ", or choose another --alias."}`,
@@ -318,11 +356,14 @@ export function planMcpConfigs({
 					: present
 						? "removed"
 						: "absent";
-			if (
-				status === "installed" ||
-				status === "updated" ||
-				status === "removed"
-			) {
+			if (status === "updated") {
+				content = updateManagedEntry({
+					content,
+					path: [harness.key, entry.name],
+					current: isRecord(current) ? current : {},
+					expected: entry.config,
+				});
+			} else if (status === "installed" || status === "removed") {
 				content = applyEdits(
 					content,
 					modify(
