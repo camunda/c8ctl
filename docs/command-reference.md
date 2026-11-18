@@ -1059,8 +1059,8 @@ c8ctl setup --yes                                           # Set up the default
 
 | Code | Meaning |
 |------|---------|
-| `0` | Every selected step succeeded — or nothing was changed on purpose: the wizard was cancelled, or a non-interactive run without `--yes` printed the plan without installing. Re-running after a successful setup exits `0` again: finished work is reused, and the blueprint is deployed and started once more so there is always a running instance. |
-| `1` | One or more steps failed. The other steps still ran; steps depending on a failed one were skipped. Fix the reported cause and re-run — finished work is picked up, not repeated. |
+| `0` | Every selected step succeeded — or nothing was installed on purpose: the wizard was cancelled, a non-interactive run without `--yes` stopped after the banner, or `--json`/`--dry-run` printed the plan only. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |
+| `1` | Arguments failed validation before any step ran, or one or more steps failed. The remaining eligible steps still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — finished work is picked up, not repeated. |
 
 ---
 

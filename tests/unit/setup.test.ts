@@ -352,7 +352,7 @@ describe("c8ctl setup", () => {
 		assert.match(result.stdout, /--no-modeler/);
 		// The documented exit-code contract.
 		assert.match(result.stdout, /Exit code 0/);
-		assert.match(result.stdout, /Exit code 1: a step failed/);
+		assert.match(result.stdout, /Exit code 1: arguments failed validation/);
 		// The blueprint is a wizard choice, not a CLI flag.
 		assert.doesNotMatch(result.stdout, /--blueprint/);
 	});
