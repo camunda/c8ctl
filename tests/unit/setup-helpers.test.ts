@@ -181,6 +181,15 @@ describe("renderNextSteps()", () => {
 		const boxed = renderNextSteps(LINES, { color: false, maxWidth: 200 });
 		assert.match(boxed, /╭/);
 	});
+
+	test("falls back for non-ASCII content, whose display width is not its length", () => {
+		const wide = renderNextSteps(
+			["Project: /home/ユーザー/rocket-launch", ...LINES.slice(1)],
+			{ color: false },
+		);
+		assert.doesNotMatch(wide, /[╭╮╰╯│]/);
+		assert.ok(wide.includes("Project: /home/ユーザー/rocket-launch"));
+	});
 });
 
 describe("formatStepResult()", () => {

@@ -349,7 +349,16 @@ export function renderNextSteps(
 	const s = bannerStyle({ color });
 	const heading = "What's next";
 	const width = Math.max(heading.length, ...lines.map((line) => line.length));
-	if (maxWidth !== undefined && width + 6 > maxWidth) {
+	// `.length` counts UTF-16 code units, not terminal columns — non-ASCII
+	// content (CJK paths, emoji) would misalign the borders. Box only
+	// printable-ASCII lines; anything wider gets the unboxed fallback.
+	const printableAscii = lines.every((line) =>
+		[...line].every((char) => {
+			const code = char.codePointAt(0) ?? 0;
+			return code >= 0x20 && code <= 0x7e;
+		}),
+	);
+	if (!printableAscii || (maxWidth !== undefined && width + 6 > maxWidth)) {
 		return [
 			`${s.brand}${s.bold}${heading}${s.reset}`,
 			...lines.map((line) => `  ${line}`),
