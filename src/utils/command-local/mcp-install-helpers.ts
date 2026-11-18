@@ -187,7 +187,7 @@ function isDocsEntry(entry: unknown): boolean {
 	if (!isRecord(entry)) return false;
 	return (
 		entry.url === DOCS_URL ||
-		(Array.isArray(entry.args) && entry.args.includes(DOCS_URL))
+		(Array.isArray(entry.args) && entry.args.some((arg) => arg === DOCS_URL))
 	);
 }
 
