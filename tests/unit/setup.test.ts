@@ -596,6 +596,33 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("a rerun updates a drifted cluster MCP entry and still deploys", async () => {
+		const stub = stubbedExecution();
+		try {
+			const first = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(first.status, 0, first.stderr);
+
+			// Drift the entry the way a moved install does — setup wrote it
+			// from a different c8ctl location — and re-run.
+			const mcpConfigPath = join(stub.home, ".claude", ".claude.json");
+			const drifted: unknown = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
+			assert.ok(isRecord(drifted) && isRecord(drifted.mcpServers));
+			const camunda = drifted.mcpServers.camunda;
+			assert.ok(isRecord(camunda) && Array.isArray(camunda.args));
+			camunda.args[0] =
+				"/usr/local/lib/node_modules/@camunda8/cli/dist/index.js";
+			writeFileSync(mcpConfigPath, JSON.stringify(drifted));
+
+			const second = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(second.status, 0, second.stderr);
+			const out = stripVTControlCharacters(second.stdout + second.stderr);
+			stepLine(out, "Configure the cluster MCP server", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("a failed scaffold skips the deploy step instead of failing it too", async () => {
 		const stub = stubbedExecution();
 		try {

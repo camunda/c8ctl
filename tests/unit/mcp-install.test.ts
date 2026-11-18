@@ -266,6 +266,99 @@ test("repeat installation preserves client-added tool restrictions and uninstall
 	assert.deepEqual(serversAt(s.paths["github-copilot"], "github-copilot"), {});
 });
 
+test("a drifted c8ctl-managed entry is updated on re-install; a foreign entry still conflicts", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	const installed = await s.run("mcp", "install", "claude-code");
+	assert.equal(installed.status, 0, installed.stderr);
+	const current = serversAt(s.paths["claude-code"], "claude-code").camunda;
+	assert.ok(isRecord(current));
+
+	// Drift the entry the way a moved install does — another Node and
+	// script path — while keeping the c8ctl orchestration shape. A
+	// client-added tools allowlist and an extra env var ride along.
+	const drifted: unknown = JSON.parse(
+		readFileSync(s.paths["claude-code"], "utf8"),
+	);
+	assert.ok(isRecord(drifted) && isRecord(drifted.mcpServers));
+	const camunda = drifted.mcpServers.camunda;
+	assert.ok(isRecord(camunda) && Array.isArray(camunda.args));
+	assert.ok(isRecord(camunda.env));
+	camunda.command = "/usr/local/bin/node";
+	camunda.args[0] = "/usr/local/lib/node_modules/@camunda8/cli/dist/index.js";
+	delete camunda.type;
+	camunda.tools = ["search_process_definitions"];
+	camunda.env.EXTRA = "keep-me";
+	s.write("claude-code", JSON.stringify(drifted));
+
+	const updated = await s.run("mcp", "install", "claude-code");
+	assert.equal(updated.status, 0, updated.stderr);
+	const items = parseJson(updated);
+	assert.ok(Array.isArray(items));
+	assert.deepEqual(
+		items.map((item: unknown) => {
+			assert.ok(isRecord(item));
+			return item.status;
+		}),
+		["updated"],
+	);
+	const after = serversAt(s.paths["claude-code"], "claude-code").camunda;
+	assert.ok(isRecord(after) && isRecord(after.env));
+	// Managed fields are rewritten to the current connection…
+	assert.notEqual(after.command, "/usr/local/bin/node");
+	assert.deepEqual(after.args, current.args);
+	assert.equal(after.type, "stdio");
+	assert.equal(after.env.C8CTL_DATA_DIR, s.env.C8CTL_DATA_DIR);
+	// …while client settings survive the update.
+	assert.deepEqual(after.tools, ["search_process_definitions"]);
+	assert.equal(after.env.EXTRA, "keep-me");
+
+	// A foreign entry under the same name is never clobbered.
+	const foreign = JSON.stringify({
+		mcpServers: { camunda: { command: "other-tool", args: ["serve"] } },
+	});
+	s.write("claude-code", foreign);
+	const conflict = await s.run("mcp", "install", "claude-code");
+	assert.equal(conflict.status, 1, conflict.stderr);
+	assert.match(conflict.stderr, /conflicts/);
+	assert.equal(readFileSync(s.paths["claude-code"], "utf8"), foreign);
+});
+
+test("updating a drifted entry preserves JSONC comments", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	s.write(
+		"vscode",
+		`{
+	// keep this note
+	"servers": {
+		"camunda": {
+			"type": "stdio",
+			"command": "/usr/local/bin/node",
+			// restrict the exposed tools
+			"tools": ["search_process_definitions"],
+			"args": ["/old/c8ctl/dist/index.js", "mcp-proxy", "--profile", "work"],
+			"env": { "C8CTL_DATA_DIR": "/old/data" }
+		}
+	}
+}`,
+	);
+	const result = await s.run("mcp", "install", "vscode");
+	assert.equal(result.status, 0, result.stderr);
+	const content = readFileSync(s.paths.vscode, "utf8");
+	assert.match(content, /keep this note/);
+	assert.match(content, /restrict the exposed tools/);
+	assert.match(content, /"tools": \[\s*"search_process_definitions"\]/);
+	assert.doesNotMatch(content, /\/old\/c8ctl|\/usr\/local\/bin\/node/);
+	assert.ok(
+		content.includes(
+			`"C8CTL_DATA_DIR": ${JSON.stringify(s.env.C8CTL_DATA_DIR)}`,
+		),
+	);
+});
+
 test("docs dry-run needs no connection and does not expose unrelated config secrets", async (t) => {
 	const s = sandbox(t);
 	s.write(
