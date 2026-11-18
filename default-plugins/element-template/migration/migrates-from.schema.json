@@ -89,29 +89,6 @@
         }
       }
     },
-    "nodeMetadata": {
-      "type": "object",
-      "description": "Optional metadata of a node: an override of the engine's lossy classification, a risk estimate and fields to revisit. Risk and revisit are shown in the migration report when the node is active.",
-      "additionalProperties": false,
-      "properties": {
-        "lossyOverride": {
-          "type": "boolean",
-          "description": "The lossy classification to use for this node instead of the engine's own. `true`: treat the node as lossy even if the engine sees no lost value, so an in-place write needs `--allow-lossy`. `false`: treat it as not lossy even if the engine would flag a value as lost, for example a value consumed by a rename or a guarded rename that legitimately did not fire. Omit to keep the engine's own classification."
-        },
-        "risk": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 5,
-          "description": "Author's risk estimate for this node, from 1 (safe, mechanical) to 5 (can change runtime behaviour or drop data). Shown in the migration report. Informational: it does not change what is written."
-        },
-        "revisit": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/definitions/path" },
-          "description": "Binding keys of the target template the user should review by hand after the upgrade, for example a value the migration had to guess. Listed in the migration report when the node is active."
-        }
-      }
-    },
     "node": {
       "oneOf": [
         { "$ref": "#/definitions/rename" },
@@ -130,8 +107,7 @@
         "to": { "$ref": "#/definitions/path" },
         "valueMap": { "$ref": "#/definitions/valueMap" },
         "when": { "$ref": "#/definitions/when" },
-        "note": { "$ref": "#/definitions/note" },
-        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" }
+        "note": { "$ref": "#/definitions/note" }
       }
     },
     "set": {
@@ -143,8 +119,7 @@
         "to": { "$ref": "#/definitions/path" },
         "set": { "$ref": "#/definitions/scalar" },
         "when": { "$ref": "#/definitions/when" },
-        "note": { "$ref": "#/definitions/note" },
-        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" }
+        "note": { "$ref": "#/definitions/note" }
       }
     },
     "template": {
@@ -156,8 +131,7 @@
         "to": { "$ref": "#/definitions/path" },
         "template": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "when": { "$ref": "#/definitions/when" },
-        "note": { "$ref": "#/definitions/note" },
-        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" }
+        "note": { "$ref": "#/definitions/note" }
       }
     },
     "group": {
@@ -167,7 +141,6 @@
       "additionalProperties": false,
       "properties": {
         "when": { "$ref": "#/definitions/when" },
-        "nodeMetadata": { "$ref": "#/definitions/nodeMetadata" },
         "rules": {
           "type": "array",
           "minItems": 1,
