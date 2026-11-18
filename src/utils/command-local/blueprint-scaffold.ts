@@ -80,10 +80,11 @@ export const SETUP_BLUEPRINTS = [
 		// "full send" launch.
 		startVariables: { missionName: "Apollo", fuelLevel: 80 },
 		// Fully automated: setup already deployed and launched an
-		// instance, so the next step is looking at it.
+		// instance, so the next step is looking at it. The suggestion pins
+		// the local profile — the session's active profile may be remote.
 		nextSteps: () => [
 			"A Rocket Launch instance is already running on the local cluster.",
-			"See it: c8ctl search process-instance",
+			"See it: c8ctl search process-instance --profile local",
 		],
 	},
 	{
@@ -103,9 +104,10 @@ export const SETUP_BLUEPRINTS = [
 		processFile: "bpmn/order-process.bpmn",
 		// The started instance stalls at its first service task until a
 		// worker connects — starting one is the whole point of the box.
+		// The path is quoted: the working directory may contain spaces.
 		nextSteps: (projectDir) => [
 			"The order process waits for a worker. Start one:",
-			`  cd ${join(projectDir, "nodejs")}`,
+			`  cd "${join(projectDir, "nodejs")}"`,
 			"  npm install && npm start",
 			"Then watch the instance complete in Operate.",
 		],

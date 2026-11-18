@@ -431,7 +431,10 @@ describe("c8ctl setup", () => {
 			// The box is actionable: setup already started an instance, and
 			// the box says so and names the command that shows it.
 			assert.match(out, /A Rocket Launch instance is already running/);
-			assert.match(out, /See it: c8ctl search process-instance/);
+			assert.match(
+				out,
+				/See it: c8ctl search process-instance --profile local/,
+			);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
 			assert.ok(
@@ -632,6 +635,10 @@ describe("c8ctl setup", () => {
 			assert.match(out, /✗ Deployment failed/);
 			// SilentError: the helper rendered the failure — no summary reprint.
 			assert.doesNotMatch(out, /^ {4}INVALID_ARGUMENT$/m);
+			// No instance was started, so the box must not claim one is
+			// running — only the Project/Guide references remain.
+			assert.doesNotMatch(out, /already running/);
+			assert.match(out, /Project: .*rocket-launch/);
 		} finally {
 			stub.cleanup();
 		}
@@ -807,7 +814,9 @@ describe("c8ctl setup", () => {
 			// The instance stalls at its service task until a worker connects —
 			// the closing box must say so and hand over the commands.
 			assert.match(out, /The order process waits for a worker/);
-			assert.match(out, /cd .*service-worker\/nodejs/);
+			// Quoted, so a working directory with spaces stays usable;
+			// either path separator, so the Windows matrix sees its own.
+			assert.match(out, /cd ".*service-worker[/\\]nodejs"/);
 			assert.match(out, /npm install && npm start/);
 			assert.match(
 				out,
@@ -840,7 +849,10 @@ describe("c8ctl setup", () => {
 			assert.doesNotMatch(out, /Create the blueprint project/);
 			// No blueprint, but the cluster runs: point at the first process
 			// run instead of leaving the user at a bare Operate link.
-			assert.match(out, /Run your first process: c8ctl run my-process\.bpmn/);
+			assert.match(
+				out,
+				/Run your first process: c8ctl run my-process\.bpmn --profile local/,
+			);
 			assert.match(out, /re-run "c8ctl setup" and pick a starter blueprint/);
 			assert.match(
 				out,

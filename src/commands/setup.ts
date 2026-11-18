@@ -87,6 +87,8 @@ interface SetupRun {
 	blueprintDir?: string;
 	/** Set when the cluster step succeeded — drives the final Operate hint. */
 	clusterStarted?: boolean;
+	/** Set when the deploy step started the blueprint's process instance. */
+	instanceStarted?: boolean;
 }
 
 /**
@@ -318,6 +320,7 @@ async function runBlueprintDeploy(
 		}),
 	});
 	logger.info(`Process instance created: ${created.processInstanceKey}`);
+	run.instanceStarted = true;
 }
 
 const NO_HARNESS_HINT =
@@ -688,11 +691,20 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		const blueprint = setupBlueprintById(
 			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
 		);
-		nextSteps.push(...blueprint.nextSteps(run.blueprintDir));
+		// Outcome lines describe the started instance — claim them only
+		// when the deploy step actually started one. On a failed deploy
+		// the Project/Guide references below still apply.
+		if (run.instanceStarted) {
+			nextSteps.push(...blueprint.nextSteps(run.blueprintDir));
+		}
 		nextSteps.push(`Project: ${run.blueprintDir}`);
 		nextSteps.push(`Guide: ${blueprint.guideUrl}`);
 	} else if (run.clusterStarted) {
-		nextSteps.push("Run your first process: c8ctl run my-process.bpmn");
+		// Both suggestions pin the local profile — the session's active
+		// profile may point at a remote cluster.
+		nextSteps.push(
+			"Run your first process: c8ctl run my-process.bpmn --profile local",
+		);
 		nextSteps.push('Or re-run "c8ctl setup" and pick a starter blueprint.');
 	}
 	if (run.clusterStarted) {
