@@ -702,10 +702,11 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	} else if (run.clusterStarted) {
 		// Both suggestions pin the local profile and its <default> tenant —
 		// the session's active profile and tenant may point at a remote
-		// cluster. The && chain keeps it one copy-paste line on every shell.
-		nextSteps.push(
-			'Run your first process: c8ctl use tenant "<default>" && c8ctl run my-process.bpmn --profile local',
-		);
+		// cluster. Two lines: && is a syntax error in Windows
+		// PowerShell 5.1.
+		nextSteps.push("Run your first process:");
+		nextSteps.push('  c8ctl use tenant "<default>"');
+		nextSteps.push("  c8ctl run my-process.bpmn --profile local");
 		nextSteps.push('Or re-run "c8ctl setup" and pick a starter blueprint.');
 	}
 	if (run.clusterStarted) {

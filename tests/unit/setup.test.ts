@@ -432,11 +432,13 @@ describe("c8ctl setup", () => {
 			// the box says so and names the command that shows it.
 			assert.match(out, /A Rocket Launch instance is already running/);
 			// Tenant and profile are pinned: a saved session tenant or a
-			// remote active profile must not redirect the suggestion.
-			assert.match(
-				out,
-				/See it: c8ctl use tenant "<default>" && c8ctl search process-instance --profile local/,
-			);
+			// remote active profile must not redirect the suggestion. Two
+			// separate lines — && is a syntax error in Windows
+			// PowerShell 5.1.
+			assert.match(out, /See it:/);
+			assert.match(out, /c8ctl use tenant "<default>"/);
+			assert.match(out, /c8ctl search process-instance --profile local/);
+			assert.doesNotMatch(out, /&&/);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
 			assert.ok(
@@ -819,7 +821,11 @@ describe("c8ctl setup", () => {
 			// Quoted, so a working directory with spaces stays usable;
 			// either path separator, so the Windows matrix sees its own.
 			assert.match(out, /cd ".*service-worker[/\\]nodejs"/);
-			assert.match(out, /npm install && npm start/);
+			// Separate lines: && is a syntax error in Windows
+			// PowerShell 5.1.
+			assert.match(out, /npm install/);
+			assert.match(out, /npm start/);
+			assert.doesNotMatch(out, /npm install && npm start/);
 			assert.match(
 				out,
 				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
@@ -851,10 +857,10 @@ describe("c8ctl setup", () => {
 			assert.doesNotMatch(out, /Create the blueprint project/);
 			// No blueprint, but the cluster runs: point at the first process
 			// run instead of leaving the user at a bare Operate link.
-			assert.match(
-				out,
-				/Run your first process: c8ctl use tenant "<default>" && c8ctl run my-process\.bpmn --profile local/,
-			);
+			assert.match(out, /Run your first process:/);
+			assert.match(out, /c8ctl use tenant "<default>"/);
+			assert.match(out, /c8ctl run my-process\.bpmn --profile local/);
+			assert.doesNotMatch(out, /&&/);
 			assert.match(out, /re-run "c8ctl setup" and pick a starter blueprint/);
 			assert.match(
 				out,

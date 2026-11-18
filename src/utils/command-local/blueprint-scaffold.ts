@@ -82,11 +82,13 @@ export const SETUP_BLUEPRINTS = [
 		// Fully automated: setup already deployed and launched an
 		// instance, so the next step is looking at it. The suggestion pins
 		// the local profile and its <default> tenant — the session's
-		// active profile and tenant may point elsewhere. The && chain
-		// keeps it one copy-paste line on every shell.
+		// active profile and tenant may point elsewhere. Two lines: && is
+		// a syntax error in Windows PowerShell 5.1.
 		nextSteps: () => [
 			"A Rocket Launch instance is already running on the local cluster.",
-			'See it: c8ctl use tenant "<default>" && c8ctl search process-instance --profile local',
+			"See it:",
+			'  c8ctl use tenant "<default>"',
+			"  c8ctl search process-instance --profile local",
 		],
 	},
 	{
@@ -107,10 +109,13 @@ export const SETUP_BLUEPRINTS = [
 		// The started instance stalls at its first service task until a
 		// worker connects — starting one is the whole point of the box.
 		// The path is quoted: the working directory may contain spaces.
+		// npm install and npm start are separate lines: && is a syntax
+		// error in Windows PowerShell 5.1.
 		nextSteps: (projectDir) => [
 			"The order process waits for a worker. Start one:",
 			`  cd "${join(projectDir, "nodejs")}"`,
-			"  npm install && npm start",
+			"  npm install",
+			"  npm start",
 			"Then watch the instance complete in Operate.",
 		],
 	},
