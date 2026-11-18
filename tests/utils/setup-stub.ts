@@ -308,6 +308,16 @@ globalThis.fetch = async (
 	// The Orchestration Cluster API of the built-in local profile, which
 	// setup's deploy step pins explicitly.
 	if (url === "http://localhost:8080/v2/deployments") {
+		if (failStep === "deploy-blueprint") {
+			return json(
+				{
+					title: "INVALID_ARGUMENT",
+					detail: "stubbed invalid deployment",
+					status: 400,
+				},
+				400,
+			);
+		}
 		return json(DEPLOYMENT_RESULT);
 	}
 	if (url === "http://localhost:8080/v2/process-instances") {

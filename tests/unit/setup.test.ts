@@ -654,6 +654,30 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("a failed deploy closes the title line before its diagnostics", async () => {
+		const stub = stubbedExecution({ failStep: "deploy-blueprint" });
+		try {
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--blueprint",
+				"rocket-launch",
+			);
+			assert.strictEqual(result.status, 1, result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Deploy and start the process", "ERROR");
+			// The deploy helper renders through the step's logger, so its
+			// diagnostics close the title line instead of colliding with it.
+			assert.match(out, /^ {2}Deploy and start the process$/m);
+			assert.match(out, /✗ Deployment failed/);
+			// SilentError: the helper rendered the failure — no summary reprint.
+			assert.doesNotMatch(out, /^ {4}INVALID_ARGUMENT$/m);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("a failed skills install does not stop the remaining steps", async () => {
 		const stub = stubbedExecution({ failStep: "install-skills" });
 		try {

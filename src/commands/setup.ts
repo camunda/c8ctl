@@ -27,7 +27,7 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, DEFAULT_PROFILE } from "../core/index.ts";
+import { createClient, DEFAULT_PROFILE, SilentError } from "../core/index.ts";
 import {
 	type CommandContext,
 	defineCommand,
@@ -292,8 +292,11 @@ async function runBlueprintDeploy(
 		verbose: ctx.verbose,
 		tenantId: LOCAL_TENANT_ID,
 		// The step report is the signal; its progress render is noise here.
+		// The step's buffered logger routes failure diagnostics through the
+		// title-closing hook instead of colliding with the open title line.
 		quiet: true,
 		suppressSkippedLog: true,
+		logger: ctx.logger,
 	});
 
 	if (blueprint.startNote) {
@@ -543,9 +546,13 @@ async function executePlan(
 					essential: true,
 				});
 			}
-			const message = error instanceof Error ? error.message : String(error);
-			for (const line of message.split("\n")) {
-				logger.info(`    ${line}`, { essential: true });
+			// A SilentError was already rendered in full by its helper
+			// (e.g. the deploy diagnostics) — don't print the summary again.
+			if (!(error instanceof SilentError)) {
+				const message = error instanceof Error ? error.message : String(error);
+				for (const line of message.split("\n")) {
+					logger.info(`    ${line}`, { essential: true });
+				}
 			}
 		}
 	}

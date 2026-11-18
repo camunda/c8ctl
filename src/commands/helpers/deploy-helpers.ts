@@ -907,9 +907,13 @@ export async function deployResources(
 		 *  `c8ctl setup` uses it: the step report is the signal. Failures
 		 *  still render in full. */
 		quiet?: boolean;
+		/** Logger override — defaults to the shared singleton. `c8ctl setup`
+		 *  passes its buffered step logger so failure diagnostics close the
+		 *  step's title line before printing instead of colliding with it. */
+		logger?: ReturnType<typeof getLogger>;
 	},
 ): Promise<void> {
-	const logger = getLogger();
+	const logger = options.logger ?? getLogger();
 	const tenantId = options.tenantId ?? resolveTenantId(options.profile);
 
 	// ─── Pre-API-call validation and preparation ────────────────────────
