@@ -18,6 +18,17 @@
  *
  * Streams: the banner, prompts and progress are UI chrome on stderr; the
  * step report and the JSON payload are the command's answer on stdout.
+ *
+ * Exit codes: 0 when every selected step succeeded, or when nothing
+ * was installed for lack of a go-ahead (the wizard was cancelled with
+ * Escape — Ctrl+C ends it by signal, 130 on POSIX shells — a piped,
+ * --quiet or JSON-mode run had no --yes, or --json / --dry-run printed
+ * the plan only). A re-run reuses finished work where possible and
+ * repeats the blueprint deploy and start and the skills install by
+ * design. 1 when arguments failed validation or any step failed — the
+ * remaining eligible steps still ran, dependents of a failed step (and
+ * the deploy finale after any failure) were skipped, and re-running
+ * picks up where the failure left off.
  */
 
 import { spawn } from "node:child_process";

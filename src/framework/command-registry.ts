@@ -163,6 +163,12 @@ export interface CommandDef {
 	 * [mcp-path] values and connection precedence).
 	 */
 	helpNotes?: readonly string[];
+	/**
+	 * Extra Markdown lines rendered only on the generated docs page
+	 * (docs/command-reference.md), after the examples — for content that
+	 * has no place in terminal help (e.g. an exit-code table).
+	 */
+	docsNotes?: readonly string[];
 }
 
 // ─── Resource Aliases ────────────────────────────────────────────────────────
@@ -1847,6 +1853,23 @@ export const COMMAND_REGISTRY = {
 			"unless you pass --yes; --json prints the plan without executing.",
 			"The starter blueprint is chosen in the wizard; a non-interactive",
 			"--yes run uses Rocket Launch.",
+			"Exit code 0: every selected step succeeded, or nothing was",
+			"installed for lack of a go-ahead (wizard cancelled with Escape;",
+			"a piped, --quiet or JSON-mode run without --yes; --json or",
+			"--dry-run printing the plan). Ctrl+C ends the wizard by signal",
+			"(130 on POSIX shells). A re-run reuses finished work where",
+			"possible; the deploy, process start and skills install repeat",
+			"by design. Exit code 1: arguments failed validation, or a step",
+			"failed — other eligible steps still ran, while dependents (and",
+			"the deploy finale after any failure) were skipped.",
+		],
+		docsNotes: [
+			"**Exit codes:**",
+			"",
+			"| Code | Meaning |",
+			"|------|---------|",
+			"| `0` | Every selected step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |",
+			"| `1` | Arguments failed validation before any step ran, or one or more steps failed. The remaining eligible steps still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |",
 		],
 		resources: [],
 		flags: {

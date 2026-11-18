@@ -1055,6 +1055,13 @@ c8ctl setup                                                 # Run the guided set
 c8ctl setup --yes                                           # Set up the defaults, without prompting
 ```
 
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every selected step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |
+| `1` | Arguments failed validation before any step ran, or one or more steps failed. The remaining eligible steps still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |
+
 ---
 
 ### `watch`
