@@ -98,6 +98,8 @@ interface SetupRun {
 	blueprintDir?: string;
 	/** Set when the cluster step succeeded — drives the final Operate hint. */
 	clusterStarted?: boolean;
+	/** Set when the deploy step started the blueprint's process instance. */
+	instanceStarted?: boolean;
 }
 
 /**
@@ -329,6 +331,7 @@ async function runBlueprintDeploy(
 		}),
 	});
 	logger.info(`Process instance created: ${created.processInstanceKey}`);
+	run.instanceStarted = true;
 }
 
 const NO_HARNESS_HINT =
@@ -691,14 +694,31 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	});
 
 	// The takeaway of the whole run, boxed so it stands apart from the
-	// step report above it.
+	// step report above it. A blueprint owns its actionable lines (what
+	// the run left behind, what to do with it); without one but with a
+	// running cluster, point at the first process run instead.
 	const nextSteps: string[] = [];
 	if (run.blueprintDir) {
 		const blueprint = setupBlueprintById(
 			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
 		);
+		// Outcome lines describe the started instance — claim them only
+		// when the deploy step actually started one. On a failed deploy
+		// the Project/Guide references below still apply.
+		if (run.instanceStarted) {
+			nextSteps.push(...blueprint.nextSteps(run.blueprintDir));
+		}
 		nextSteps.push(`Project: ${run.blueprintDir}`);
 		nextSteps.push(`Guide: ${blueprint.guideUrl}`);
+	} else if (run.clusterStarted) {
+		// Both suggestions pin the local profile and its <default> tenant —
+		// the session's active profile and tenant may point at a remote
+		// cluster. Two lines: && is a syntax error in Windows
+		// PowerShell 5.1.
+		nextSteps.push("Run your first process:");
+		nextSteps.push('  c8ctl use tenant "<default>"');
+		nextSteps.push("  c8ctl run my-process.bpmn --profile local");
+		nextSteps.push('Or re-run "c8ctl setup" and pick a starter blueprint.');
 	}
 	if (run.clusterStarted) {
 		nextSteps.push("Operate: http://localhost:8080/operate (demo/demo)");
