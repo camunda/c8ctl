@@ -332,8 +332,10 @@ test("skills help explains local-edit preservation and explicit restoration", as
 	);
 	assert.match(
 		result.stdout,
-		/gh skill update --force --dir <skill-directory> <skill-name>/i,
+		/gh skill update --force --dir <skills-root> <skill-name>/i,
 	);
+	assert.match(result.stdout, /parent skills directory/i);
+	assert.match(result.stdout, /not the listed skill directory/i);
 	assert.doesNotMatch(
 		result.stdout,
 		/local edits to Camunda skills are overwritten/i,
