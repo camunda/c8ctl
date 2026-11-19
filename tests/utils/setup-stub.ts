@@ -17,9 +17,9 @@
  *    (Builtin fs is patched before the CLI's imports load, and
  *    syncBuiltinESMExports() publishes the patches to named ESM imports.)
  *
- * Child processes: the `c8ctl cluster start` self-invocation is faked (a
- * successful `start` flips the health endpoint to UP), `gh` skill
- * installs report success, and browser openers exit quietly.
+ * Child processes: the `c8ctl cluster start` and `stop` self-invocations
+ * are faked (a successful `start` flips the health endpoint to UP), `gh`
+ * skill installs report success, and browser openers exit quietly.
  * `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process exit
  * 1 so failure handling is exercised. Everything else passes through.
  *
@@ -31,9 +31,12 @@
  *   C8CTL_SETUP_STUB_CAPTURE=file — the process-instance creation request
  *                                   body is written to this file.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
- *                                   (e.g. "start-cluster", "install-skills").
+ *                                   (e.g. "start-cluster", "stop-cluster",
+ *                                   "install-skills").
  *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
  *                                   warning on stderr while succeeding.
+ *   C8CTL_SETUP_STUB_SKILL_PATH=path — report a listed skill at this
+ *                                   path, for removal safety tests.
  */
 
 import childProcess from "node:child_process";
@@ -216,8 +219,8 @@ function fakeChild(
 
 /**
  * The fake GitHub CLI for skill discovery, installation and updates.
- * Shared by the spawn and spawnSync patches: listing reports the skills
- * the marker file knows, installing writes the marker, and
+ * Shared by the spawn and spawnSync patches: listing reports skill
+ * directories, installing creates them, and
  * C8CTL_SETUP_STUB_FAIL=install-skills fails a real install.
  */
 function fakeGh(commandArgs: string[]): {
@@ -241,11 +244,20 @@ function fakeGh(commandArgs: string[]): {
 		return {
 			status: 0,
 			stdout: JSON.stringify(
-				installedSkillNames.map((skillName) => ({
-					skillName,
-					sourceURL: "https://github.com/camunda/skills",
-					path: join(skillRoot, skillName),
-				})),
+				installedSkillNames.flatMap((skillName) => {
+					const path =
+						process.env.C8CTL_SETUP_STUB_SKILL_PATH ??
+						join(skillRoot, skillName);
+					return fs.existsSync(path)
+						? [
+								{
+									skillName,
+									sourceURL: "https://github.com/camunda/skills",
+									path,
+								},
+							]
+						: [];
+				}),
 			),
 			stderr: "",
 		};
@@ -271,6 +283,9 @@ function fakeGh(commandArgs: string[]): {
 		const requestedSkills = commandArgs.includes("--all")
 			? CAMUNDA_SKILL_NAMES
 			: [commandArgs[3]].filter((skillName) => skillName !== undefined);
+		for (const skillName of requestedSkills) {
+			fs.mkdirSync(join(skillRoot, skillName), { recursive: true });
+		}
 		fs.writeFileSync(
 			skillMarker,
 			[...new Set([...installedSkillNames, ...requestedSkills])].join("\n"),
@@ -306,8 +321,17 @@ Object.defineProperty(childProcess, "spawn", {
 						: {}),
 				});
 			}
-			// setup must not self-invoke anything but `cluster start` —
-			// a first-run install is part of start.
+			if (argv.includes("stop")) {
+				if (failStep === "stop-cluster") {
+					return fakeChild(1, {
+						stderr: "stubbed cluster stop failure diagnostics\n",
+					});
+				}
+				clusterRunning = false;
+				return fakeChild(0, {
+					stdout: "Stopped local Camunda 8 cluster.\n",
+				});
+			}
 			return fakeChild(1);
 		}
 		// Skill discovery, installation, and updates use the GitHub CLI.
