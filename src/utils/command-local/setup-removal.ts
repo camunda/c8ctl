@@ -7,17 +7,25 @@ import {
 	type CamundaSkillInstallation,
 	camundaSkillRemovalPath,
 	detectInstalledHarnesses,
+	hasCamundaUserSkillsDirectory,
 	listCamundaSkills,
 } from "./skills-install-helpers.ts";
 
 export interface SetupMcpRemoval {
 	readonly plan: McpConfigPlan;
 	readonly servers: readonly string[];
+	readonly preservedServers: readonly string[];
+}
+
+export interface SetupSkillDiscoveryFailure {
+	readonly harness: string;
+	readonly message: string;
 }
 
 export interface SetupRemovalInventory {
 	readonly mcp: readonly SetupMcpRemoval[];
 	readonly skills: readonly CamundaSkillInstallation[];
+	readonly skillDiscoveryFailures: readonly SetupSkillDiscoveryFailure[];
 	readonly blueprints: readonly SetupBlueprintRemoval[];
 }
 
@@ -48,6 +56,7 @@ export async function inspectSetupRemovalInventory({
 		docs: true,
 		orchestration: true,
 		alias: "camunda",
+		preserveConflicts: true,
 	});
 	const mcp = plans
 		.map(
@@ -56,20 +65,35 @@ export async function inspectSetupRemovalInventory({
 				servers: plan.changes
 					.filter((change) => change.status === "removed")
 					.map((change) => change.server),
+				preservedServers: plan.changes
+					.filter((change) => change.status === "preserved")
+					.map((change) => change.server),
 			}),
 		)
-		.filter((entry) => entry.servers.length > 0);
+		.filter(
+			(entry) => entry.servers.length > 0 || entry.preservedServers.length > 0,
+		);
 
-	const skills = (
-		await Promise.all(
-			detectInstalledHarnesses().map((harness) => listCamundaSkills(harness)),
-		)
-	).flat();
-	for (const skill of skills) camundaSkillRemovalPath(skill);
+	const skills: CamundaSkillInstallation[] = [];
+	const skillDiscoveryFailures: SetupSkillDiscoveryFailure[] = [];
+	for (const harness of detectInstalledHarnesses()) {
+		try {
+			if (!hasCamundaUserSkillsDirectory(harness)) continue;
+			const discovered = await listCamundaSkills(harness);
+			for (const skill of discovered) camundaSkillRemovalPath(skill);
+			skills.push(...discovered);
+		} catch (error) {
+			skillDiscoveryFailures.push({
+				harness,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
 
 	return {
 		mcp,
 		skills,
+		skillDiscoveryFailures,
 		blueprints: planSetupBlueprintRemovals({ cwd }),
 	};
 }

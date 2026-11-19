@@ -693,12 +693,14 @@ function setupRemovalPreview(
 		action: "remove";
 		preview: true;
 		items: Record<string, unknown>[];
+		warnings?: string[];
 	};
 } {
 	const items: Record<string, unknown>[] = [];
+	const warnings: string[] = [];
 	const lines = ["Setup removal preview:"];
 
-	for (const { plan, servers } of inventory.mcp) {
+	for (const { plan, servers, preservedServers } of inventory.mcp) {
 		for (const server of servers) {
 			items.push({
 				type: "mcp-server",
@@ -710,6 +712,17 @@ function setupRemovalPreview(
 				`  Remove MCP server "${server}" for ${plan.harness} from ${plan.path}`,
 			);
 		}
+		for (const server of preservedServers) {
+			const warning = `Preserved foreign MCP server "${server}" for ${plan.harness} in ${plan.path}; it does not match setup-managed configuration.`;
+			warnings.push(warning);
+			lines.push(`  ${warning}`);
+		}
+	}
+
+	for (const failure of inventory.skillDiscoveryFailures) {
+		const warning = `Could not inspect Camunda skills for ${failure.harness}: ${failure.message}. Those skills were left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
 	}
 
 	for (const skill of inventory.skills) {
@@ -749,7 +762,7 @@ function setupRemovalPreview(
 	if (items.length === 0)
 		lines.push("  No setup-managed components were found.");
 	lines.push(
-		"  Skill directories and listed blueprint files may contain local edits; those contents will be removed. Untracked blueprint files and Desktop Modeler are not removed.",
+		"  Listed skill directories and blueprint files may contain local edits; those contents will be removed. Untracked blueprint files and Desktop Modeler are not removed.",
 	);
 	lines.push("Nothing was removed.");
 
@@ -760,6 +773,7 @@ function setupRemovalPreview(
 			action: "remove",
 			preview: true,
 			items,
+			...(warnings.length > 0 ? { warnings } : {}),
 		},
 	};
 }
@@ -779,7 +793,12 @@ async function applySetupRemoval(
 	stopCluster: boolean,
 ): Promise<void> {
 	const { logger } = ctx;
-	let failures = 0;
+	let failures = inventory.skillDiscoveryFailures.length;
+	for (const failure of inventory.skillDiscoveryFailures) {
+		logger.error(
+			`Could not inspect Camunda skills for ${failure.harness}: ${failure.message}. Those skills were left untouched.`,
+		);
+	}
 
 	if (stopCluster) {
 		try {
@@ -833,15 +852,21 @@ async function applySetupRemoval(
 	for (const blueprint of inventory.blueprints) {
 		try {
 			const result = removeSetupBlueprint(blueprint);
+			if (result.remainingFiles.length > 0) {
+				throw new Error(
+					`Marker-listed files could not be removed: ${result.remainingFiles.join(", ")}.`,
+				);
+			}
 			logger.info(
 				`Removed ${blueprint.blueprint.name} blueprint files from ${blueprint.directory}.`,
 				{ essential: true },
 			);
 			if (result.directoryExists) {
-				logger.info(
-					`Kept untracked or unsafe files in ${blueprint.directory}; remove them manually if desired.`,
-					{ essential: true },
-				);
+				const message =
+					resolve(blueprint.directory) === resolve(process.cwd())
+						? `Kept ${blueprint.directory} because it is the current working directory.`
+						: `Kept untracked files in ${blueprint.directory}; remove them manually if desired.`;
+				logger.info(message, { essential: true });
 			}
 		} catch (error) {
 			failures += 1;
@@ -881,7 +906,10 @@ async function runSetupRemoval(
 	}
 
 	logger.output(preview.text);
-	if (preview.payload.items.length === 0) return;
+	if (preview.payload.items.length === 0) {
+		if (inventory.skillDiscoveryFailures.length > 0) process.exitCode = 1;
+		return;
+	}
 
 	const interactive = !ctx.quiet && isInteractive() && !ctx.yes;
 	if (interactive) {
@@ -897,10 +925,16 @@ async function runSetupRemoval(
 			return;
 		}
 	} else if (!ctx.yes) {
-		logger.info(
-			'Nothing was removed. Run "c8ctl setup --remove --yes" to confirm.',
-			{ essential: true },
-		);
+		const command = [
+			"c8ctl",
+			"setup",
+			"--remove",
+			...(stopCluster ? ["--stop-cluster"] : []),
+			"--yes",
+		].join(" ");
+		logger.info(`Nothing was removed. Run "${command}" to confirm.`, {
+			essential: true,
+		});
 		return;
 	}
 

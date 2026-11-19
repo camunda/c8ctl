@@ -41,7 +41,13 @@ interface McpHarness {
 
 export interface McpChange {
 	server: string;
-	status: "installed" | "updated" | "removed" | "unchanged" | "absent";
+	status:
+		| "installed"
+		| "updated"
+		| "removed"
+		| "unchanged"
+		| "absent"
+		| "preserved";
 	config?: Record<string, unknown>;
 }
 
@@ -262,6 +268,7 @@ export function planMcpConfigs({
 	orchestration,
 	alias,
 	connection,
+	preserveConflicts = false,
 }: {
 	requested: readonly string[];
 	operation: "install" | "uninstall";
@@ -269,6 +276,7 @@ export function planMcpConfigs({
 	orchestration: boolean;
 	alias: string;
 	connection?: Record<string, unknown>;
+	preserveConflicts?: boolean;
 }): McpConfigPlan[] {
 	return selectHarnesses(requested).map((harness) => {
 		const path = resolve(harness.path);
@@ -342,6 +350,9 @@ export function planMcpConfigs({
 			// so only the orchestration entry can drift this way.
 			const owned = !entry.docs && isOrchestrationEntry(current);
 			if (present && !matches && !(operation === "install" && owned)) {
+				if (operation === "uninstall" && preserveConflicts) {
+					return { server: entry.name, status: "preserved" };
+				}
 				throw new Error(
 					`MCP entry '${entry.name}' conflicts in ${path}. Inspect it before changing it${entry.docs ? "." : ", or choose another --alias."}`,
 				);

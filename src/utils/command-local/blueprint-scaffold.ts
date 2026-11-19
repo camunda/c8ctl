@@ -550,6 +550,26 @@ function isWithinBlueprint(directory: string, candidate: string): boolean {
 	);
 }
 
+function hasSafeDirectoryChain(directory: string, candidate: string): boolean {
+	const root = resolve(directory);
+	const target = resolve(candidate);
+	if (!isWithinBlueprint(root, target)) return false;
+	const rootInfo = lstatSync(root, { throwIfNoEntry: false });
+	if (!rootInfo || rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+		return false;
+	}
+	const relativePath = relative(root, target);
+	if (relativePath === "") return true;
+
+	let current = root;
+	for (const segment of relativePath.split(sep)) {
+		current = join(current, segment);
+		const info = lstatSync(current, { throwIfNoEntry: false });
+		if (!info || info.isSymbolicLink() || !info.isDirectory()) return false;
+	}
+	return true;
+}
+
 /**
  * Remove only files listed by a valid setup marker. The caller must display
  * the file list and get explicit confirmation before calling this function.
@@ -642,10 +662,8 @@ export function removeSetupBlueprint(
 	for (const parent of [...parentDirectories].sort(
 		(left, right) => right.length - left.length,
 	)) {
-		const parentInfo = lstatSync(parent, { throwIfNoEntry: false });
 		if (
-			parentInfo?.isDirectory() &&
-			!parentInfo.isSymbolicLink() &&
+			hasSafeDirectoryChain(directory, parent) &&
 			readdirSync(parent).length === 0
 		) {
 			rmdirSync(parent);
@@ -654,6 +672,7 @@ export function removeSetupBlueprint(
 
 	const finalRootInfo = lstatSync(directory, { throwIfNoEntry: false });
 	if (
+		resolve(directory) !== resolve(process.cwd()) &&
 		finalRootInfo?.isDirectory() &&
 		!finalRootInfo.isSymbolicLink() &&
 		readdirSync(directory).length === 0

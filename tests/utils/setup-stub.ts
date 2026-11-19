@@ -32,7 +32,7 @@
  *                                   body is written to this file.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "stop-cluster",
- *                                   "install-skills").
+ *                                   "install-skills", "list-skills").
  *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
  *                                   warning on stderr while succeeding.
  *   C8CTL_SETUP_STUB_SKILL_PATH=path — report a listed skill at this
@@ -221,7 +221,7 @@ function fakeChild(
  * The fake GitHub CLI for skill discovery, installation and updates.
  * Shared by the spawn and spawnSync patches: listing reports skill
  * directories, installing creates them, and
- * C8CTL_SETUP_STUB_FAIL=install-skills fails a real install.
+ * C8CTL_SETUP_STUB_FAIL=install-skills or list-skills simulates a CLI error.
  */
 function fakeGh(commandArgs: string[]): {
 	status: number;
@@ -241,6 +241,13 @@ function fakeGh(commandArgs: string[]): {
 		fs.appendFileSync(capture, `${JSON.stringify(commandArgs)}\n`);
 	}
 	if (commandArgs[1] === "list") {
+		if (failStep === "list-skills") {
+			return {
+				status: 1,
+				stdout: "",
+				stderr: 'unknown command "skill" for "gh"',
+			};
+		}
 		return {
 			status: 0,
 			stdout: JSON.stringify(

@@ -337,6 +337,30 @@ interface SkillRemovalOptions {
 	platform?: string;
 }
 
+export function hasCamundaUserSkillsDirectory(
+	harness: string,
+	{
+		env = process.env,
+		home,
+		platform = process.platform,
+	}: SkillRemovalOptions = {},
+): boolean {
+	const userHome =
+		home ??
+		(platform === "win32"
+			? env.USERPROFILE || env.HOME || homedir()
+			: env.HOME || homedir());
+	return harnessSkillDirectories({
+		harness,
+		env,
+		home: userHome,
+		platform,
+	}).some(
+		(directory) =>
+			statSync(directory, { throwIfNoEntry: false })?.isDirectory() === true,
+	);
+}
+
 function skillRemovalLocation(
 	skill: CamundaSkillInstallation,
 	{ env = process.env, home, platform = process.platform }: SkillRemovalOptions,
