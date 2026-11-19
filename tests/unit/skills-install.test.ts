@@ -72,29 +72,105 @@ test("builds a user-scoped install that refreshes the same Camunda skills", () =
 		"claude-code",
 		"--scope",
 		"user",
-		"--force",
 	]);
 });
 
-test("runs the GitHub CLI skill installer and surfaces failures", () => {
+test("installs Camunda skills only when none are installed", () => {
 	const calls: Array<{ command: string; args: string[] }> = [];
 	runSkillInstall("claude-code", (command, args) => {
 		calls.push({ command, args });
-		return { status: 0, stdout: "", stderr: "" };
+		return { status: 0, stdout: "[]", stderr: "" };
 	});
 	assert.deepEqual(calls, [
+		{
+			command: "gh",
+			args: [
+				"skill",
+				"list",
+				"--agent",
+				"claude-code",
+				"--scope",
+				"user",
+				"--json",
+				"skillName,sourceURL,path",
+			],
+		},
 		{ command: "gh", args: buildSkillInstallArgs("claude-code") },
 	]);
+});
+
+test("updates only installed Camunda skills through their existing directories", () => {
+	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
+	const calls: Array<{ command: string; args: string[] }> = [];
+	const skills = [
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "https://github.com/camunda/skills",
+			path: join(skillRoot, "camunda-ai-agents"),
+		},
+		{
+			skillName: "camunda-bpmn",
+			sourceURL: "https://github.com/camunda/skills",
+			path: join(skillRoot, "camunda-bpmn"),
+		},
+		{
+			skillName: "unrelated",
+			sourceURL: "https://github.com/other/skills",
+			path: join(skillRoot, "unrelated"),
+		},
+	];
+	runSkillInstall("claude-code", (command, args) => {
+		calls.push({ command, args });
+		return {
+			status: 0,
+			stdout: args[1] === "list" ? JSON.stringify(skills) : "",
+			stderr: "",
+		};
+	});
+	assert.deepEqual(calls, [
+		{
+			command: "gh",
+			args: [
+				"skill",
+				"list",
+				"--agent",
+				"claude-code",
+				"--scope",
+				"user",
+				"--json",
+				"skillName,sourceURL,path",
+			],
+		},
+		{
+			command: "gh",
+			args: [
+				"skill",
+				"update",
+				"--all",
+				"--dir",
+				skillRoot,
+				"camunda-ai-agents",
+				"camunda-bpmn",
+			],
+		},
+	]);
+});
+
+test("surfaces GitHub CLI skill install failures", () => {
+	let install = false;
 
 	assert.throws(
 		() =>
-			runSkillInstall("claude-code", () => ({
-				status: 1,
-				stdout: "",
-				stderr: "network denied",
-			})),
+			runSkillInstall("claude-code", (_command, args) => {
+				if (args[1] === "list") {
+					return { status: 0, stdout: "[]", stderr: "" };
+				}
+				install = true;
+				return { status: 1, stdout: "", stderr: "network denied" };
+			}),
 		/network denied/,
 	);
+	assert.equal(install, true);
 });
 
 test("skills help documents the install action and harness selector", async () => {

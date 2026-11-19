@@ -16,6 +16,8 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	statSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -403,7 +405,7 @@ describe("c8ctl setup", () => {
 			// …while a step with useful lines shows them between its title
 			// and its status line.
 			assert.match(out, /^ {2}Install AI assistant skills$/m);
-			assert.match(out, /Installing Camunda skills \(camunda\/skills\) for /);
+			assert.match(out, /Checking Camunda skills \(camunda\/skills\) for /);
 			assert.match(out, /MCP configuration: /);
 			// Everything else is held back: no c8run chatter, no progress
 			// percentages, no deploy progress, no prerequisite checklist.
@@ -587,18 +589,37 @@ describe("c8ctl setup", () => {
 
 	test("a rerun reuses the existing blueprint project instead of failing", async () => {
 		const stub = stubbedExecution();
+		const ghCapture = join(stub.cwd, "gh-calls.jsonl");
+		stub.options.env.C8CTL_SETUP_STUB_GH_CAPTURE = ghCapture;
 		try {
 			const first = await c8WithOptions(stub.options, "setup", "--yes");
 			assert.strictEqual(first.status, 0, first.stderr);
 			assert.ok(
 				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 			);
+			const mcpConfigPath = join(stub.home, ".claude", ".claude.json");
+			const mcpConfig = readFileSync(mcpConfigPath, "utf-8");
+			utimesSync(mcpConfigPath, 1, 1);
 
 			const second = await c8WithOptions(stub.options, "setup", "--yes");
 			assert.strictEqual(second.status, 0, second.stderr);
 			const out = stripVTControlCharacters(second.stdout + second.stderr);
 			stepLine(out, "Create the blueprint project", "SUCCESS");
 			assert.match(out, /already set up/);
+			assert.strictEqual(readFileSync(mcpConfigPath, "utf-8"), mcpConfig);
+			assert.strictEqual(statSync(mcpConfigPath).mtimeMs, 1000);
+			const ghCalls = readFileSync(ghCapture, "utf-8")
+				.trim()
+				.split("\n")
+				.map((line) => {
+					const parsed: unknown = JSON.parse(line);
+					assert.ok(Array.isArray(parsed));
+					return parsed.map(String);
+				});
+			assert.deepStrictEqual(
+				ghCalls.map((args) => args[1]),
+				["list", "install", "list", "update"],
+			);
 			// No suffixed copies, ever.
 			assert.ok(!existsSync(join(stub.cwd, "rocket-launch-1")));
 			assert.ok(!existsSync(join(stub.cwd, "rocket-launch-2")));

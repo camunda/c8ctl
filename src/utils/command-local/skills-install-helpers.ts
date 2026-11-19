@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { posix, win32 } from "node:path";
+import { dirname, posix, win32 } from "node:path";
+import { isRecord } from "../../core/index.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -21,6 +22,8 @@ const HARNESS_ALIASES: Readonly<Record<string, string>> = {
 };
 
 export const CAMUNDA_SKILLS_REPOSITORY = "camunda/skills";
+
+const CAMUNDA_SKILLS_URL = `https://github.com/${CAMUNDA_SKILLS_REPOSITORY}`;
 
 export function normalizeSkillHarness(value: string): string {
 	const normalized = value.trim().toLowerCase();
@@ -44,8 +47,60 @@ export function buildSkillInstallArgs(harness: string): string[] {
 		harness,
 		"--scope",
 		"user",
-		"--force",
 	];
+}
+
+function buildSkillListArgs(harness: string): string[] {
+	return [
+		"skill",
+		"list",
+		"--agent",
+		harness,
+		"--scope",
+		"user",
+		"--json",
+		"skillName,sourceURL,path",
+	];
+}
+
+function buildSkillUpdateArgs(skills: string[], directory: string): string[] {
+	return ["skill", "update", "--all", "--dir", directory, ...skills];
+}
+
+interface InstalledCamundaSkill {
+	readonly name: string;
+	readonly directory: string;
+}
+
+function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(stdout);
+	} catch {
+		throw new Error("GitHub CLI returned invalid JSON while listing skills.");
+	}
+	if (!Array.isArray(parsed)) {
+		throw new Error("GitHub CLI returned an invalid installed-skills list.");
+	}
+
+	const skills: InstalledCamundaSkill[] = [];
+	for (const entry of parsed) {
+		if (!isRecord(entry) || typeof entry.sourceURL !== "string") continue;
+		if (
+			entry.sourceURL.replace(/\/+$/, "").toLowerCase() !== CAMUNDA_SKILLS_URL
+		)
+			continue;
+		if (
+			typeof entry.skillName !== "string" ||
+			entry.skillName.length === 0 ||
+			typeof entry.path !== "string" ||
+			entry.path.length === 0
+		) {
+			throw new Error("GitHub CLI returned incomplete Camunda skill metadata.");
+		}
+		skills.push({ name: entry.skillName, directory: dirname(entry.path) });
+	}
+	return skills;
 }
 
 function joinForPlatform(platform: string, ...paths: string[]): string {
@@ -154,7 +209,35 @@ export function runSkillInstall(
 	harness: string,
 	runner: SkillInstallRunner = runCommand,
 ): void {
-	const result = runner("gh", buildSkillInstallArgs(harness));
+	const listed = runner("gh", buildSkillListArgs(harness));
+	requireSuccessfulSkillCommand(listed, "check for installed");
+	const installed = installedCamundaSkills(listed.stdout);
+	if (installed.length === 0) {
+		requireSuccessfulSkillCommand(
+			runner("gh", buildSkillInstallArgs(harness)),
+			"install",
+		);
+		return;
+	}
+
+	const byDirectory = new Map<string, string[]>();
+	for (const skill of installed) {
+		const skills = byDirectory.get(skill.directory) ?? [];
+		if (!skills.includes(skill.name)) skills.push(skill.name);
+		byDirectory.set(skill.directory, skills);
+	}
+	for (const [directory, skills] of byDirectory) {
+		requireSuccessfulSkillCommand(
+			runner("gh", buildSkillUpdateArgs(skills, directory)),
+			"update",
+		);
+	}
+}
+
+function requireSuccessfulSkillCommand(
+	result: SkillInstallRunResult,
+	action: string,
+): void {
 	if (result.error) {
 		const errorCode =
 			"code" in result.error && typeof result.error.code === "string"
@@ -179,6 +262,6 @@ export function runSkillInstall(
 		);
 	}
 	throw new Error(
-		`GitHub CLI failed to install Camunda skills${result.status === null ? "" : ` (exit code ${result.status})`}: ${details || "No details were reported."}`,
+		`GitHub CLI failed to ${action} Camunda skills${result.status === null ? "" : ` (exit code ${result.status})`}: ${details || "No details were reported."}`,
 	);
 }

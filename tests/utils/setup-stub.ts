@@ -40,7 +40,7 @@ import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { PassThrough } from "node:stream";
 
 // ── Desktop Modeler looks installed ────────────────────────────────
@@ -257,8 +257,34 @@ Object.defineProperty(childProcess, "spawnSync", {
 	value: (...args: unknown[]) => {
 		// Skills install through the GitHub CLI (`gh skill install …`).
 		if (basename(String(args[0])) === "gh") {
-			if (failStep === "install-skills") {
+			const commandArgs = Array.isArray(args[1]) ? args[1].map(String) : [];
+			const skillRoot = join(process.env.HOME ?? "", ".claude", "skills");
+			const skillMarker = join(skillRoot, ".c8ctl-installed");
+			const capture = process.env.C8CTL_SETUP_STUB_GH_CAPTURE;
+			if (capture) {
+				fs.appendFileSync(capture, `${JSON.stringify(commandArgs)}\n`);
+			}
+			if (commandArgs[1] === "list") {
+				return {
+					status: 0,
+					stdout: fs.existsSync(skillMarker)
+						? JSON.stringify([
+								{
+									skillName: "camunda-c8ctl",
+									sourceURL: "https://github.com/camunda/skills",
+									path: join(skillRoot, "camunda-c8ctl"),
+								},
+							])
+						: "[]",
+					stderr: "",
+				};
+			}
+			if (failStep === "install-skills" && commandArgs[1] === "install") {
 				return { status: 1, stdout: "", stderr: "stubbed gh failure" };
+			}
+			if (commandArgs[1] === "install") {
+				fs.mkdirSync(skillRoot, { recursive: true });
+				fs.writeFileSync(skillMarker, "");
 			}
 			return { status: 0, stdout: "", stderr: "" };
 		}

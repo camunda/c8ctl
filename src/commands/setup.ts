@@ -23,9 +23,10 @@
  * was installed for lack of a go-ahead (the wizard was cancelled with
  * Escape — Ctrl+C ends it by signal, 130 on POSIX shells — a piped,
  * --quiet or JSON-mode run had no --yes, or --json / --dry-run printed
- * the plan only). A re-run reuses finished work where possible and
- * repeats the blueprint deploy and start and the skills install by
- * design. 1 when arguments failed validation or any step failed — the
+ * the plan only). A re-run reuses finished work where possible; it
+ * repeats the blueprint deploy and start by design, leaves correct MCP
+ * entries untouched, and only updates skills that are out of date.
+ * 1 when arguments failed validation or any step failed — the
  * remaining eligible steps still ran, dependents of a failed step (and
  * the deploy finale after any failure) were skipped, and re-running
  * picks up where the failure left off.
@@ -348,7 +349,7 @@ async function runSkillsInstall(ctx: CommandContext): Promise<void> {
 	}
 	for (const harness of harnesses) {
 		ctx.logger.info(
-			`Installing Camunda skills (${CAMUNDA_SKILLS_REPOSITORY}) for ${harness}…`,
+			`Checking Camunda skills (${CAMUNDA_SKILLS_REPOSITORY}) for ${harness}…`,
 			{ essential: true },
 		);
 		runSkillInstall(harness);
