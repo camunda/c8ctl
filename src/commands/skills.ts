@@ -40,7 +40,7 @@ export const installSkillsCommand = defineCommand(
 		}
 
 		for (const harness of harnesses) {
-			runSkillInstall(harness);
+			await runSkillInstall(harness);
 		}
 
 		const labels = harnesses

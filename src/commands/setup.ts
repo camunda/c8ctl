@@ -3,8 +3,11 @@
  *
  * Prints the welcome banner, asks what to set up (checkbox list with
  * dependencies plus a blueprint choice), then runs every selected step.
- * Each step ends in a `[SUCCESS]`, `[ERROR]` or `[SKIPPED]` line in an
- * aligned column (green, red and dim on a terminal); a failed step
+ * While a step runs on a terminal, a braille spinner ticks on its open
+ * title line so long steps don't look frozen (piped and --quiet output
+ * stays static). Each step ends in a `[SUCCESS]`, `[ERROR]` or
+ * `[SKIPPED]` line in an aligned column (green, red and dim on a
+ * terminal); a failed step
  * prints its error on the following lines and the remaining steps still
  * run. Steps whose dependencies failed are skipped with the unmet steps
  * named.
@@ -69,9 +72,11 @@ import {
 	SETUP_STEPS,
 	type SetupComponentId,
 	type SetupStepId,
+	type StepSpinner,
 	scaffoldSetupBlueprint,
 	setupBlueprintById,
 	setupPlanPayload,
+	startStepSpinner,
 	writeMcpConfig,
 } from "../utils/index.ts";
 import { deployResources } from "./helpers/deploy-helpers.ts";
@@ -353,7 +358,7 @@ async function runSkillsInstall(ctx: CommandContext): Promise<void> {
 			`Checking Camunda skills (${CAMUNDA_SKILLS_REPOSITORY}) for ${harness}…`,
 			{ essential: true },
 		);
-		runSkillInstall(harness);
+		await runSkillInstall(harness);
 	}
 }
 
@@ -433,13 +438,14 @@ interface BufferedLine {
  * A ctx whose logger buffers non-essential info output: on success the
  * buffer is dropped and the step collapses to its status line; on
  * failure the buffer is flushed above the error. Essential lines,
- * warnings and errors pass through immediately — `onPassthrough` runs
- * first, so the step's title line can be closed before they print.
+ * warnings and errors pass through wrapped in `aroundPassthrough`, so
+ * the step's title line closes before they print and — except for
+ * errors, which precede a failing step's diagnostics — reopens after.
  */
 function withBufferedOutput(
 	ctx: CommandContext,
 	buffer: BufferedLine[],
-	onPassthrough: () => void,
+	aroundPassthrough: (emit: () => void, options?: { resume: boolean }) => void,
 ): CommandContext {
 	const { logger } = ctx;
 	const bufferedLogger = Object.create(logger, {
@@ -449,8 +455,7 @@ function withBufferedOutput(
 				options?: { stream?: "stdout" | "stderr"; essential?: boolean },
 			) => {
 				if (options?.essential) {
-					onPassthrough();
-					logger.info(message, options);
+					aroundPassthrough(() => logger.info(message, options));
 				} else {
 					buffer.push({ message, stream: options?.stream });
 				}
@@ -458,20 +463,23 @@ function withBufferedOutput(
 		},
 		warn: {
 			value: (message: string) => {
-				onPassthrough();
-				logger.warn(message);
+				aroundPassthrough(() => logger.warn(message));
 			},
 		},
 		error: {
 			value: (message: string, error?: Error) => {
-				onPassthrough();
-				logger.error(message, error);
+				// A step that logs an error is failing, and its diagnostics
+				// may follow outside the wrapped logger (deploy-helpers
+				// writes them straight to stderr) — close the title for
+				// good instead of stranding a reopened frame among them.
+				aroundPassthrough(() => logger.error(message, error), {
+					resume: false,
+				});
 			},
 		},
 		success: {
 			value: (message: string, key?: string | number) => {
-				onPassthrough();
-				logger.success(message, key);
+				aroundPassthrough(() => logger.success(message, key));
 			},
 		},
 	});
@@ -523,22 +531,63 @@ async function executePlan(
 		}
 
 		// The title line stays open: the status tag completes it. Essential
-		// step output closes it first, so it never garbles mid-line.
+		// step output closes it first, so it never garbles mid-line — and
+		// on a terminal the line reopens below the printed output with a
+		// fresh spinner, so a chatty long step (the skills install prints
+		// one line per harness, then downloads) keeps its activity
+		// indicator. Piped and --quiet runs keep the plain, static line.
 		let titleOpen = false;
-		if (!ctx.quiet) {
+		let spinner: StepSpinner | null = null;
+		let stepActive = true;
+		// Animate only when the spinning line fits the terminal: a wrapped
+		// line would redraw on its continuation row, adding rows instead
+		// of spinning in place.
+		const canAnimate =
+			color &&
+			step.title.length + 4 <=
+				(process.stdout.columns ?? Number.POSITIVE_INFINITY);
+		const openTitle = () => {
 			process.stdout.write(`  ${step.title}`);
 			titleOpen = true;
-		}
-		const closeTitle = () => {
-			if (titleOpen) {
-				process.stdout.write("\n");
-				titleOpen = false;
+			if (canAnimate) {
+				spinner = startStepSpinner({
+					title: step.title,
+					write: (text) => process.stdout.write(text),
+				});
 			}
 		};
+		if (!ctx.quiet) openTitle();
+		// Returns true when a spinning line was closed — the passthrough
+		// wrapper then reopens it after the essential output, below what
+		// was printed.
+		const closeTitle = () => {
+			if (!titleOpen) return false;
+			const hadSpinner = spinner !== null;
+			spinner?.stop();
+			spinner = null;
+			// With a spinner the line ends in a frame glyph and this rewrite
+			// is shorter — erase to end of line so the glyph doesn't linger.
+			process.stdout.write(hadSpinner ? `\r  ${step.title}\x1b[K\n` : "\n");
+			titleOpen = false;
+			return hadSpinner;
+		};
+		const aroundPassthrough = (
+			emit: () => void,
+			{ resume = true }: { resume?: boolean } = {},
+		) => {
+			const reopen = closeTitle();
+			emit();
+			if (reopen && resume && stepActive) openTitle();
+		};
 		const reportStatus = (status: "success" | "error") => {
+			stepActive = false;
 			if (titleOpen) {
+				spinner?.stop();
+				const suffix = formatStepStatusSuffix(step.title, status, width, {
+					color,
+				});
 				process.stdout.write(
-					`${formatStepStatusSuffix(step.title, status, width, { color })}\n`,
+					spinner ? `\r  ${step.title}${suffix}\n` : `${suffix}\n`,
 				);
 				titleOpen = false;
 			} else {
@@ -551,7 +600,7 @@ async function executePlan(
 		const buffered: BufferedLine[] = [];
 		try {
 			await STEP_EXECUTORS[step.id](
-				withBufferedOutput(ctx, buffered, closeTitle),
+				withBufferedOutput(ctx, buffered, aroundPassthrough),
 				run,
 			);
 			succeeded.add(step.id);

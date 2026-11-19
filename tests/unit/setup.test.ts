@@ -241,7 +241,7 @@ function stepLine(
 describe("c8ctl setup", () => {
 	test("is registered: prints the plan as JSON and exits 0", async () => {
 		const result = await c8("setup");
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		const payload = JSON.parse(result.stdout);
 		assert.strictEqual(payload.command, "setup");
 		assert.strictEqual(payload.preview, true);
@@ -262,7 +262,7 @@ describe("c8ctl setup", () => {
 				"setup",
 				"--yes",
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			const payload = JSON.parse(result.stdout);
 			assert.strictEqual(payload.command, "setup");
 			assert.strictEqual(payload.blueprint, "rocket-launch");
@@ -287,7 +287,7 @@ describe("c8ctl setup", () => {
 			{ env: { C8CTL_OUTPUT_MODE: "text" } },
 			"setup",
 		);
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(result.stdout, /Welcome to Camunda 8!/);
 		// No plan preview: the step report is the only step listing.
 		assert.doesNotMatch(result.stdout, /Here's what c8ctl setup will do/);
@@ -300,7 +300,7 @@ describe("c8ctl setup", () => {
 
 	test("--dry-run emits a JSON preview without running anything", async () => {
 		const result = await c8("setup", "--dry-run");
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		const payload = JSON.parse(result.stdout);
 		assert.strictEqual(payload.dryRun, true);
 		assert.strictEqual(payload.command, "setup");
@@ -309,14 +309,14 @@ describe("c8ctl setup", () => {
 
 	test("--dry-run reports the default blueprint", async () => {
 		const result = await c8("setup", "--dry-run");
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		const payload = JSON.parse(result.stdout);
 		assert.strictEqual(payload.blueprint, "rocket-launch");
 	});
 
 	test("--no-modeler deselects the modeler component", async () => {
 		const result = await c8("setup", "--no-modeler");
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		const payload = JSON.parse(result.stdout);
 		const modeler = payload.components.find(
 			(c: { id: string }) => c.id === "modeler",
@@ -330,7 +330,7 @@ describe("c8ctl setup", () => {
 
 	test("--no-modeler wins over --modeler", async () => {
 		const result = await c8("setup", "--modeler", "--no-modeler");
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		const payload = JSON.parse(result.stdout);
 		const modeler = payload.components.find(
 			(c: { id: string }) => c.id === "modeler",
@@ -344,7 +344,7 @@ describe("c8ctl setup", () => {
 			"setup",
 			"--help",
 		);
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(
 			result.stdout,
 			/Guided first-run setup: install a local cluster/,
@@ -357,7 +357,7 @@ describe("c8ctl setup", () => {
 			"help",
 			"setup",
 		);
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(result.stdout, /Usage: c8ctl setup/);
 		assert.match(result.stdout, /Nothing is installed without your say\./);
 		assert.match(result.stdout, /\[SUCCESS\]/);
@@ -374,7 +374,7 @@ describe("c8ctl setup", () => {
 			{ env: { C8CTL_OUTPUT_MODE: "text" } },
 			"--help",
 		);
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(
 			result.stdout,
 			/Guided first-run setup: install a local cluster/,
@@ -384,7 +384,7 @@ describe("c8ctl setup", () => {
 
 	test("completion lists the setup verb", async () => {
 		const result = await c8("completion", "bash");
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(result.stdout, /setup/);
 	});
 
@@ -399,7 +399,7 @@ describe("c8ctl setup", () => {
 		stub.options.env.CAMUNDA_DEFAULT_TENANT_ID = "remote-tenant";
 		try {
 			const result = await c8WithOptions(stub.options, "setup", "--yes");
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			assert.doesNotMatch(result.stderr, /What should we set up/);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Check prerequisites", "SUCCESS");
@@ -491,7 +491,7 @@ describe("c8ctl setup", () => {
 		stub.options.env.C8CTL_SETUP_STUB_CLUSTER_WARN = "1";
 		try {
 			const result = await c8WithOptions(stub.options, "setup", "--yes");
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Start the local cluster", "SUCCESS");
 			// stderr passes through: the warning is not buffered away.
@@ -555,6 +555,189 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	describe("step spinner on terminal stdout", () => {
+		const BRAILLE_FRAME = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/;
+
+		/**
+		 * Run `setup --yes` with stdout simulated as a terminal — the
+		 * spinner branch only runs when stdout is a TTY.
+		 */
+		const runOnTty = (
+			stub: ReturnType<typeof stubbedExecution>,
+			{
+				columns,
+				extraArgs = [],
+			}: { columns?: number; extraArgs?: string[] } = {},
+		) =>
+			c8WithOptions(
+				{
+					...stub.options,
+					nodeArgs: [...(stub.options.nodeArgs ?? []), "--import", FAKE_TTY],
+					env: {
+						...stub.options.env,
+						C8CTL_FAKE_TTY_STDOUT: "true",
+						...(columns !== undefined
+							? { C8CTL_FAKE_TTY_COLUMNS: String(columns) }
+							: {}),
+					},
+				},
+				"setup",
+				"--yes",
+				...extraArgs,
+			);
+
+		/**
+		 * Every line's final state (after its last carriage return) must
+		 * be free of spinner frames: a completed step never leaves the
+		 * activity indicator behind.
+		 */
+		const assertNoLeftoverFrames = (stdout: string) => {
+			for (const line of stdout.split("\n")) {
+				const finalSegment = line.split("\r").pop() ?? "";
+				assert.doesNotMatch(
+					finalSegment,
+					BRAILLE_FRAME,
+					`spinner frame left on a finished line: ${JSON.stringify(line)}`,
+				);
+			}
+		};
+
+		test("every step spins on its open title line, then completes it", async () => {
+			const stub = stubbedExecution();
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+				// The first frame lands with the step — no waiting for a tick.
+				assert.ok(
+					result.stdout.includes("\r  Check prerequisites ⠋"),
+					"no spinner frame on the prerequisites line",
+				);
+				assert.ok(
+					result.stdout.includes("\r  Start the local cluster ⠋"),
+					"no spinner frame on the cluster line",
+				);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Check prerequisites", "SUCCESS");
+				stepLine(out, "Deploy and start the process", "SUCCESS");
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("essential output closes the spinning line and erases the frame", async () => {
+			const stub = stubbedExecution();
+			stub.options.env.C8CTL_SETUP_STUB_CLUSTER_WARN = "1";
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+				// The passthrough warning closes the title line first: the
+				// rewrite erases to end of line so the frame can't linger.
+				assert.ok(
+					result.stdout.includes("\r  Start the local cluster\x1b[K\n"),
+					"title line closed without erasing the spinner frame",
+				);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Start the local cluster", "SUCCESS");
+				assert.match(out, /Could not persist the durable cluster PID record/);
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("essential mid-step output reopens the spinning title below it", async () => {
+			const stub = stubbedExecution();
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+				// The skills step prints one essential line per harness, then
+				// downloads; the spinning title reopens below the printed
+				// line and the step still completes on its own line.
+				const messageAt = result.stdout.indexOf("Checking Camunda skills");
+				assert.ok(messageAt !== -1, "skills install message missing");
+				const reopened = result.stdout.indexOf(
+					"\r  Install AI assistant skills ⠋",
+					messageAt,
+				);
+				assert.ok(
+					reopened > messageAt,
+					"the title line did not reopen below the essential output",
+				);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Install AI assistant skills", "SUCCESS");
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("a failed deploy does not reopen the spinner into its stderr diagnostics", async () => {
+			// deploy-helpers renders failure diagnostics straight to stderr;
+			// the error passthrough must close the title for good, or a
+			// reopened frame is stranded between "Deployment failed" and
+			// the detail lines on a shared terminal.
+			const stub = stubbedExecution({ failStep: "deploy-blueprint" });
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 1, result.stdout);
+				const openings = result.stdout.match(
+					/\r {2}Deploy and start the process ⠋/g,
+				);
+				assert.strictEqual(
+					openings?.length ?? 0,
+					1,
+					"the deploy title reopened after the error passthrough",
+				);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Deploy and start the process", "ERROR");
+				assert.match(out, /stubbed invalid deployment/);
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("a failed step stops the spinner and reports [ERROR] cleanly", async () => {
+			const stub = stubbedExecution({ failStep: "start-cluster" });
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 1, result.stdout);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Start the local cluster", "ERROR");
+				assert.match(out, /stubbed cluster failure diagnostics/);
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("narrow terminals and --quiet suppress the animation", async () => {
+			const narrow = stubbedExecution();
+			try {
+				const result = await runOnTty(narrow, { columns: 10 });
+				assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+				assert.doesNotMatch(result.stdout, BRAILLE_FRAME);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Check prerequisites", "SUCCESS");
+			} finally {
+				narrow.cleanup();
+			}
+
+			const quiet = stubbedExecution();
+			try {
+				const result = await runOnTty(quiet, { extraArgs: ["--quiet"] });
+				assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+				assert.doesNotMatch(result.stdout, BRAILLE_FRAME);
+				// No open title lines: quiet prints only the essential
+				// completed status lines.
+				assert.doesNotMatch(result.stdout, /^ {2}Check prerequisites$/m);
+			} finally {
+				quiet.cleanup();
+			}
+		});
+	});
+
 	test("--yes --docs-mcp also configures the docs MCP server", async () => {
 		const stub = stubbedExecution();
 		try {
@@ -564,7 +747,7 @@ describe("c8ctl setup", () => {
 				"--yes",
 				"--docs-mcp",
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Configure the docs MCP server", "SUCCESS");
 			// The sign-in browser window is announced before the first step runs.
@@ -589,7 +772,7 @@ describe("c8ctl setup", () => {
 
 	test("--docs-mcp plans the docs step non-interactively", async () => {
 		const result = await c8("setup", "--docs-mcp");
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		const payload = JSON.parse(result.stdout);
 		const docsStep = payload.steps.find(
 			(s: { title: string }) => s.title === "Configure the docs MCP server",
@@ -754,7 +937,7 @@ describe("c8ctl setup", () => {
 					cwd: stub.cwd,
 				},
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
 			assert.ok(
 				!result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
@@ -807,7 +990,7 @@ describe("c8ctl setup", () => {
 					cwd: stub.cwd,
 				},
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
 			assert.ok(
 				result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
@@ -830,7 +1013,7 @@ describe("c8ctl setup", () => {
 			[{ waitFor: PROMPT_TEXT, keys: "\x1b" }],
 			{ args: ["--json"] },
 		);
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.doesNotMatch(result.stderr, new RegExp(PROMPT_TEXT));
 		const payload = JSON.parse(result.stdout);
 		assert.strictEqual(payload.command, "setup");
@@ -842,7 +1025,7 @@ describe("c8ctl setup", () => {
 		const result = await runInteractive([
 			{ waitFor: "Docs MCP server", keys: "\x1b" },
 		]);
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(result.stdout, /Cancelled — nothing was changed\./);
 		assert.doesNotMatch(result.stdout, /Check prerequisites/);
 	});
@@ -852,7 +1035,7 @@ describe("c8ctl setup", () => {
 			{ waitFor: "Docs MCP server", keys: "\r" },
 			{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\x1b" },
 		]);
-		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(result.stdout, /Cancelled — nothing was changed\./);
 		assert.doesNotMatch(result.stdout, /Setup finished\./);
 	});
@@ -872,7 +1055,7 @@ describe("c8ctl setup", () => {
 					cwd: stub.cwd,
 				},
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Create the blueprint project", "SUCCESS");
 			stepLine(out, "Deploy and start the process", "SUCCESS");
@@ -914,7 +1097,7 @@ describe("c8ctl setup", () => {
 					cwd: stub.cwd,
 				},
 			);
-			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			assert.ok(
 				!result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
 				"blueprint prompt should not render when the blueprint is off",

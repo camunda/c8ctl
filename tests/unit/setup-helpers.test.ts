@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert";
-import { describe, test } from "node:test";
+import { describe, mock, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import {
 	createLineForwarder,
@@ -17,6 +17,7 @@ import {
 	SETUP_COMPONENTS,
 	SETUP_STEPS,
 	setupPlanPayload,
+	startStepSpinner,
 } from "../../src/utils/index.ts";
 
 const BRAND_BLUE = "\x1b[38;2;79;57;246m";
@@ -160,11 +161,27 @@ describe("renderNextSteps()", () => {
 
 	test("colored output only styles, never changes the visible text", () => {
 		const colored = renderNextSteps(LINES, { color: true });
-		assert.ok(colored.includes(BRAND_BLUE), "brand color missing");
 		assert.strictEqual(
 			stripVTControlCharacters(colored),
 			renderNextSteps(LINES, { color: false }),
 		);
+	});
+
+	test("the heading is white on brand blue — fixed colors, readable on dark and light terminals", () => {
+		const colored = renderNextSteps(LINES, { color: true });
+		const band = `\x1b[48;2;79;57;246m\x1b[38;2;255;255;255m\x1b[1m`;
+		assert.ok(colored.includes(band), "white-on-brand heading band missing");
+		assert.ok(
+			colored.includes(`${band}  What's next`),
+			"heading does not open the band",
+		);
+		// Plain brand-blue text was near-invisible on dark themes — the
+		// heading must not fall back to it.
+		const headingRow = colored.split("\n")[1];
+		assert.ok(headingRow.startsWith(`│${band}`));
+		// The unboxed fallback highlights the heading the same way.
+		const fallback = renderNextSteps(LINES, { color: true, maxWidth: 40 });
+		assert.ok(fallback.startsWith(`${band}What's next`));
 	});
 
 	test("falls back to an unboxed block when the content exceeds the width budget", () => {
@@ -267,6 +284,58 @@ describe("createLineForwarder()", () => {
 		forwarder.push(" line\n//> tail without newline");
 		forwarder.flush();
 		assert.deepStrictEqual(written, ["partial line"]);
+	});
+});
+
+describe("startStepSpinner()", () => {
+	test("writes the first frame immediately, then the next frame on every tick", () => {
+		mock.timers.enable({ apis: ["setInterval"] });
+		try {
+			const written: string[] = [];
+			startStepSpinner({ title: "Do a thing", write: (t) => written.push(t) });
+			mock.timers.tick(80);
+			mock.timers.tick(80);
+			mock.timers.tick(80);
+			assert.deepStrictEqual(written, [
+				"\r  Do a thing ⠋",
+				"\r  Do a thing ⠙",
+				"\r  Do a thing ⠹",
+				"\r  Do a thing ⠸",
+			]);
+		} finally {
+			mock.timers.reset();
+		}
+	});
+
+	test("wraps around after the last frame", () => {
+		mock.timers.enable({ apis: ["setInterval"] });
+		try {
+			const written: string[] = [];
+			startStepSpinner({ title: "X", write: (t) => written.push(t) });
+			mock.timers.tick(80 * 10);
+			assert.strictEqual(written.length, 11);
+			assert.strictEqual(written[0], written[10]);
+		} finally {
+			mock.timers.reset();
+		}
+	});
+
+	test("stop() ends the animation and is idempotent", () => {
+		mock.timers.enable({ apis: ["setInterval"] });
+		try {
+			const written: string[] = [];
+			const spinner = startStepSpinner({
+				title: "X",
+				write: (t) => written.push(t),
+			});
+			mock.timers.tick(160);
+			spinner.stop();
+			spinner.stop();
+			mock.timers.tick(1000);
+			assert.strictEqual(written.length, 3);
+		} finally {
+			mock.timers.reset();
+		}
 	});
 });
 

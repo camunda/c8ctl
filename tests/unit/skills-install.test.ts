@@ -75,9 +75,9 @@ test("builds a user-scoped install that refreshes the same Camunda skills", () =
 	]);
 });
 
-test("installs Camunda skills only when none are installed", () => {
+test("installs Camunda skills only when none are installed", async () => {
 	const calls: Array<{ command: string; args: string[] }> = [];
-	runSkillInstall("claude-code", (command, args) => {
+	await runSkillInstall("claude-code", async (command, args) => {
 		calls.push({ command, args });
 		return { status: 0, stdout: "[]", stderr: "" };
 	});
@@ -99,7 +99,7 @@ test("installs Camunda skills only when none are installed", () => {
 	]);
 });
 
-test("updates only installed Camunda skills through their existing directories", () => {
+test("updates only installed Camunda skills through their existing directories", async () => {
 	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
 	const calls: Array<{ command: string; args: string[] }> = [];
 	const skills = [
@@ -119,7 +119,7 @@ test("updates only installed Camunda skills through their existing directories",
 			path: join(skillRoot, "unrelated"),
 		},
 	];
-	runSkillInstall("claude-code", (command, args) => {
+	await runSkillInstall("claude-code", async (command, args) => {
 		calls.push({ command, args });
 		if (args[1] === "install" && args.length === 3) {
 			return {
@@ -170,7 +170,7 @@ test("updates only installed Camunda skills through their existing directories",
 	]);
 });
 
-test("installs missing Camunda skills despite multiline catalog descriptions", () => {
+test("installs missing Camunda skills despite multiline catalog descriptions", async () => {
 	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
 	const availableSkills = [
 		"camunda-ai-agents",
@@ -191,7 +191,7 @@ test("installs missing Camunda skills despite multiline catalog descriptions", (
 	];
 	const calls: Array<{ command: string; args: string[] }> = [];
 
-	runSkillInstall("claude-code", (command, args) => {
+	await runSkillInstall("claude-code", async (command, args) => {
 		calls.push({ command, args });
 		if (args[1] === "list") {
 			return {
@@ -275,7 +275,7 @@ test("installs missing Camunda skills despite multiline catalog descriptions", (
 	]);
 });
 
-test("fails when available Camunda skills cannot be listed", () => {
+test("fails when available Camunda skills cannot be listed", async () => {
 	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
 	const installedSkills = [
 		{
@@ -285,29 +285,33 @@ test("fails when available Camunda skills cannot be listed", () => {
 		},
 	];
 
-	assert.throws(
-		() =>
-			runSkillInstall("claude-code", (_command, args) => ({
+	await assert.rejects(
+		runSkillInstall("claude-code", (_command, args) =>
+			Promise.resolve({
 				status: 0,
 				stdout: args[1] === "list" ? JSON.stringify(installedSkills) : "",
 				stderr: "",
-			})),
+			}),
+		),
 		/no available Camunda skills/i,
 	);
 });
 
-test("surfaces GitHub CLI skill install failures", () => {
+test("surfaces GitHub CLI skill install failures", async () => {
 	let install = false;
 
-	assert.throws(
-		() =>
-			runSkillInstall("claude-code", (_command, args) => {
-				if (args[1] === "list") {
-					return { status: 0, stdout: "[]", stderr: "" };
-				}
-				install = true;
-				return { status: 1, stdout: "", stderr: "network denied" };
-			}),
+	await assert.rejects(
+		runSkillInstall("claude-code", (_command, args) => {
+			if (args[1] === "list") {
+				return Promise.resolve({ status: 0, stdout: "[]", stderr: "" });
+			}
+			install = true;
+			return Promise.resolve({
+				status: 1,
+				stdout: "",
+				stderr: "network denied",
+			});
+		}),
 		/network denied/,
 	);
 	assert.equal(install, true);
