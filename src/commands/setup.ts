@@ -358,7 +358,7 @@ async function runSkillsInstall(ctx: CommandContext): Promise<void> {
 			`Checking Camunda skills (${CAMUNDA_SKILLS_REPOSITORY}) for ${harness}…`,
 			{ essential: true },
 		);
-		runSkillInstall(harness);
+		await runSkillInstall(harness);
 	}
 }
 
@@ -438,13 +438,13 @@ interface BufferedLine {
  * A ctx whose logger buffers non-essential info output: on success the
  * buffer is dropped and the step collapses to its status line; on
  * failure the buffer is flushed above the error. Essential lines,
- * warnings and errors pass through immediately — `onPassthrough` runs
- * first, so the step's title line can be closed before they print.
+ * warnings and errors pass through wrapped in `aroundPassthrough`, so
+ * the step's title line closes before they print and reopens after.
  */
 function withBufferedOutput(
 	ctx: CommandContext,
 	buffer: BufferedLine[],
-	onPassthrough: () => void,
+	aroundPassthrough: (emit: () => void) => void,
 ): CommandContext {
 	const { logger } = ctx;
 	const bufferedLogger = Object.create(logger, {
@@ -454,8 +454,7 @@ function withBufferedOutput(
 				options?: { stream?: "stdout" | "stderr"; essential?: boolean },
 			) => {
 				if (options?.essential) {
-					onPassthrough();
-					logger.info(message, options);
+					aroundPassthrough(() => logger.info(message, options));
 				} else {
 					buffer.push({ message, stream: options?.stream });
 				}
@@ -463,20 +462,17 @@ function withBufferedOutput(
 		},
 		warn: {
 			value: (message: string) => {
-				onPassthrough();
-				logger.warn(message);
+				aroundPassthrough(() => logger.warn(message));
 			},
 		},
 		error: {
 			value: (message: string, error?: Error) => {
-				onPassthrough();
-				logger.error(message, error);
+				aroundPassthrough(() => logger.error(message, error));
 			},
 		},
 		success: {
 			value: (message: string, key?: string | number) => {
-				onPassthrough();
-				logger.success(message, key);
+				aroundPassthrough(() => logger.success(message, key));
 			},
 		},
 	});
@@ -528,36 +524,53 @@ async function executePlan(
 		}
 
 		// The title line stays open: the status tag completes it. Essential
-		// step output closes it first, so it never garbles mid-line. On a
-		// terminal the open line gets a spinner so long steps don't look
-		// frozen; piped and --quiet runs keep the plain, static line.
+		// step output closes it first, so it never garbles mid-line — and
+		// on a terminal the line reopens below the printed output with a
+		// fresh spinner, so a chatty long step (the skills install prints
+		// one line per harness, then downloads) keeps its activity
+		// indicator. Piped and --quiet runs keep the plain, static line.
 		let titleOpen = false;
 		let spinner: StepSpinner | null = null;
-		if (!ctx.quiet) {
+		let stepActive = true;
+		// Animate only when the spinning line fits the terminal: a wrapped
+		// line would redraw on its continuation row, adding rows instead
+		// of spinning in place.
+		const canAnimate =
+			color &&
+			step.title.length + 4 <=
+				(process.stdout.columns ?? Number.POSITIVE_INFINITY);
+		const openTitle = () => {
 			process.stdout.write(`  ${step.title}`);
 			titleOpen = true;
-			// Animate only when the spinning line fits the terminal: a
-			// wrapped line would redraw on its continuation row, adding
-			// rows instead of spinning in place.
-			const columns = process.stdout.columns ?? Number.POSITIVE_INFINITY;
-			if (color && step.title.length + 4 <= columns) {
+			if (canAnimate) {
 				spinner = startStepSpinner({
 					title: step.title,
 					write: (text) => process.stdout.write(text),
 				});
 			}
-		}
+		};
+		if (!ctx.quiet) openTitle();
+		// Returns true when a spinning line was closed — the passthrough
+		// wrapper then reopens it after the essential output, below what
+		// was printed.
 		const closeTitle = () => {
-			if (titleOpen) {
-				spinner?.stop();
-				// With a spinner the line ends in a frame glyph and this
-				// rewrite is shorter — erase to end of line so the glyph
-				// doesn't linger.
-				process.stdout.write(spinner ? `\r  ${step.title}\x1b[K\n` : "\n");
-				titleOpen = false;
-			}
+			if (!titleOpen) return false;
+			const hadSpinner = spinner !== null;
+			spinner?.stop();
+			spinner = null;
+			// With a spinner the line ends in a frame glyph and this rewrite
+			// is shorter — erase to end of line so the glyph doesn't linger.
+			process.stdout.write(hadSpinner ? `\r  ${step.title}\x1b[K\n` : "\n");
+			titleOpen = false;
+			return hadSpinner;
+		};
+		const aroundPassthrough = (emit: () => void) => {
+			const resume = closeTitle();
+			emit();
+			if (resume && stepActive) openTitle();
 		};
 		const reportStatus = (status: "success" | "error") => {
+			stepActive = false;
 			if (titleOpen) {
 				spinner?.stop();
 				const suffix = formatStepStatusSuffix(step.title, status, width, {
@@ -577,7 +590,7 @@ async function executePlan(
 		const buffered: BufferedLine[] = [];
 		try {
 			await STEP_EXECUTORS[step.id](
-				withBufferedOutput(ctx, buffered, closeTitle),
+				withBufferedOutput(ctx, buffered, aroundPassthrough),
 				run,
 			);
 			succeeded.add(step.id);

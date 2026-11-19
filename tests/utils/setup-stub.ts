@@ -245,6 +245,13 @@ Object.defineProperty(childProcess, "spawn", {
 			// a first-run install is part of start.
 			return fakeChild(1);
 		}
+		// Skills install through the GitHub CLI (`gh skill install …`).
+		if (basename(String(command)) === "gh") {
+			if (failStep === "install-skills") {
+				return fakeChild(1, { stderr: "stubbed gh failure\n" });
+			}
+			return fakeChild(0);
+		}
 		// Browser openers: open (macOS), xdg-open (Linux), cmd.exe /c start.
 		if (["open", "xdg-open", "cmd.exe"].includes(basename(String(command)))) {
 			return fakeChild(0);

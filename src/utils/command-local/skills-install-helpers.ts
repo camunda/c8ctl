@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, posix, win32 } from "node:path";
@@ -233,34 +233,56 @@ export interface SkillInstallRunResult {
 export type SkillInstallRunner = (
 	command: string,
 	args: string[],
-) => SkillInstallRunResult;
+) => Promise<SkillInstallRunResult>;
 
-function runCommand(command: string, args: string[]): SkillInstallRunResult {
-	const result = spawnSync(command, args, { encoding: "utf8" });
-	return {
-		status: result.status,
-		stdout: typeof result.stdout === "string" ? result.stdout : "",
-		stderr: typeof result.stderr === "string" ? result.stderr : "",
-		...(result.error ? { error: result.error } : {}),
-	};
+/**
+ * Async spawn, not spawnSync: a sync call would block the event loop
+ * for the whole download, freezing the setup step's spinner mid-run.
+ */
+function runCommand(
+	command: string,
+	args: string[],
+): Promise<SkillInstallRunResult> {
+	return new Promise((resolveRun) => {
+		const child = spawn(command, args);
+		let stdout = "";
+		let stderr = "";
+		child.stdout?.setEncoding("utf8");
+		child.stderr?.setEncoding("utf8");
+		child.stdout?.on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.stderr?.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		// ENOENT reports "error" and then "close" — settle once, on the
+		// first signal.
+		let settled = false;
+		const done = (result: SkillInstallRunResult) => {
+			if (settled) return;
+			settled = true;
+			resolveRun(result);
+		};
+		child.on("error", (error) => done({ status: null, stdout, stderr, error }));
+		child.on("close", (status) => done({ status, stdout, stderr }));
+	});
 }
 
-export function runSkillInstall(
+export async function runSkillInstall(
 	harness: string,
-	runner: SkillInstallRunner = runCommand,
-): void {
-	const listed = runner("gh", buildSkillListArgs(harness));
+): Promise<void> {
+	const listed = await runner("gh", buildSkillListArgs(harness));
 	requireSuccessfulSkillCommand(listed, "check for installed");
 	const installed = installedCamundaSkills(listed.stdout);
 	if (installed.length === 0) {
 		requireSuccessfulSkillCommand(
-			runner("gh", buildSkillInstallArgs(harness)),
+			await runner("gh", buildSkillInstallArgs(harness)),
 			"install",
 		);
 		return;
 	}
 
-	const availableResult = runner("gh", buildSkillDiscoveryArgs());
+	const availableResult = await runner("gh", buildSkillDiscoveryArgs());
 	requireSuccessfulSkillCommand(availableResult, "list available");
 	const available = availableCamundaSkills(availableResult.stdout);
 	const installedNames = new Set(installed.map(({ name }) => name));
@@ -274,13 +296,13 @@ export function runSkillInstall(
 	}
 	for (const [directory, skills] of byDirectory) {
 		requireSuccessfulSkillCommand(
-			runner("gh", buildSkillUpdateArgs(skills, directory)),
+			await runner("gh", buildSkillUpdateArgs(skills, directory)),
 			"update",
 		);
 	}
 	for (const skill of missing) {
 		requireSuccessfulSkillCommand(
-			runner("gh", buildSkillInstallSpecificArgs({ harness, skill })),
+			await runner("gh", buildSkillInstallSpecificArgs({ harness, skill })),
 			"install",
 		);
 	}
