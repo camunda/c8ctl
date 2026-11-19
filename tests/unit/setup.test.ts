@@ -172,7 +172,8 @@ function runInteractive(
  * An offline execution sandbox for `c8ctl setup --yes`:
  * - a temp working directory the blueprint project is scaffolded into
  * - a fake `camunda-modeler` executable (the Linux installed-lookup;
- *   macOS/Windows detection is patched in the stub itself)
+ *   macOS/Windows detection is patched in the stub, which the `c8ctl
+ *   modeler install` child loads as well)
  * - a fixture HOME with a `.claude` directory, so harness detection
  *   finds Claude Code and every harness config root (HOME, USERPROFILE,
  *   APPDATA, XDG_CONFIG_HOME) points into the fixture — a harness found

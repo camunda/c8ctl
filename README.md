@@ -140,7 +140,6 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `open` - Open Camunda web application in browser
 - `add` - Add a profile
 - `remove` (alias: `rm`) - Remove a profile
-- `skills` - Install Camunda AI coding skills
 - `load` - Load a c8ctl plugin
 - `unload` (alias: `rm`) - Unload a c8ctl plugin
 - `upgrade` - Upgrade a plugin

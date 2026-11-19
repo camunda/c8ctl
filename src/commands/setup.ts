@@ -69,7 +69,6 @@ import {
 	removeSetupBlueprint,
 	renderNextSteps,
 	renderWelcomeBanner,
-	runSkillInstall,
 	SETUP_BLUEPRINTS,
 	SETUP_COMPONENTS,
 	SETUP_STEPS,
@@ -206,10 +205,19 @@ function spawnC8ctl(
 ): Promise<void> {
 	const label = `c8ctl ${argv.join(" ")}`;
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(process.execPath, [CLI_ENTRY, ...argv], {
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, C8CTL_OUTPUT_MODE: "text", ...extraEnv },
-		});
+		// process.execArgv carries the parent's `--experimental-strip-types`
+		// and any `--import` preloads into the child, so a test preload (the
+		// offline setup stub) governs the child's fetch/fs/child-process
+		// seams the same way it governs this process. In production
+		// execArgv is empty and the child runs plain.
+		const child = spawn(
+			process.execPath,
+			[...process.execArgv, CLI_ENTRY, ...argv],
+			{
+				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, C8CTL_OUTPUT_MODE: "text", ...extraEnv },
+			},
+		);
 		const out = createLineForwarder({
 			write: (line) =>
 				ctx.logger.info(line, {
@@ -390,7 +398,9 @@ async function runSkillsInstall(ctx: CommandContext): Promise<void> {
 			`Checking Camunda skills (${CAMUNDA_SKILLS_REPOSITORY}) for ${harness}…`,
 			{ essential: true },
 		);
-		await runSkillInstall(harness);
+		// The skills plugin owns the install; one child per harness keeps
+		// per-harness failure granularity.
+		await spawnC8ctl(ctx, ["skills", "install", "--harness", harness]);
 	}
 }
 

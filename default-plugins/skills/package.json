@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-skills",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "c8ctl default plugin to install Camunda AI coding skills",
+  "keywords": ["c8ctl", "c8ctl-plugin", "skills", "camunda"],
+  "main": "c8ctl-plugin.js"
+}

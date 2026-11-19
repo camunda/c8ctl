@@ -13,15 +13,20 @@
  *
  * 2. Desktop Modeler detection — the installer skips when Modeler is
  *    already installed; the fs patches make it look installed on every
- *    OS, so tests never download or install a real application.
+ *    OS, so tests never download or install a real application. The
+ *    `c8ctl modeler install` child process setup spawns loads this stub
+ *    too (setup forwards its `--import` preloads), so the patch applies
+ *    there as well.
  *    (Builtin fs is patched before the CLI's imports load, and
  *    syncBuiltinESMExports() publishes the patches to named ESM imports.)
  *
  * Child processes: the `c8ctl cluster start` and `stop` self-invocations
  * are faked (a successful `start` flips the health endpoint to UP), `gh`
- * skill installs report success, and browser openers exit quietly.
- * `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process exit
- * 1 so failure handling is exercised. Everything else passes through.
+ * skill installs report success, and browser openers exit quietly. The
+ * modeler and skills children run their real plugin code under this
+ * stub. `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process
+ * exit 1 so failure handling is exercised. Everything else passes
+ * through.
  *
  * Env:
  *   C8CTL_SETUP_STUB_CLUSTER=up   — the health endpoint reports UP from
@@ -45,6 +50,16 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { basename, join } from "node:path";
 import { PassThrough } from "node:stream";
+
+// ── Desktop Modeler looks installed ────────────────────────────────
+// macOS and Windows look the app up at fixed paths. The Linux lookup
+// searches PATH for a `camunda-modeler` executable instead — the tests
+// put a real fixture file on PATH for that.
+
+const originalExistsSync = fs.existsSync;
+fs.existsSync = (path: fs.PathLike): boolean =>
+	/Camunda Modeler\.app$|Camunda Modeler\.exe$/.test(String(path)) ||
+	originalExistsSync(path);
 
 syncBuiltinESMExports();
 
@@ -330,14 +345,6 @@ Object.defineProperty(childProcess, "spawn", {
 				});
 			}
 			return fakeChild(1);
-		}
-		// The modeler install runs as a `c8ctl modeler install` child;
-		// report the already-installed skip so no real download happens.
-		if (argv.includes("modeler")) {
-			return fakeChild(0, {
-				stdout:
-					"Camunda Modeler is already installed at /stubbed/Camunda Modeler.app; skipping installation.\n",
-			});
 		}
 		// Skill discovery, installation, and updates use the GitHub CLI.
 		if (basename(String(command)) === "gh") {

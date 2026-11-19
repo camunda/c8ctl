@@ -120,7 +120,6 @@ import {
 	whichOutputCommand,
 } from "./commands/session.ts";
 import { setupCommand } from "./commands/setup.ts";
-import { installSkillsCommand } from "./commands/skills.ts";
 import { getTopologyCommand } from "./commands/topology.ts";
 import {
 	completeUserTaskCommand,
@@ -157,9 +156,6 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["downgrade:plugin", downgradePluginCommand],
 	["doctor:plugin", doctorPluginCommand],
 	["init:plugin", initPluginCommand],
-
-	// ── Agent skills ────────────────────────────────────────────────────
-	["skills:install", installSkillsCommand],
 
 	// ── Process instances ──────────────────────────────────────────────
 	["list:process-instance", listProcessInstancesCommand],

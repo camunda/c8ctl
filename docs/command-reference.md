@@ -1154,33 +1154,6 @@ Remove a profile (alias: rm)
 
 ---
 
-### `skills`
-
-Install Camunda skills into AI coding harnesses
-
-**Resources:** install
-
-**Resource-specific flags:**
-
-<details>
-<summary><code>install</code></summary>
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--harness` | string |  | GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted) |
-
-</details>
-
-**Examples:**
-
-```bash
-c8ctl skills install                                        # Install or update skills for detected harnesses
-c8ctl skills install --harness claude-code                  # Install or update skills for Claude Code
-c8ctl skills install --harness github-copilot               # Install or update skills for GitHub Copilot CLI
-```
-
----
-
 ### `load`
 
 Load a c8ctl plugin (npm registry or URL)

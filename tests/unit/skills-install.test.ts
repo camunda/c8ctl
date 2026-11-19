@@ -321,8 +321,11 @@ test("skills help documents the install action and harness selector", async () =
 	const result = await c8("help", "skills");
 
 	assert.equal(result.status, 0, result.stderr);
+	// skills is a default plugin: the help payload carries the plugin
+	// discriminator, and the install action is a plugin subcommand.
 	assert.match(result.stdout, /"verb":"skills"/);
-	assert.match(result.stdout, /"resource":"install"/);
+	assert.match(result.stdout, /"kind":"plugin"/);
+	assert.match(result.stdout, /"name":"install"/);
 	assert.match(result.stdout, /--harness/i);
 });
 
