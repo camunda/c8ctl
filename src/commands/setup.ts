@@ -536,7 +536,11 @@ async function executePlan(
 		if (!ctx.quiet) {
 			process.stdout.write(`  ${step.title}`);
 			titleOpen = true;
-			if (color) {
+			// Animate only when the spinning line fits the terminal: a
+			// wrapped line would redraw on its continuation row, adding
+			// rows instead of spinning in place.
+			const columns = process.stdout.columns ?? Number.POSITIVE_INFINITY;
+			if (color && step.title.length + 4 <= columns) {
 				spinner = startStepSpinner({
 					title: step.title,
 					write: (text) => process.stdout.write(text),
@@ -546,9 +550,10 @@ async function executePlan(
 		const closeTitle = () => {
 			if (titleOpen) {
 				spinner?.stop();
-				// With a spinner the line ends in a frame glyph — rewrite it
-				// from the carriage return so the frame doesn't linger.
-				process.stdout.write(spinner ? `\r  ${step.title}\n` : "\n");
+				// With a spinner the line ends in a frame glyph and this
+				// rewrite is shorter — erase to end of line so the glyph
+				// doesn't linger.
+				process.stdout.write(spinner ? `\r  ${step.title}\x1b[K\n` : "\n");
 				titleOpen = false;
 			}
 		};
