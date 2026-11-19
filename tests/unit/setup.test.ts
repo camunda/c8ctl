@@ -654,7 +654,7 @@ describe("c8ctl setup", () => {
 				// The skills step prints one essential line per harness, then
 				// downloads; the spinning title reopens below the printed
 				// line and the step still completes on its own line.
-				const messageAt = result.stdout.indexOf("Installing Camunda skills");
+				const messageAt = result.stdout.indexOf("Checking Camunda skills");
 				assert.ok(messageAt !== -1, "skills install message missing");
 				const reopened = result.stdout.indexOf(
 					"\r  Install AI assistant skills ⠋",

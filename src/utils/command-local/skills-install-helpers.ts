@@ -270,6 +270,7 @@ function runCommand(
 
 export async function runSkillInstall(
 	harness: string,
+	runner: SkillInstallRunner = runCommand,
 ): Promise<void> {
 	const listed = await runner("gh", buildSkillListArgs(harness));
 	requireSuccessfulSkillCommand(listed, "check for installed");

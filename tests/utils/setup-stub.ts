@@ -214,6 +214,71 @@ function fakeChild(
 	return child;
 }
 
+/**
+ * The fake GitHub CLI for skill discovery, installation and updates.
+ * Shared by the spawn and spawnSync patches: listing reports the skills
+ * the marker file knows, installing writes the marker, and
+ * C8CTL_SETUP_STUB_FAIL=install-skills fails a real install.
+ */
+function fakeGh(commandArgs: string[]): {
+	status: number;
+	stdout: string;
+	stderr: string;
+} {
+	const skillRoot = join(process.env.HOME ?? "", ".claude", "skills");
+	const skillMarker = join(skillRoot, ".c8ctl-installed");
+	const installedSkillNames = fs.existsSync(skillMarker)
+		? fs
+				.readFileSync(skillMarker, "utf8")
+				.split(/\r?\n/)
+				.filter((name) => name.length > 0)
+		: [];
+	const capture = process.env.C8CTL_SETUP_STUB_GH_CAPTURE;
+	if (capture) {
+		fs.appendFileSync(capture, `${JSON.stringify(commandArgs)}\n`);
+	}
+	if (commandArgs[1] === "list") {
+		return {
+			status: 0,
+			stdout: JSON.stringify(
+				installedSkillNames.map((skillName) => ({
+					skillName,
+					sourceURL: "https://github.com/camunda/skills",
+					path: join(skillRoot, skillName),
+				})),
+			),
+			stderr: "",
+		};
+	}
+	if (commandArgs[1] === "install" && commandArgs.length === 3) {
+		return {
+			status: 0,
+			stdout: CAMUNDA_SKILL_NAMES.map(
+				(skillName) => `${skillName}\tCamunda skill`,
+			).join("\n"),
+			stderr: "",
+		};
+	}
+	if (
+		failStep === "install-skills" &&
+		commandArgs[1] === "install" &&
+		commandArgs.length > 3
+	) {
+		return { status: 1, stdout: "", stderr: "stubbed gh failure" };
+	}
+	if (commandArgs[1] === "install") {
+		fs.mkdirSync(skillRoot, { recursive: true });
+		const requestedSkills = commandArgs.includes("--all")
+			? CAMUNDA_SKILL_NAMES
+			: [commandArgs[3]].filter((skillName) => skillName !== undefined);
+		fs.writeFileSync(
+			skillMarker,
+			[...new Set([...installedSkillNames, ...requestedSkills])].join("\n"),
+		);
+	}
+	return { status: 0, stdout: "", stderr: "" };
+}
+
 // defineProperty replaces the functions without a static type check on
 // the stand-ins — no `as` assertions needed for the overloaded originals.
 const realSpawn = childProcess.spawn;
@@ -245,12 +310,10 @@ Object.defineProperty(childProcess, "spawn", {
 			// a first-run install is part of start.
 			return fakeChild(1);
 		}
-		// Skills install through the GitHub CLI (`gh skill install …`).
+		// Skill discovery, installation, and updates use the GitHub CLI.
 		if (basename(String(command)) === "gh") {
-			if (failStep === "install-skills") {
-				return fakeChild(1, { stderr: "stubbed gh failure\n" });
-			}
-			return fakeChild(0);
+			const { status, stdout, stderr } = fakeGh(argv.slice(1));
+			return fakeChild(status, { stdout, stderr });
 		}
 		// Browser openers: open (macOS), xdg-open (Linux), cmd.exe /c start.
 		if (["open", "xdg-open", "cmd.exe"].includes(basename(String(command)))) {
@@ -266,58 +329,7 @@ Object.defineProperty(childProcess, "spawnSync", {
 		// Skill discovery, installation, and updates use the GitHub CLI.
 		if (basename(String(args[0])) === "gh") {
 			const commandArgs = Array.isArray(args[1]) ? args[1].map(String) : [];
-			const skillRoot = join(process.env.HOME ?? "", ".claude", "skills");
-			const skillMarker = join(skillRoot, ".c8ctl-installed");
-			const installedSkillNames = fs.existsSync(skillMarker)
-				? fs
-						.readFileSync(skillMarker, "utf8")
-						.split(/\r?\n/)
-						.filter((name) => name.length > 0)
-				: [];
-			const capture = process.env.C8CTL_SETUP_STUB_GH_CAPTURE;
-			if (capture) {
-				fs.appendFileSync(capture, `${JSON.stringify(commandArgs)}\n`);
-			}
-			if (commandArgs[1] === "list") {
-				return {
-					status: 0,
-					stdout: JSON.stringify(
-						installedSkillNames.map((skillName) => ({
-							skillName,
-							sourceURL: "https://github.com/camunda/skills",
-							path: join(skillRoot, skillName),
-						})),
-					),
-					stderr: "",
-				};
-			}
-			if (commandArgs[1] === "install" && commandArgs.length === 3) {
-				return {
-					status: 0,
-					stdout: CAMUNDA_SKILL_NAMES.map(
-						(skillName) => `${skillName}\tCamunda skill`,
-					).join("\n"),
-					stderr: "",
-				};
-			}
-			if (
-				failStep === "install-skills" &&
-				commandArgs[1] === "install" &&
-				commandArgs.length > 3
-			) {
-				return { status: 1, stdout: "", stderr: "stubbed gh failure" };
-			}
-			if (commandArgs[1] === "install") {
-				fs.mkdirSync(skillRoot, { recursive: true });
-				const requestedSkills = commandArgs.includes("--all")
-					? CAMUNDA_SKILL_NAMES
-					: [commandArgs[3]].filter((skillName) => skillName !== undefined);
-				fs.writeFileSync(
-					skillMarker,
-					[...new Set([...installedSkillNames, ...requestedSkills])].join("\n"),
-				);
-			}
-			return { status: 0, stdout: "", stderr: "" };
+			return fakeGh(commandArgs);
 		}
 		return Reflect.apply(realSpawnSync, childProcess, args);
 	},
