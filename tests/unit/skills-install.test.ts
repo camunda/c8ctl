@@ -366,3 +366,19 @@ test("skills install dry-run reports the source and selected harness", async () 
 		harnesses: ["claude-code"],
 	});
 });
+
+// Plugin flag parsing has no rejectEmpty enforcement, so the handler
+// itself must refuse an empty or valueless --harness — a silent fallback
+// to auto-detection would install into every detected harness on a typo.
+for (const invocation of [
+	["skills", "install", "--harness="],
+	["skills", "install", "--harness", ""],
+	["skills", "install", "--harness"],
+]) {
+	test(`skills install rejects an empty harness (${invocation.slice(2).join(" ")})`, async () => {
+		const result = await c8(...invocation);
+
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /Invalid --harness: value must not be empty/);
+	});
+}

@@ -514,6 +514,53 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("the deploy child keeps a customized local profile but pins its tenant", async () => {
+		// A saved local profile with custom credentials and a remote tenant:
+		// the deployment must keep the connection settings (the in-process
+		// process start reads the same profile) while the tenant stays
+		// pinned to the fresh cluster's <default>.
+		const stub = stubbedExecution();
+		const deployCapture = join(stub.cwd, "deploy-capture.json");
+		stub.options.env.C8CTL_SETUP_STUB_DEPLOY_CAPTURE = deployCapture;
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-profile-"));
+		writeFileSync(
+			join(dataDir, "profiles.json"),
+			JSON.stringify({
+				profiles: [
+					{
+						name: "local",
+						baseUrl: "http://localhost:8080/v2",
+						username: "marker-user",
+						password: "marker-pass",
+						defaultTenantId: "remote-tenant",
+					},
+				],
+			}),
+		);
+		stub.options.env.C8CTL_DATA_DIR = dataDir;
+		try {
+			const result = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+			const captured: unknown = JSON.parse(
+				readFileSync(deployCapture, "utf-8"),
+			);
+			assert.ok(isRecord(captured), "deploy capture is not an object");
+			assert.strictEqual(
+				captured.authorization,
+				`Basic ${Buffer.from("marker-user:marker-pass").toString("base64")}`,
+				"the deploy child did not use the saved local profile",
+			);
+			assert.ok(
+				typeof captured.body === "string" &&
+					captured.body.includes('"tenantId"\r\n\r\n<default>'),
+				"the deploy child's tenant was not pinned to <default>",
+			);
+		} finally {
+			stub.cleanup();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("a cluster warning on stderr shows even though the step succeeds", async () => {
 		const stub = stubbedExecution();
 		stub.options.env.C8CTL_SETUP_STUB_CLUSTER_WARN = "1";

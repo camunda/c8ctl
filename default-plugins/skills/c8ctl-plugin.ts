@@ -87,11 +87,23 @@ async function skillsHandler(
 	}
 
 	try {
-		const harnessFlag =
-			typeof flags?.harness === "string" ? flags.harness : undefined;
-		const requestedHarness = harnessFlag
-			? normalizeSkillHarness(harnessFlag)
-			: undefined;
+		// Plugin flag dispatch does not enforce `rejectEmpty`: a valueless
+		// --harness arrives as a non-string and --harness= as an empty
+		// string. Both are validation errors, as for the built-in command —
+		// never a silent fallback to auto-detection.
+		const rawHarness = flags?.harness;
+		if (
+			rawHarness !== undefined &&
+			(typeof rawHarness !== "string" || rawHarness === "")
+		) {
+			logger.error("Invalid --harness: value must not be empty");
+			process.exitCode = 1;
+			return;
+		}
+		const requestedHarness =
+			typeof rawHarness === "string"
+				? normalizeSkillHarness(rawHarness)
+				: undefined;
 		const harnesses = requestedHarness
 			? [requestedHarness]
 			: detectInstalledHarnesses();

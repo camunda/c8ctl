@@ -43,6 +43,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -50,7 +51,11 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { DEFAULT_PROFILE, renderCommandFailure } from "../../src/core/index.ts";
+import {
+	DEFAULT_PROFILE,
+	isRecord,
+	renderCommandFailure,
+} from "../../src/core/index.ts";
 import type {
 	PluginCommands,
 	PluginCtx,
@@ -375,12 +380,12 @@ async function runBlueprintDeploy(
 	// Both mutations target the cluster the health check just probed: the
 	// built-in local profile and its default tenant. The deploy runs as a
 	// `c8ctl deploy` child process — deploy-helpers is command-private, so
-	// the plugin orchestrates the command that owns it. The child pins the
-	// tenant through CAMUNDA_DEFAULT_TENANT_ID and runs with a throwaway
-	// data dir so a session's preselected tenant cannot redirect the
-	// first-run deployment; --profile local likewise wins over CAMUNDA_*
-	// env vars.
+	// the plugin orchestrates the command that owns it. The child runs with
+	// a throwaway data dir so a session's preselected tenant cannot
+	// redirect the first-run deployment; --profile local likewise wins over
+	// CAMUNDA_* env vars.
 	const deployDataDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-deploy-"));
+	stageLocalProfile(deployDataDir);
 	try {
 		await spawnC8ctl(
 			ctx,
@@ -420,6 +425,37 @@ async function runBlueprintDeploy(
 		});
 	logger.info(`Process instance created: ${created.processInstanceKey}`);
 	run.instanceStarted = true;
+}
+
+/**
+ * Stage the saved `local` profile into the deploy child's isolated data
+ * dir. A throwaway data dir would otherwise reduce the child to the
+ * localhost/demo defaults while the in-process process start below uses
+ * the saved profile — with a customized local profile (URL, credentials,
+ * headers) deployment and process creation would target different
+ * clusters. The tenant is pinned to `<default>` because tenant resolution
+ * prefers a profile's defaultTenantId over the CAMUNDA_DEFAULT_TENANT_ID
+ * env pin. Without a saved profile the child synthesizes the same
+ * localhost default the in-process start would use.
+ */
+function stageLocalProfile(deployDataDir: string): void {
+	const profilesPath = join(c8ctl.getUserDataDir(), "profiles.json");
+	if (!existsSync(profilesPath)) return;
+	const parsed: unknown = JSON.parse(readFileSync(profilesPath, "utf-8"));
+	const profiles =
+		isRecord(parsed) && Array.isArray(parsed.profiles) ? parsed.profiles : [];
+	const local = profiles
+		.filter(isRecord)
+		.find((profile) => profile.name === DEFAULT_PROFILE);
+	if (!local) return;
+	// Credentials may live in this file — keep it owner-only.
+	writeFileSync(
+		join(deployDataDir, "profiles.json"),
+		JSON.stringify({
+			profiles: [{ ...local, defaultTenantId: LOCAL_TENANT_ID }],
+		}),
+		{ mode: 0o600 },
+	);
 }
 
 const NO_HARNESS_HINT =

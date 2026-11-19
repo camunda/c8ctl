@@ -35,6 +35,9 @@
  *                                   down.
  *   C8CTL_SETUP_STUB_CAPTURE=file — the process-instance creation request
  *                                   body is written to this file.
+ *   C8CTL_SETUP_STUB_DEPLOY_CAPTURE=file — the deployment request's
+ *                                   authorization header and body are
+ *                                   written to this file as JSON.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "stop-cluster",
  *                                   "install-skills", "list-skills").
@@ -414,6 +417,18 @@ globalThis.fetch = async (
 	// The Orchestration Cluster API of the built-in local profile, which
 	// setup's deploy step pins explicitly.
 	if (url === "http://localhost:8080/v2/deployments") {
+		// Capture the deployment request so tests can assert which profile
+		// credentials and tenant the deploy child used.
+		const deployCapture = process.env.C8CTL_SETUP_STUB_DEPLOY_CAPTURE;
+		if (deployCapture && input instanceof Request) {
+			fs.writeFileSync(
+				deployCapture,
+				JSON.stringify({
+					authorization: input.headers.get("authorization"),
+					body: await input.text(),
+				}),
+			);
+		}
 		if (failStep === "deploy-blueprint") {
 			return json(
 				{
