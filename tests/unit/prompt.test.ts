@@ -74,6 +74,58 @@ function type(io: { input: PassThrough }, ...keys: string[]): void {
 	});
 }
 
+/**
+ * Replay prompt output onto a virtual screen, emulating line wrap at
+ * `cols`. Lets tests assert what the terminal actually shows after the
+ * last repaint — in particular that no stale fragments survive when a
+ * render is shorter than the one before it.
+ */
+function renderScreen(
+	text: string,
+	{ cols = 80, rows = 100 }: { cols?: number; rows?: number } = {},
+): string[] {
+	const screen: string[] = Array.from({ length: rows }, () => "");
+	let line = 0;
+	let col = 0;
+	// ANSI introducer as a string: biome's noControlCharactersInRegex
+	// keeps control characters out of regex literals.
+	const CSI = "\x1b\\[";
+	// Cursor-up, clear-line, cursor-to-col-1, cursor visibility, styles.
+	const tokens = text.split(
+		new RegExp(`(${CSI}(?:\\d+A|2K|1G|\\?25[hl]|[0-9;]*m))`),
+	);
+	for (const token of tokens) {
+		const up = new RegExp(`^${CSI}(\\d+)A$`).exec(token);
+		if (up) {
+			line = Math.max(0, line - Number(up[1]));
+			continue;
+		}
+		if (token === "\x1b[2K") {
+			screen[line] = "";
+			continue;
+		}
+		if (token === "\x1b[1G") {
+			col = 0;
+			continue;
+		}
+		if (token === "" || token.startsWith("\x1b[")) continue;
+		for (const ch of token) {
+			if (ch === "\n") {
+				line = Math.min(rows - 1, line + 1);
+				col = 0;
+				continue;
+			}
+			screen[line] += ch;
+			col += 1;
+			if (col >= cols) {
+				line = Math.min(rows - 1, line + 1);
+				col = 0;
+			}
+		}
+	}
+	return screen;
+}
+
 const ENV_KEYS = ["C8CTL_INTERACTIVE", "C8CTL_NON_INTERACTIVE", "CI"] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -585,6 +637,35 @@ describe("multiSelect()", () => {
 				stripVTControlCharacters(io.text()),
 				/enable it to unlock this option/,
 			);
+		});
+
+		test("a repaint that shrinks the menu erases stale wrapped lines", async () => {
+			const io = fakeTTY();
+			// Cluster off blocks the blueprint; moving onto its row shows
+			// the status line, which wraps past 80 columns; moving off
+			// collapses it to a blank line. The wrapped remainder of the
+			// old status line must not survive below the menu.
+			type(io, " ", DOWN, UP, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Local cluster", value: "cluster", checked: true },
+					{
+						label: "Starter blueprint",
+						value: "blueprint",
+						requires: [
+							{ value: "cluster", reason: "requires the local cluster" },
+						],
+					},
+				],
+				io,
+			});
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.deepStrictEqual(visible, [
+				"? Pick",
+				"  ↑/↓ move · space toggle · a all · enter confirm · esc cancel",
+				"  (none selected)",
+			]);
 		});
 
 		test("a blocked option cannot be toggled until its requirement is back", async () => {

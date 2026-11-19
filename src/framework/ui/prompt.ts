@@ -704,7 +704,18 @@ export async function multiSelect<T>(
 			out.write(
 				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}\n`,
 			);
-			lastRenderedLines = physicalLineCount();
+			// A repaint can be shorter than the previous render (a reason
+			// or the footer collapsed to fewer wrapped lines). Erase the
+			// leftover lines — otherwise their stale text survives below
+			// the menu, out of reach of the final clearMenu().
+			const painted = physicalLineCount();
+			for (let i = painted; i < lastRenderedLines; i++) {
+				out.write(`${CLEAR_LINE}\n`);
+			}
+			if (painted < lastRenderedLines) {
+				out.write(CURSOR_UP(lastRenderedLines - painted));
+			}
+			lastRenderedLines = painted;
 		}
 
 		/** Re-evaluate dependencies after a toggle, then repaint. */
