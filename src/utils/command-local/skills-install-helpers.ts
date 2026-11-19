@@ -129,6 +129,7 @@ function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
 function availableCamundaSkills(stdout: string): string[] {
 	const names = stdout
 		.split(/\r?\n/)
+		.filter((line) => line.includes("\t"))
 		.map((line) => line.split("\t", 1)[0].trim())
 		.filter((name) => name.length > 0);
 	if (names.length === 0) {

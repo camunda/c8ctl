@@ -170,7 +170,7 @@ test("updates only installed Camunda skills through their existing directories",
 	]);
 });
 
-test("installs missing Camunda skills when some are already installed", () => {
+test("installs missing Camunda skills despite multiline catalog descriptions", () => {
 	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
 	const availableSkills = [
 		"camunda-ai-agents",
@@ -203,9 +203,14 @@ test("installs missing Camunda skills when some are already installed", () => {
 		if (args[1] === "install" && args.length === 3) {
 			return {
 				status: 0,
-				stdout: availableSkills
-					.map((skill) => `${skill}\tCamunda skill`)
-					.join("\n"),
+				stdout: [
+					"camunda-ai-agents\tCamunda 8 AI Agent sub-processes",
+					"Also covers v1/v2 element-template selection and upgrading v1 elements to v2.",
+					"camunda-bpmn\tReliable multi-step workflows",
+					"Designs, edits, and lints executable BPMN processes for Camunda 8.",
+					"camunda-c8ctl\tRun or configure c8ctl",
+					"Installs and configures c8ctl, the Camunda 8 CLI.",
+				].join("\n"),
 				stderr: "",
 			};
 		}
