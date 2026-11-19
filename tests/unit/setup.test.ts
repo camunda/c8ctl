@@ -11,9 +11,11 @@ import assert from "node:assert";
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
+	closeSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	rmSync,
@@ -237,51 +239,71 @@ function stubbedExecution({
 }
 
 /**
- * Spawn `c8ctl` with both streams captured into one arrival-ordered
- * string — the only way to assert output ordering across stdout and
- * stderr, as a shared terminal would interleave them. Concatenating
- * separately captured streams always places stderr last, even when it
- * was emitted first.
+ * Spawn `c8ctl` with both streams sharing one file descriptor so their
+ * write order is preserved in the captured output.
  */
 function runWithOrderedOutput(
 	options: { cwd: string; nodeArgs: string[]; env: Record<string, string> },
 	...args: string[]
 ): Promise<{ status: number | null; output: string }> {
 	const forwardedDataDir = process.env.C8CTL_DATA_DIR;
-	const ownDataDir = forwardedDataDir
-		? undefined
-		: mkdtempSync(join(tmpdir(), "c8ctl-setup-test-"));
 	return new Promise((resolveRun, rejectRun) => {
-		const child = spawn(
-			process.execPath,
-			["--experimental-strip-types", ...options.nodeArgs, CLI, ...args],
-			{
-				stdio: ["ignore", "pipe", "pipe"],
-				cwd: options.cwd,
-				env: {
-					PATH: process.env.PATH,
-					HOME: "/tmp/c8ctl-test-nonexistent-home",
-					C8CTL_DATA_DIR: forwardedDataDir ?? ownDataDir,
-					...options.env,
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-test-"));
+		const outputPath = join(tempDir, "ordered-output.txt");
+		let outputFd: number;
+		try {
+			outputFd = openSync(outputPath, "w");
+		} catch (error) {
+			rmSync(tempDir, { recursive: true, force: true });
+			rejectRun(error);
+			return;
+		}
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(
+				process.execPath,
+				["--experimental-strip-types", ...options.nodeArgs, CLI, ...args],
+				{
+					stdio: ["ignore", outputFd, outputFd],
+					cwd: options.cwd,
+					env: {
+						PATH: process.env.PATH,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: forwardedDataDir ?? tempDir,
+						...options.env,
+					},
 				},
-			},
-		);
-		let output = "";
-		child.stdout.setEncoding("utf-8");
-		child.stderr.setEncoding("utf-8");
-		child.stdout.on("data", (chunk: string) => {
-			output += chunk;
-		});
-		child.stderr.on("data", (chunk: string) => {
-			output += chunk;
-		});
+			);
+		} catch (error) {
+			try {
+				closeSync(outputFd);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+			rejectRun(error);
+			return;
+		}
+		let spawnError: Error | undefined;
 		// Safety net only: a stuck child must not hang the test runner.
 		const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
-		child.on("error", rejectRun);
-		child.on("close", (status) => {
+		child.once("error", (error) => {
+			spawnError = error;
+		});
+		child.once("close", (status) => {
 			clearTimeout(timer);
-			if (ownDataDir) rmSync(ownDataDir, { recursive: true, force: true });
-			resolveRun({ status, output });
+			try {
+				closeSync(outputFd);
+				const output = readFileSync(outputPath, "utf-8");
+				if (spawnError) {
+					rejectRun(spawnError);
+				} else {
+					resolveRun({ status, output });
+				}
+			} catch (error) {
+				rejectRun(error);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
 		});
 	});
 }
