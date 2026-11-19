@@ -61,7 +61,7 @@ export interface McpConfigPlan {
 	changes: McpChange[];
 }
 
-function selectHarnesses(requested: readonly string[]): McpHarness[] {
+function buildHarnesses(): McpHarness[] {
 	const home =
 		(process.platform === "win32"
 			? process.env.USERPROFILE
@@ -116,6 +116,32 @@ function selectHarnesses(requested: readonly string[]): McpHarness[] {
 			directories: [join(appData, "Claude")],
 		});
 	}
+	return harnesses;
+}
+
+/**
+ * The MCP harnesses detectable on this machine, by the same rules
+ * `planMcpConfigs` uses when no harness is named: config file, config
+ * directory, or executable on PATH. Callers that treat "no harness" as
+ * a soft skip (the setup wizard) probe with this before invoking the
+ * install, so an absent harness never becomes a command failure.
+ */
+export function detectMcpHarnesses(): McpHarness[] {
+	return buildHarnesses().filter(
+		(harness) =>
+			existsSync(harness.path) ||
+			harness.directories.some((directory) => existsSync(directory)) ||
+			(harness.executable !== undefined &&
+				executableIsOnPath({
+					name: harness.executable,
+					env: process.env,
+					platform: process.platform,
+				})),
+	);
+}
+
+function selectHarnesses(requested: readonly string[]): McpHarness[] {
+	const harnesses = buildHarnesses();
 	const aliases: Readonly<Record<string, string>> = {
 		claude: "claude-code",
 		copilot: "github-copilot",
@@ -138,17 +164,7 @@ function selectHarnesses(requested: readonly string[]): McpHarness[] {
 			return harness;
 		});
 	}
-	const detected = harnesses.filter(
-		(harness) =>
-			existsSync(harness.path) ||
-			harness.directories.some((directory) => existsSync(directory)) ||
-			(harness.executable &&
-				executableIsOnPath({
-					name: harness.executable,
-					env: process.env,
-					platform: process.platform,
-				})),
-	);
+	const detected = detectMcpHarnesses();
 	if (detected.length === 0) {
 		throw new Error(
 			`No supported MCP harness was detected. Specify a harness: ${harnesses.map((harness) => harness.id).join(", ")}.`,
