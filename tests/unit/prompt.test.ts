@@ -87,6 +87,10 @@ function renderScreen(
 	const screen: string[] = Array.from({ length: rows }, () => "");
 	let line = 0;
 	let col = 0;
+	// Delayed autowrap: a character written into the last column leaves
+	// the cursor on that cell; the wrap happens when the next printable
+	// character arrives. erase-to-EOL there erases the last character.
+	let pendingWrap = false;
 	// ANSI introducer as a string: biome's noControlCharactersInRegex
 	// keeps control characters out of regex literals.
 	const CSI = "\x1b\\[";
@@ -99,26 +103,37 @@ function renderScreen(
 		const up = new RegExp(`^${CSI}(\\d+)A$`).exec(token);
 		if (up) {
 			line = Math.max(0, line - Number(up[1]));
+			pendingWrap = false;
 			continue;
 		}
 		if (token === "\x1b[2K") {
 			screen[line] = "";
+			pendingWrap = false;
 			continue;
 		}
 		if (token === "\x1b[0K") {
-			screen[line] = screen[line].slice(0, col);
+			screen[line] = screen[line].slice(0, pendingWrap ? col - 1 : col);
 			continue;
 		}
 		if (token === "\x1b[1G") {
 			col = 0;
+			pendingWrap = false;
 			continue;
 		}
+		// SGR styles and cursor-visibility escapes neither print nor
+		// move the cursor — a pending wrap survives them.
 		if (token === "" || token.startsWith("\x1b[")) continue;
 		for (const ch of token) {
 			if (ch === "\n") {
 				line = Math.min(rows - 1, line + 1);
 				col = 0;
+				pendingWrap = false;
 				continue;
+			}
+			if (pendingWrap) {
+				line = Math.min(rows - 1, line + 1);
+				col = 0;
+				pendingWrap = false;
 			}
 			// Terminals overwrite at the cursor column, they don't append.
 			const existing = screen[line];
@@ -127,10 +142,7 @@ function renderScreen(
 					? existing.slice(0, col) + ch + existing.slice(col + 1)
 					: existing + " ".repeat(col - existing.length) + ch;
 			col += 1;
-			if (col >= cols) {
-				line = Math.min(rows - 1, line + 1);
-				col = 0;
-			}
+			if (col === cols) pendingWrap = true;
 		}
 	}
 	return screen;
@@ -696,6 +708,30 @@ describe("multiSelect()", () => {
 			// The blueprint stays off: re-enabling the requirement does
 			// not bring back a hidden checkmark.
 			assert.deepStrictEqual(result.values, ["cluster"]);
+		});
+
+		test("an exact-width row keeps its final character (delayed autowrap)", async () => {
+			const io = fakeTTY();
+			// 8 (pointer + checkbox) + 72 = exactly 80 columns. Under
+			// delayed autowrap the cursor sits on the final character, and
+			// a trailing erase-to-EOL would delete it. The first render
+			// happens synchronously, so the screen can be checked before
+			// any keypress.
+			const exactLabel = "A".repeat(72);
+			const done = multiSelect({
+				message: "Pick",
+				options: [{ label: exactLabel, value: "a", checked: true }],
+				io,
+			});
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.ok(
+				visible.some((l) => l.includes(exactLabel)),
+				`exact-width row lost its final character: ${JSON.stringify(visible)}`,
+			);
+			setImmediate(() => io.input.write(ENTER));
+			const result = await done;
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a"]);
 		});
 
 		test("a repaint that shrinks the menu erases stale wrapped lines", async () => {

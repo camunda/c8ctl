@@ -670,6 +670,17 @@ export async function multiSelect<T>(
 		// Cursor rewinds must traverse the *previous* render's line count.
 		let lastRenderedLines = 0;
 
+		/**
+		 * Erase the stale tail of a wrapped row whose new content is
+		 * shorter than the previous render's — but only when the
+		 * content does not exactly fill its last physical line: under
+		 * delayed autowrap the cursor then sits on the final character,
+		 * and erase-to-EOL would delete it. An exactly-full line was
+		 * fully overwritten, so no stale tail can remain.
+		 */
+		const eraseTail = (visibleLength: number): string =>
+			visibleLength % cols === 0 ? "" : CLEAR_TO_EOL;
+
 		function render(firstRender: boolean) {
 			if (!firstRender) {
 				out.write(CURSOR_UP(lastRenderedLines));
@@ -677,7 +688,7 @@ export async function multiSelect<T>(
 			for (const row of rows) {
 				if (row.kind === "header") {
 					out.write(
-						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${BOLD}${row.label}${RESET}${CLEAR_TO_EOL}\n`,
+						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${BOLD}${row.label}${RESET}${eraseTail(2 + row.label.length)}\n`,
 					);
 					continue;
 				}
@@ -699,17 +710,13 @@ export async function multiSelect<T>(
 				else if (highlighted) label = `${BOLD}${opt.label}${RESET}`;
 				const desc = opt.description ? ` ${DIM}${opt.description}${RESET}` : "";
 				const why = reason !== undefined ? ` ${YELLOW}⚠ ${reason}${RESET}` : "";
-				// CLEAR_TO_EOL after the content: a row that wraps to the
-				// same number of physical lines as last time can still be
-				// shorter on its continuation line (a reason disappeared)
-				// — erase the stale tail.
 				out.write(
-					`${CLEAR_LINE}${CURSOR_TO_COL(1)}${indent}${pointer} ${box} ${label}${desc}${why}${CLEAR_TO_EOL}\n`,
+					`${CLEAR_LINE}${CURSOR_TO_COL(1)}${indent}${pointer} ${box} ${label}${desc}${why}${eraseTail(rowVisibleLength(row))}\n`,
 				);
 			}
 			const footer = footerText();
 			out.write(
-				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${CLEAR_TO_EOL}\n`,
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${eraseTail(footerVisibleLength())}\n`,
 			);
 			// A repaint can be shorter than the previous render (a reason
 			// or the footer collapsed to fewer wrapped lines). Erase the
