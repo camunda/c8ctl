@@ -19,6 +19,10 @@ const DIM = `${ESC}2m`;
 
 /** Camunda Royal Blue (#4F39F6), the primary brand color. */
 const BRAND_BLUE = `${ESC}38;2;79;57;246m`;
+/** Royal Blue as a background, with white text: fixed colors on both
+ * sides, so the pair reads the same on dark and light terminals. */
+const BRAND_BLUE_BG = `${ESC}48;2;79;57;246m`;
+const WHITE = `${ESC}38;2;255;255;255m`;
 
 export interface BannerStyle {
 	readonly brand: string;
@@ -288,12 +292,15 @@ export interface StepSpinner {
 }
 
 /**
- * Animate a spinner on a step's open title line: every interval the
- * line is redrawn as `\r  ${title} ${frame}`, so the glyph spins in
- * place and the eventual status tag overwrites it. Terminal-only — the
- * caller starts one only when stdout is a TTY, so piped and --quiet
- * output never see a frame. The interval is unref'd: a stuck step can
- * never keep the process alive through the spinner alone.
+ * Animate a spinner on a step's open title line: the first frame is
+ * written immediately (the indicator appears with the step, not one
+ * interval later — and a caller can observe it without waiting), then
+ * every interval the line is redrawn as `\r  ${title} ${frame}`, so the
+ * glyph spins in place and the eventual status tag overwrites it.
+ * Terminal-only — the caller starts one only when stdout is a TTY, so
+ * piped and --quiet output never see a frame. The interval is unref'd:
+ * a stuck step can never keep the process alive through the spinner
+ * alone.
  */
 export function startStepSpinner({
 	title,
@@ -305,10 +312,12 @@ export function startStepSpinner({
 	intervalMs?: number;
 }): StepSpinner {
 	let frame = 0;
-	const timer = setInterval(() => {
+	const tick = () => {
 		write(`\r  ${title} ${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]}`);
 		frame += 1;
-	}, intervalMs);
+	};
+	tick();
+	const timer = setInterval(tick, intervalMs);
 	timer.unref();
 	let stopped = false;
 	return {
@@ -383,11 +392,13 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 /**
  * The boxed completion block after the step report: the takeaway of the
  * whole run, visually set apart from the status lines so it cannot
- * blend in. The box is as wide as its longest line; the heading carries
- * the brand color on a terminal. When the content would exceed the
- * terminal's width (`maxWidth`), the borders would wrap — the block
- * degrades to an unboxed, indented list that keeps long paths and URLs
- * intact.
+ * blend in. The box is as wide as its longest line. The heading reads
+ * white on a brand-blue band (boxed) or highlight (unboxed) — fixed
+ * colors on both sides, so it stays readable on dark and light terminal
+ * backgrounds alike; plain brand-blue text was near-invisible on dark
+ * themes. When the content would exceed the terminal's width
+ * (`maxWidth`), the borders would wrap — the block degrades to an
+ * unboxed, indented list that keeps long paths and URLs intact.
  */
 export function renderNextSteps(
 	lines: readonly string[],
@@ -395,6 +406,7 @@ export function renderNextSteps(
 ): string {
 	const s = bannerStyle({ color });
 	const heading = "What's next";
+	const headingStyle = color ? `${BRAND_BLUE_BG}${WHITE}${BOLD}` : "";
 	const width = Math.max(heading.length, ...lines.map((line) => line.length));
 	// `.length` counts UTF-16 code units, not terminal columns — non-ASCII
 	// content (CJK paths, emoji) would misalign the borders. Box only
@@ -407,7 +419,7 @@ export function renderNextSteps(
 	);
 	if (!printableAscii || (maxWidth !== undefined && width + 6 > maxWidth)) {
 		return [
-			`${s.brand}${s.bold}${heading}${s.reset}`,
+			color ? `${headingStyle}${heading}${s.reset}` : heading,
 			...lines.map((line) => `  ${line}`),
 		].join("\n");
 	}
@@ -415,9 +427,14 @@ export function renderNextSteps(
 	const bottom = `╰${"─".repeat(width + 4)}╯`;
 	const row = (text: string, visibleLength: number) =>
 		`│  ${text}${" ".repeat(width - visibleLength)}  │`;
+	// The heading row's whole inner width carries the band — only the
+	// borders stay in the terminal's default color.
+	const band = color
+		? `│${headingStyle}  ${heading}${" ".repeat(width - heading.length)}  ${s.reset}│`
+		: row(heading, heading.length);
 	return [
 		top,
-		row(`${s.brand}${s.bold}${heading}${s.reset}`, heading.length),
+		band,
 		row("", 0),
 		...lines.map((line) => row(line, line.length)),
 		bottom,

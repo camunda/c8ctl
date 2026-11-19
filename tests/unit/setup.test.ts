@@ -555,6 +555,137 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	describe("step spinner on terminal stdout", () => {
+		const BRAILLE_FRAME = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/;
+
+		/**
+		 * Run `setup --yes` with stdout simulated as a terminal — the
+		 * spinner branch only runs when stdout is a TTY.
+		 */
+		const runOnTty = (
+			stub: ReturnType<typeof stubbedExecution>,
+			{
+				columns,
+				extraArgs = [],
+			}: { columns?: number; extraArgs?: string[] } = {},
+		) =>
+			c8WithOptions(
+				{
+					...stub.options,
+					nodeArgs: [...(stub.options.nodeArgs ?? []), "--import", FAKE_TTY],
+					env: {
+						...stub.options.env,
+						C8CTL_FAKE_TTY_STDOUT: "true",
+						...(columns !== undefined
+							? { C8CTL_FAKE_TTY_COLUMNS: String(columns) }
+							: {}),
+					},
+				},
+				"setup",
+				"--yes",
+				...extraArgs,
+			);
+
+		/**
+		 * Every line's final state (after its last carriage return) must
+		 * be free of spinner frames: a completed step never leaves the
+		 * activity indicator behind.
+		 */
+		const assertNoLeftoverFrames = (stdout: string) => {
+			for (const line of stdout.split("\n")) {
+				const finalSegment = line.split("\r").pop() ?? "";
+				assert.doesNotMatch(
+					finalSegment,
+					BRAILLE_FRAME,
+					`spinner frame left on a finished line: ${JSON.stringify(line)}`,
+				);
+			}
+		};
+
+		test("every step spins on its open title line, then completes it", async () => {
+			const stub = stubbedExecution();
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 0, result.stderr);
+				// The first frame lands with the step — no waiting for a tick.
+				assert.ok(
+					result.stdout.includes("\r  Check prerequisites ⠋"),
+					"no spinner frame on the prerequisites line",
+				);
+				assert.ok(
+					result.stdout.includes("\r  Start the local cluster ⠋"),
+					"no spinner frame on the cluster line",
+				);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Check prerequisites", "SUCCESS");
+				stepLine(out, "Deploy and start the process", "SUCCESS");
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("essential output closes the spinning line and erases the frame", async () => {
+			const stub = stubbedExecution();
+			stub.options.env.C8CTL_SETUP_STUB_CLUSTER_WARN = "1";
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 0, result.stderr);
+				// The passthrough warning closes the title line first: the
+				// rewrite erases to end of line so the frame can't linger.
+				assert.ok(
+					result.stdout.includes("\r  Start the local cluster\x1b[K\n"),
+					"title line closed without erasing the spinner frame",
+				);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Start the local cluster", "SUCCESS");
+				assert.match(out, /Could not persist the durable cluster PID record/);
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("a failed step stops the spinner and reports [ERROR] cleanly", async () => {
+			const stub = stubbedExecution({ failStep: "start-cluster" });
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 1, result.stdout);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Start the local cluster", "ERROR");
+				assert.match(out, /stubbed cluster failure diagnostics/);
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
+		test("narrow terminals and --quiet suppress the animation", async () => {
+			const narrow = stubbedExecution();
+			try {
+				const result = await runOnTty(narrow, { columns: 10 });
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.doesNotMatch(result.stdout, BRAILLE_FRAME);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Check prerequisites", "SUCCESS");
+			} finally {
+				narrow.cleanup();
+			}
+
+			const quiet = stubbedExecution();
+			try {
+				const result = await runOnTty(quiet, { extraArgs: ["--quiet"] });
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.doesNotMatch(result.stdout, BRAILLE_FRAME);
+				// No open title lines: quiet prints only the essential
+				// completed status lines.
+				assert.doesNotMatch(result.stdout, /^ {2}Check prerequisites$/m);
+			} finally {
+				quiet.cleanup();
+			}
+		});
+	});
+
 	test("--yes --docs-mcp also configures the docs MCP server", async () => {
 		const stub = stubbedExecution();
 		try {
