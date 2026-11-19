@@ -41,6 +41,8 @@ import {
 	parseFlags,
 	parseVerbArgs,
 	confirm as promptConfirm,
+	isInteractive as promptIsInteractive,
+	multiSelect as promptMultiSelect,
 	select as promptSelect,
 	refreshCompletionsIfStale,
 	showCommandHelp,
@@ -426,7 +428,12 @@ async function main() {
 			yes: bool(values.yes) === true,
 			fields: c8ctl.fields,
 			logger,
-			prompt: { select: promptSelect, confirm: promptConfirm },
+			prompt: {
+				select: promptSelect,
+				multiSelect: promptMultiSelect,
+				confirm: promptConfirm,
+				isInteractive: promptIsInteractive,
+			},
 			get client() {
 				if (!_pluginClient) _pluginClient = createClient(pluginProfile);
 				return _pluginClient;

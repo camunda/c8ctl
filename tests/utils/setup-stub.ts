@@ -13,15 +13,20 @@
  *
  * 2. Desktop Modeler detection — the installer skips when Modeler is
  *    already installed; the fs patches make it look installed on every
- *    OS, so tests never download or install a real application.
+ *    OS, so tests never download or install a real application. The
+ *    `c8ctl modeler install` child process setup spawns loads this stub
+ *    too (setup forwards its `--import` preloads), so the patch applies
+ *    there as well.
  *    (Builtin fs is patched before the CLI's imports load, and
  *    syncBuiltinESMExports() publishes the patches to named ESM imports.)
  *
  * Child processes: the `c8ctl cluster start` and `stop` self-invocations
  * are faked (a successful `start` flips the health endpoint to UP), `gh`
- * skill installs report success, and browser openers exit quietly.
- * `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process exit
- * 1 so failure handling is exercised. Everything else passes through.
+ * skill installs report success, and browser openers exit quietly. The
+ * modeler and skills children run their real plugin code under this
+ * stub. `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process
+ * exit 1 so failure handling is exercised. Everything else passes
+ * through.
  *
  * Env:
  *   C8CTL_SETUP_STUB_CLUSTER=up   — the health endpoint reports UP from
@@ -30,6 +35,9 @@
  *                                   down.
  *   C8CTL_SETUP_STUB_CAPTURE=file — the process-instance creation request
  *                                   body is written to this file.
+ *   C8CTL_SETUP_STUB_DEPLOY_CAPTURE=file — the deployment request's
+ *                                   authorization header and body are
+ *                                   written to this file as JSON.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "stop-cluster",
  *                                   "install-skills", "list-skills").
@@ -409,6 +417,18 @@ globalThis.fetch = async (
 	// The Orchestration Cluster API of the built-in local profile, which
 	// setup's deploy step pins explicitly.
 	if (url === "http://localhost:8080/v2/deployments") {
+		// Capture the deployment request so tests can assert which profile
+		// credentials and tenant the deploy child used.
+		const deployCapture = process.env.C8CTL_SETUP_STUB_DEPLOY_CAPTURE;
+		if (deployCapture && input instanceof Request) {
+			fs.writeFileSync(
+				deployCapture,
+				JSON.stringify({
+					authorization: input.headers.get("authorization"),
+					body: await input.text(),
+				}),
+			);
+		}
 		if (failStep === "deploy-blueprint") {
 			return json(
 				{

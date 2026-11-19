@@ -22,7 +22,7 @@ import {
 	latestStableModelerVersion,
 	modelerMacArchiveName,
 	renderDownloadProgress,
-} from "../../src/utils/command-local/modeler-helpers.ts";
+} from "../../default-plugins/modeler/helpers.ts";
 import { c8WithOptions, parseJson } from "../utils/cli.ts";
 import { pollUntilValue } from "../utils/polling.ts";
 

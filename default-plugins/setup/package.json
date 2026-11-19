@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-setup",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "c8ctl default plugin providing guided first-run setup for local Camunda 8 development",
+  "keywords": ["c8ctl", "c8ctl-plugin", "setup", "camunda"],
+  "main": "c8ctl-plugin.js"
+}

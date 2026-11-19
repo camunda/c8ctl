@@ -1288,25 +1288,6 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
-	modeler: {
-		description: "Install Camunda Desktop Modeler",
-		helpDescription:
-			"Install the latest stable Camunda Desktop Modeler on macOS, Windows, or Linux, skipping the installation when Modeler is already installed. On macOS, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable). On Windows, installs it with winget into %LOCALAPPDATA%\\Programs\\Camunda Modeler, then registers its file types and adds it to the Start Menu. On Linux (x64), installs the release into /usr/bin as root, using sudo, as the Camunda documentation describes, then registers its file types with the bundled support/xdg_register.sh.",
-		helpResource: "install",
-		hasDetailedHelp: true,
-		helpFooterLabel: "Show modeler install help",
-		mutating: true,
-		requiresResource: true,
-		helpExamples: [
-			{
-				command: "c8ctl modeler install",
-				description: "Install the latest stable Camunda Desktop Modeler",
-			},
-		],
-		resources: ["install"],
-		flags: {},
-	},
-
 	modify: {
 		description:
 			"Modify process instances: activate, terminate or move elements",
@@ -1817,116 +1798,6 @@ export const COMMAND_REGISTRY = {
 
 	// ── Operational commands ───────────────────────────────────────────────
 
-	setup: {
-		description: "Guided first-run setup for local Camunda 8 development",
-		helpDescription:
-			"Guided first-run setup: install a local cluster, a starter " +
-			"blueprint project, and AI assistant tooling.",
-		hasDetailedHelp: true,
-		helpFooterLabel: "Show setup details",
-		mutating: true,
-		requiresResource: false,
-		helpExamples: [
-			{
-				command: "c8ctl setup",
-				description: "Run the guided setup wizard",
-			},
-			{
-				command: "c8ctl setup --yes",
-				description: "Set up the defaults, without prompting",
-			},
-			{
-				command: "c8ctl setup --remove",
-				description: "Preview setup-managed components to remove",
-			},
-			{
-				command: "c8ctl setup --remove --yes",
-				description: "Remove the previewed setup-managed components",
-			},
-			{
-				command: "c8ctl setup --remove --stop-cluster --yes",
-				description: "Also stop the local cluster without purging its data",
-			},
-		],
-		helpNotes: [
-			"The wizard offers to start a local cluster (downloading Camunda 8 Run",
-			"on first run), install Desktop Modeler, create a starter project from a",
-			"blueprint, deploy and run it, and set up AI assistant tooling.",
-			"Nothing is installed without your say.",
-			"Each step announces its title and ends in [SUCCESS], [ERROR] or",
-			"[SKIPPED]; a step's own output is shown only when it fails, and a",
-			"failed step does not stop the rest. The blueprint and the cluster MCP",
-			"server need the local cluster — deselect the cluster and both options",
-			"are disabled.",
-			"A browser window opens when the local cluster reports healthy; the docs",
-			"MCP server asks you to sign in in a browser on first use — announced",
-			"up front.",
-			"A run without a selection (piped output, CI) installs nothing",
-			"unless you pass --yes; --json prints the plan without executing.",
-			"The starter blueprint is chosen in the wizard; a non-interactive",
-			"--yes run uses Rocket Launch.",
-			"Exit code 0: every selected step succeeded, or nothing was",
-			"installed for lack of a go-ahead (wizard cancelled with Escape;",
-			"a piped, --quiet or JSON-mode run without --yes; --json or",
-			"--dry-run printing the plan). Ctrl+C ends the wizard by signal",
-			"(130 on POSIX shells). A re-run reuses finished work where",
-			"possible; the deploy, process start and skills install repeat",
-			"by design. Exit code 1: arguments failed validation, or a step",
-			"failed — other eligible steps still ran, while dependents (and",
-			"the deploy finale after any failure) were skipped.",
-			"",
-			"--remove shows setup-managed MCP entries, Camunda skills, and",
-			"marker-listed blueprint files before removing them. Confirm in the",
-			"interactive prompt or pass --yes in non-interactive use. --json and",
-			"--dry-run print only the removal preview. Local edits in skill folders",
-			"and listed blueprint files are removed; untracked blueprint files are",
-			"kept. Desktop Modeler is not removed. --remove cannot be combined with",
-			"--modeler, --no-modeler, or --docs-mcp.",
-			"--stop-cluster is available only with --remove. It stops the local",
-			"cluster without purging runtime data or deleting downloaded binaries.",
-			"Removal exits 0 when every requested action succeeds, and 1 if any",
-			"action fails; the other removal actions still run.",
-		],
-		docsNotes: [
-			"**Removal:** `c8ctl setup --remove` previews setup-managed MCP entries, Camunda skills, and marker-listed blueprint files. Confirm at the prompt or use `--yes` in non-interactive use. `--json` and `--dry-run` only print the preview. Local edits in skill directories and listed blueprint files are removed; untracked blueprint files are kept. Desktop Modeler is not removed. `--remove` cannot be combined with `--modeler`, `--no-modeler`, or `--docs-mcp`.",
-			"",
-			"`--stop-cluster` can be combined with `--remove` to stop the local cluster. It does not purge runtime data or delete downloaded binaries.",
-			"",
-			"**Exit codes:**",
-			"",
-			"| Code | Meaning |",
-			"|------|---------|",
-			"| `0` | Every selected setup step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. All requested removal actions also succeeded. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |",
-			"| `1` | Arguments failed validation before any step ran, one or more setup steps failed, or one or more removal actions failed. The remaining eligible setup steps or removal actions still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |",
-		],
-		resources: [],
-		flags: {
-			modeler: {
-				type: "boolean",
-				description: "Install Desktop Modeler, whatever the selection",
-			},
-			"no-modeler": {
-				type: "boolean",
-				description: "Do not install Desktop Modeler",
-			},
-			"docs-mcp": {
-				type: "boolean",
-				description:
-					"Also configure the docs MCP server (off unless selected or flagged)",
-			},
-			remove: {
-				type: "boolean",
-				description:
-					"Preview and remove setup-managed MCP entries, skills, and blueprint files",
-			},
-			"stop-cluster": {
-				type: "boolean",
-				description:
-					"With --remove, stop the local cluster without purging its data",
-			},
-		},
-	},
-
 	watch: {
 		description: "Watch files for changes and auto-deploy",
 		helpDescription: "Watch files for changes and auto-deploy",
@@ -2032,47 +1903,6 @@ export const COMMAND_REGISTRY = {
 			profile: [
 				{ name: "name", required: false },
 			] as const satisfies readonly PositionalDef[],
-		},
-	},
-
-	skills: {
-		description: "Install Camunda AI coding skills",
-		helpDescription: "Install Camunda skills into AI coding harnesses",
-		helpFooterLabel: "Install Camunda skills",
-		helpNotes: [
-			"Requires GitHub CLI 2.90 or later; its skill commands are in preview.",
-			"Re-run to update the same skill directories without duplicates when upstream changes. Local edits to up-to-date skills are preserved; upstream updates may replace edited files.",
-			"To restore one skill's upstream files, use `gh skill update --force --dir <skills-root> <skill-name>`; pass the parent skills directory (for example `~/.claude/skills`), not the listed skill directory. Find names with `gh skill list --scope user --agent <agent-id>`. Extra local files are retained.",
-			"Use a GitHub CLI agent ID for --harness. See `gh skill install --help` for supported IDs.",
-		],
-		hasDetailedHelp: true,
-		helpExamples: [
-			{
-				command: "c8ctl skills install",
-				description: "Install or update skills for detected harnesses",
-			},
-			{
-				command: "c8ctl skills install --harness claude-code",
-				description: "Install or update skills for Claude Code",
-			},
-			{
-				command: "c8ctl skills install --harness github-copilot",
-				description: "Install or update skills for GitHub Copilot CLI",
-			},
-		],
-		mutating: true,
-		requiresResource: true,
-		resources: ["install"],
-		flags: {},
-		resourceFlags: {
-			install: {
-				harness: {
-					type: "string",
-					rejectEmpty: true,
-					description:
-						"GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted)",
-				},
-			},
 		},
 	},
 

@@ -541,7 +541,10 @@ export function showHelp(): void {
 	let pluginExamples = "";
 	for (const cmd of pluginCommandsInfo) {
 		for (const ex of cmd.examples ?? []) {
-			pluginExamples += `\n  ${ex.command.padEnd(35)}${ex.description}`;
+			// Match generateExamplesSection: at least two spaces between the
+			// command and its description, however long the command is.
+			const padding = Math.max(2, 36 - ex.command.length - 2);
+			pluginExamples += `\n  ${ex.command}${" ".repeat(padding)}${ex.description}`;
 		}
 	}
 
@@ -890,6 +893,7 @@ function showFlagAwarePluginHelp(command: string): void {
 						]),
 					)
 				: {},
+			subcommands: pluginInfo.subcommands ?? [],
 			examples: pluginInfo.examples ?? [],
 			globalFlags: allHelp.globalFlags,
 			searchFlags: allHelp.searchFlags,
@@ -1033,6 +1037,25 @@ export async function showCommandHelp(command: string): Promise<void> {
 		return;
 	}
 
+	// Flag-aware plugin commands render their own declarative help in both
+	// output modes — this check must precede the generic JSON branch, which
+	// would otherwise answer with the thin allHelp entry (no flags, no
+	// helpDescription). Alias resolution runs first so a plugin command
+	// never shadows a built-in verb's alias.
+	let resolvedPluginVerb = command;
+	if (!lookupVerb(command)) {
+		for (const [v, d] of registryEntries()) {
+			if (d.aliases?.includes(command)) {
+				resolvedPluginVerb = v;
+				break;
+			}
+		}
+	}
+	if (!lookupVerb(resolvedPluginVerb) && isPluginCommand(resolvedPluginVerb)) {
+		showFlagAwarePluginHelp(resolvedPluginVerb);
+		return;
+	}
+
 	// JSON mode: emit structured help for machine/agent consumption
 	if (logger.mode === "json") {
 		const version = getVersion();
@@ -1074,18 +1097,8 @@ export async function showCommandHelp(command: string): Promise<void> {
 		}
 	}
 
-	// If the verb is still not in the registry, check if it's a plugin command.
-	// Render the plugin's declarative help (#377) — derived from
-	// `metadata.commands[verb]` plus typed `flags` declarations. The
-	// plugin's own handler is NOT invoked; previously help was rendered
-	// by side-effect of calling the handler with no args, which leaked
-	// the boundary between host and plugin (the plugin had to know it
-	// was being asked for help, parse argv itself, and produce a
-	// consistent shape — none of which it could be relied on to do).
-	if (!lookupVerb(resolvedVerb) && isPluginCommand(resolvedVerb)) {
-		showFlagAwarePluginHelp(resolvedVerb);
-		return;
-	}
-
+	// Flag-aware plugin commands were already routed to
+	// showFlagAwarePluginHelp before the JSON branch above; a verb that
+	// reaches this line is either built-in or unknown.
 	showGenericVerbHelp(resolvedVerb);
 }

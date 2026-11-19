@@ -1,15 +1,18 @@
 import {
-	planSetupBlueprintRemovals,
-	type SetupBlueprintRemoval,
-} from "./blueprint-scaffold.ts";
-import { type McpConfigPlan, planMcpConfigs } from "./mcp-install-helpers.ts";
+	type McpConfigPlan,
+	planMcpConfigs,
+} from "../../src/utils/command-local/mcp-install-helpers.ts";
 import {
 	type CamundaSkillInstallation,
 	camundaSkillRemovalPath,
 	detectInstalledHarnesses,
 	hasCamundaUserSkillsDirectory,
 	listCamundaSkills,
-} from "./skills-install-helpers.ts";
+} from "../../src/utils/command-local/skills-install-helpers.ts";
+import {
+	planSetupBlueprintRemovals,
+	type SetupBlueprintRemoval,
+} from "./blueprint-scaffold.ts";
 
 export interface SetupMcpRemoval {
 	readonly plan: McpConfigPlan;

@@ -683,22 +683,6 @@ c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 
 
 ---
 
-### `modeler`
-
-Install the latest stable Camunda Desktop Modeler on macOS, Windows, or Linux, skipping the installation when Modeler is already installed. On macOS, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable). On Windows, installs it with winget into %LOCALAPPDATA%\Programs\Camunda Modeler, then registers its file types and adds it to the Start Menu. On Linux (x64), installs the release into /usr/bin as root, using sudo, as the Camunda documentation describes, then registers its file types with the bundled support/xdg_register.sh.
-
-**Usage:** `c8ctl modeler install`
-
-**Resources:** install
-
-**Examples:**
-
-```bash
-c8ctl modeler install                                       # Install the latest stable Camunda Desktop Modeler
-```
-
----
-
 ### `modify`
 
 Modify a running process instance by activating elements, terminating element instances or moving tokens, or move tokens in all active instances of a definition (batch)
@@ -1036,43 +1020,6 @@ c8ctl unassign role admin --from-user=john                  # Unassign role from
 
 ---
 
-### `setup`
-
-Guided first-run setup: install a local cluster, a starter blueprint project, and AI assistant tooling.
-
-**Flags:**
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--modeler` | boolean |  | Install Desktop Modeler, whatever the selection |
-| `--no-modeler` | boolean |  | Do not install Desktop Modeler |
-| `--docs-mcp` | boolean |  | Also configure the docs MCP server (off unless selected or flagged) |
-| `--remove` | boolean |  | Preview and remove setup-managed MCP entries, skills, and blueprint files |
-| `--stop-cluster` | boolean |  | With --remove, stop the local cluster without purging its data |
-
-**Examples:**
-
-```bash
-c8ctl setup                                                 # Run the guided setup wizard
-c8ctl setup --yes                                           # Set up the defaults, without prompting
-c8ctl setup --remove                                        # Preview setup-managed components to remove
-c8ctl setup --remove --yes                                  # Remove the previewed setup-managed components
-c8ctl setup --remove --stop-cluster --yes                   # Also stop the local cluster without purging its data
-```
-
-**Removal:** `c8ctl setup --remove` previews setup-managed MCP entries, Camunda skills, and marker-listed blueprint files. Confirm at the prompt or use `--yes` in non-interactive use. `--json` and `--dry-run` only print the preview. Local edits in skill directories and listed blueprint files are removed; untracked blueprint files are kept. Desktop Modeler is not removed. `--remove` cannot be combined with `--modeler`, `--no-modeler`, or `--docs-mcp`.
-
-`--stop-cluster` can be combined with `--remove` to stop the local cluster. It does not purge runtime data or delete downloaded binaries.
-
-**Exit codes:**
-
-| Code | Meaning |
-|------|---------|
-| `0` | Every selected setup step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. All requested removal actions also succeeded. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |
-| `1` | Arguments failed validation before any step ran, one or more setup steps failed, or one or more removal actions failed. The remaining eligible setup steps or removal actions still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |
-
----
-
 ### `watch`
 
 Watch files for changes and auto-deploy
@@ -1167,33 +1114,6 @@ Remove a profile (alias: rm)
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--none` | boolean |  | Clear active profile |
-
----
-
-### `skills`
-
-Install Camunda skills into AI coding harnesses
-
-**Resources:** install
-
-**Resource-specific flags:**
-
-<details>
-<summary><code>install</code></summary>
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--harness` | string |  | GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted) |
-
-</details>
-
-**Examples:**
-
-```bash
-c8ctl skills install                                        # Install or update skills for detected harnesses
-c8ctl skills install --harness claude-code                  # Install or update skills for Claude Code
-c8ctl skills install --harness github-copilot               # Install or update skills for GitHub Copilot CLI
-```
 
 ---
 

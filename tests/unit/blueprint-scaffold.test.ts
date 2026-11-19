@@ -17,7 +17,7 @@ import {
 	BlueprintScaffoldError,
 	SETUP_BLUEPRINTS,
 	scaffoldSetupBlueprint,
-} from "../../src/utils/index.ts";
+} from "../../default-plugins/setup/blueprint-scaffold.ts";
 
 function jsonResponse(value: unknown): BlueprintResponse {
 	return {

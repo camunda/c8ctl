@@ -321,8 +321,11 @@ test("skills help documents the install action and harness selector", async () =
 	const result = await c8("help", "skills");
 
 	assert.equal(result.status, 0, result.stderr);
+	// skills is a default plugin: the help payload carries the plugin
+	// discriminator, and the install action is a plugin subcommand.
 	assert.match(result.stdout, /"verb":"skills"/);
-	assert.match(result.stdout, /"resource":"install"/);
+	assert.match(result.stdout, /"kind":"plugin"/);
+	assert.match(result.stdout, /"name":"install"/);
 	assert.match(result.stdout, /--harness/i);
 });
 
@@ -363,3 +366,19 @@ test("skills install dry-run reports the source and selected harness", async () 
 		harnesses: ["claude-code"],
 	});
 });
+
+// Plugin flag parsing has no rejectEmpty enforcement, so the handler
+// itself must refuse an empty or valueless --harness — a silent fallback
+// to auto-detection would install into every detected harness on a typo.
+for (const invocation of [
+	["skills", "install", "--harness="],
+	["skills", "install", "--harness", ""],
+	["skills", "install", "--harness"],
+]) {
+	test(`skills install rejects an empty harness (${invocation.slice(2).join(" ")})`, async () => {
+		const result = await c8(...invocation);
+
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /Invalid --harness: value must not be empty/);
+	});
+}

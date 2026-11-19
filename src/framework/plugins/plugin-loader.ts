@@ -17,6 +17,8 @@ import type { FlagDef } from "../command-registry.ts";
 import type {
 	ConfirmConfig,
 	ConfirmResult,
+	MultiSelectConfig,
+	MultiSelectResult,
 	SelectConfig,
 	SelectResult,
 } from "../ui/prompt.ts";
@@ -68,10 +70,15 @@ export interface PluginCtx {
 	fields?: string[];
 	/** Host logger — use `logger.json(...)` for structured output. */
 	logger: Logger;
-	/** Interactive prompts — arrow-key menu and yes/no confirmation. */
+	/** Interactive prompts — arrow-key menu, checkbox list and yes/no confirmation. */
 	prompt: {
 		select: <T>(config: SelectConfig<T>) => Promise<SelectResult<T>>;
+		multiSelect: <T>(
+			config: MultiSelectConfig<T>,
+		) => Promise<MultiSelectResult<T>>;
 		confirm: (config: ConfirmConfig) => Promise<ConfirmResult>;
+		/** True when stdin is an interactive terminal and prompts can render. */
+		isInteractive: () => boolean;
 	};
 	/** Lazily-resolved Camunda client. Reading triggers credential resolution. */
 	readonly client: CamundaClient;

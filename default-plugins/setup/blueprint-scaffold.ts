@@ -24,7 +24,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { isRecord } from "../../core/index.ts";
+import { isRecord } from "../../src/core/index.ts";
 
 export interface BlueprintSource {
 	readonly owner: string;

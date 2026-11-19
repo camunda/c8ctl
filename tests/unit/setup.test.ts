@@ -11,9 +11,11 @@ import assert from "node:assert";
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
+	closeSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	rmSync,
@@ -172,7 +174,8 @@ function runInteractive(
  * An offline execution sandbox for `c8ctl setup --yes`:
  * - a temp working directory the blueprint project is scaffolded into
  * - a fake `camunda-modeler` executable (the Linux installed-lookup;
- *   macOS/Windows detection is patched in the stub itself)
+ *   macOS/Windows detection is patched in the stub, which the `c8ctl
+ *   modeler install` child loads as well)
  * - a fixture HOME with a `.claude` directory, so harness detection
  *   finds Claude Code and every harness config root (HOME, USERPROFILE,
  *   APPDATA, XDG_CONFIG_HOME) points into the fixture — a harness found
@@ -233,6 +236,76 @@ function stubbedExecution({
 		},
 		cleanup: () => rmSync(cwd, { recursive: true, force: true }),
 	};
+}
+
+/**
+ * Spawn `c8ctl` with both streams sharing one file descriptor so their
+ * write order is preserved in the captured output.
+ */
+function runWithOrderedOutput(
+	options: { cwd: string; nodeArgs: string[]; env: Record<string, string> },
+	...args: string[]
+): Promise<{ status: number | null; output: string }> {
+	const forwardedDataDir = process.env.C8CTL_DATA_DIR;
+	return new Promise((resolveRun, rejectRun) => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-test-"));
+		const outputPath = join(tempDir, "ordered-output.txt");
+		let outputFd: number;
+		try {
+			outputFd = openSync(outputPath, "w");
+		} catch (error) {
+			rmSync(tempDir, { recursive: true, force: true });
+			rejectRun(error);
+			return;
+		}
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(
+				process.execPath,
+				["--experimental-strip-types", ...options.nodeArgs, CLI, ...args],
+				{
+					stdio: ["ignore", outputFd, outputFd],
+					cwd: options.cwd,
+					env: {
+						PATH: process.env.PATH,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: forwardedDataDir ?? tempDir,
+						...options.env,
+					},
+				},
+			);
+		} catch (error) {
+			try {
+				closeSync(outputFd);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+			rejectRun(error);
+			return;
+		}
+		let spawnError: Error | undefined;
+		// Safety net only: a stuck child must not hang the test runner.
+		const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+		child.once("error", (error) => {
+			spawnError = error;
+		});
+		child.once("close", (status) => {
+			clearTimeout(timer);
+			try {
+				closeSync(outputFd);
+				const output = readFileSync(outputPath, "utf-8");
+				if (spawnError) {
+					rejectRun(spawnError);
+				} else {
+					resolveRun({ status, output });
+				}
+			} catch (error) {
+				rejectRun(error);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
 }
 
 /** Every step title followed by its status tag. */
@@ -375,7 +448,9 @@ describe("c8ctl setup", () => {
 			"setup",
 		);
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
-		assert.match(result.stdout, /Usage: c8ctl setup/);
+		// setup is a default plugin: the host renders the plugin help shape.
+		assert.match(result.stdout, /c8ctl setup — Guided first-run setup/);
+		assert.match(result.stdout, /\(plugin: c8ctl-plugin-setup /);
 		assert.match(result.stdout, /Nothing is installed without your say\./);
 		assert.match(result.stdout, /\[SUCCESS\]/);
 		assert.match(result.stdout, /--no-modeler/);
@@ -395,9 +470,11 @@ describe("c8ctl setup", () => {
 			"--help",
 		);
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+		// setup moved to a default plugin: it is listed under Plugin
+		// Commands, and its examples are aggregated into the Examples section.
 		assert.match(
 			result.stdout,
-			/Guided first-run setup: install a local cluster/,
+			/Plugin Commands:[\s\S]*setup\s+Guided first-run setup for local Camunda 8 development/,
 		);
 		assert.match(result.stdout, /c8ctl setup --yes/);
 		assert.match(result.stdout, /c8ctl setup --remove/);
@@ -440,6 +517,9 @@ describe("c8ctl setup", () => {
 			assert.match(out, /^ {2}Install AI assistant skills$/m);
 			assert.match(out, /Checking Camunda skills \(camunda\/skills\) for /);
 			assert.match(out, /MCP configuration: /);
+			// A successful child's stderr warnings stay actionable — the
+			// deploy child's failed version check warns even on success.
+			assert.match(out, /Could not reach the server to check its version/);
 			// Everything else is held back: no c8run chatter, no progress
 			// percentages, no deploy progress, no prerequisite checklist.
 			assert.doesNotMatch(out, /\/\/>/);
@@ -506,6 +586,53 @@ describe("c8ctl setup", () => {
 			});
 		} finally {
 			stub.cleanup();
+		}
+	});
+
+	test("the deploy child keeps a customized local profile but pins its tenant", async () => {
+		// A saved local profile with custom credentials and a remote tenant:
+		// the deployment must keep the connection settings (the in-process
+		// process start reads the same profile) while the tenant stays
+		// pinned to the fresh cluster's <default>.
+		const stub = stubbedExecution();
+		const deployCapture = join(stub.cwd, "deploy-capture.json");
+		stub.options.env.C8CTL_SETUP_STUB_DEPLOY_CAPTURE = deployCapture;
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-profile-"));
+		writeFileSync(
+			join(dataDir, "profiles.json"),
+			JSON.stringify({
+				profiles: [
+					{
+						name: "local",
+						baseUrl: "http://localhost:8080/v2",
+						username: "marker-user",
+						password: "marker-pass",
+						defaultTenantId: "remote-tenant",
+					},
+				],
+			}),
+		);
+		stub.options.env.C8CTL_DATA_DIR = dataDir;
+		try {
+			const result = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+			const captured: unknown = JSON.parse(
+				readFileSync(deployCapture, "utf-8"),
+			);
+			assert.ok(isRecord(captured), "deploy capture is not an object");
+			assert.strictEqual(
+				captured.authorization,
+				`Basic ${Buffer.from("marker-user:marker-pass").toString("base64")}`,
+				"the deploy child did not use the saved local profile",
+			);
+			assert.ok(
+				typeof captured.body === "string" &&
+					captured.body.includes('"tenantId"\r\n\r\n<default>'),
+				"the deploy child's tenant was not pinned to <default>",
+			);
+		} finally {
+			stub.cleanup();
+			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});
 
@@ -695,23 +822,20 @@ describe("c8ctl setup", () => {
 			}
 		});
 
-		test("a failed deploy does not reopen the spinner into its stderr diagnostics", async () => {
-			// deploy-helpers renders failure diagnostics straight to stderr;
-			// the error passthrough must close the title for good, or a
-			// reopened frame is stranded between "Deployment failed" and
-			// the detail lines on a shared terminal.
+		test("a failed deploy buffers the child diagnostics until the step closes", async () => {
+			// The deploy runs as a `c8ctl deploy` child whose diagnostics are
+			// buffered and printed after the step's status line, so no spinner
+			// frame can be stranded among them on a shared terminal. (The
+			// previous count-based assertion encoded "the in-process deploy
+			// fails before the spinner's first tick"; a child process
+			// legitimately outlives one tick on slow runners, so the count is
+			// timing-dependent. The diagnostics' position relative to the
+			// spinner is not observable across the separately captured streams,
+			// so the stranded-frame guard carries the invariant.)
 			const stub = stubbedExecution({ failStep: "deploy-blueprint" });
 			try {
 				const result = await runOnTty(stub);
 				assert.strictEqual(result.status, 1, result.stdout);
-				const openings = result.stdout.match(
-					/\r {2}Deploy and start the process ⠋/g,
-				);
-				assert.strictEqual(
-					openings?.length ?? 0,
-					1,
-					"the deploy title reopened after the error passthrough",
-				);
 				const out = stripVTControlCharacters(result.stdout + result.stderr);
 				stepLine(out, "Deploy and start the process", "ERROR");
 				assert.match(out, /stubbed invalid deployment/);
@@ -1684,18 +1808,28 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("a failed deploy closes the title line before its diagnostics", async () => {
+	test("a failed deploy prints the child diagnostics below its status line", async () => {
 		const stub = stubbedExecution({ failStep: "deploy-blueprint" });
 		try {
-			const result = await c8WithOptions(stub.options, "setup", "--yes");
-			assert.strictEqual(result.status, 1, result.stdout);
-			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			const result = await runWithOrderedOutput(stub.options, "setup", "--yes");
+			assert.strictEqual(result.status, 1, result.output);
+			const out = stripVTControlCharacters(result.output);
 			stepLine(out, "Deploy and start the process", "ERROR");
-			// The deploy helper renders through the step's logger, so its
-			// diagnostics close the title line instead of colliding with it.
-			assert.match(out, /^ {2}Deploy and start the process$/m);
-			assert.match(out, /✗ Deployment failed/);
-			// SilentError: the helper rendered the failure — no summary reprint.
+			// The deploy runs as a `c8ctl deploy` child whose diagnostics are
+			// buffered and printed after the step's status line — they never
+			// collide with the open title line or its spinner. Compared
+			// against the completed [ERROR] line in the arrival-ordered
+			// capture: the opening title also contains the step name.
+			const statusAt = out.search(/Deploy and start the process \.+ \[ERROR\]/);
+			assert.ok(statusAt !== -1, "completed status line missing");
+			const diagnosticsAt = out.indexOf("✗ Deployment failed");
+			assert.ok(
+				diagnosticsAt > statusAt,
+				"diagnostics must follow the status line",
+			);
+			// The child rendered the failure with its own indentation — the
+			// step's dump re-indents those lines, so the child's two-space
+			// problem detail never surfaces as a four-space summary line.
 			assert.doesNotMatch(out, /^ {4}INVALID_ARGUMENT$/m);
 			// No instance was started, so the box must not claim one is
 			// running — only the Project/Guide references remain.
