@@ -747,23 +747,20 @@ describe("c8ctl setup", () => {
 			}
 		});
 
-		test("a failed deploy does not reopen the spinner into its stderr diagnostics", async () => {
-			// deploy-helpers renders failure diagnostics straight to stderr;
-			// the error passthrough must close the title for good, or a
-			// reopened frame is stranded between "Deployment failed" and
-			// the detail lines on a shared terminal.
+		test("a failed deploy buffers the child diagnostics until the step closes", async () => {
+			// The deploy runs as a `c8ctl deploy` child whose diagnostics are
+			// buffered and printed after the step's status line, so no spinner
+			// frame can be stranded among them on a shared terminal. (The
+			// previous count-based assertion encoded "the in-process deploy
+			// fails before the spinner's first tick"; a child process
+			// legitimately outlives one tick on slow runners, so the count is
+			// timing-dependent. The diagnostics' position relative to the
+			// spinner is not observable across the separately captured streams,
+			// so the stranded-frame guard carries the invariant.)
 			const stub = stubbedExecution({ failStep: "deploy-blueprint" });
 			try {
 				const result = await runOnTty(stub);
 				assert.strictEqual(result.status, 1, result.stdout);
-				const openings = result.stdout.match(
-					/\r {2}Deploy and start the process ⠋/g,
-				);
-				assert.strictEqual(
-					openings?.length ?? 0,
-					1,
-					"the deploy title reopened after the error passthrough",
-				);
 				const out = stripVTControlCharacters(result.stdout + result.stderr);
 				stepLine(out, "Deploy and start the process", "ERROR");
 				assert.match(out, /stubbed invalid deployment/);
