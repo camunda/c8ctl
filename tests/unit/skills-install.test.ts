@@ -121,6 +121,16 @@ test("updates only installed Camunda skills through their existing directories",
 	];
 	runSkillInstall("claude-code", (command, args) => {
 		calls.push({ command, args });
+		if (args[1] === "install" && args.length === 3) {
+			return {
+				status: 0,
+				stdout: [
+					"camunda-ai-agents\tCamunda skill",
+					"camunda-bpmn\tCamunda skill",
+				].join("\n"),
+				stderr: "",
+			};
+		}
 		return {
 			status: 0,
 			stdout: args[1] === "list" ? JSON.stringify(skills) : "",
@@ -143,6 +153,10 @@ test("updates only installed Camunda skills through their existing directories",
 		},
 		{
 			command: "gh",
+			args: ["skill", "install", "camunda/skills"],
+		},
+		{
+			command: "gh",
 			args: [
 				"skill",
 				"update",
@@ -154,6 +168,127 @@ test("updates only installed Camunda skills through their existing directories",
 			],
 		},
 	]);
+});
+
+test("installs missing Camunda skills when some are already installed", () => {
+	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
+	const availableSkills = [
+		"camunda-ai-agents",
+		"camunda-bpmn",
+		"camunda-c8ctl",
+	];
+	const installedSkills = [
+		{
+			skillName: availableSkills[0],
+			sourceURL: "https://github.com/camunda/skills",
+			path: join(skillRoot, availableSkills[0]),
+		},
+		{
+			skillName: "unrelated",
+			sourceURL: "https://github.com/other/skills",
+			path: join(skillRoot, "unrelated"),
+		},
+	];
+	const calls: Array<{ command: string; args: string[] }> = [];
+
+	runSkillInstall("claude-code", (command, args) => {
+		calls.push({ command, args });
+		if (args[1] === "list") {
+			return {
+				status: 0,
+				stdout: JSON.stringify(installedSkills),
+				stderr: "",
+			};
+		}
+		if (args[1] === "install" && args.length === 3) {
+			return {
+				status: 0,
+				stdout: availableSkills
+					.map((skill) => `${skill}\tCamunda skill`)
+					.join("\n"),
+				stderr: "",
+			};
+		}
+		return { status: 0, stdout: "", stderr: "" };
+	});
+
+	assert.deepEqual(calls, [
+		{
+			command: "gh",
+			args: [
+				"skill",
+				"list",
+				"--agent",
+				"claude-code",
+				"--scope",
+				"user",
+				"--json",
+				"skillName,sourceURL,path",
+			],
+		},
+		{
+			command: "gh",
+			args: ["skill", "install", "camunda/skills"],
+		},
+		{
+			command: "gh",
+			args: [
+				"skill",
+				"update",
+				"--all",
+				"--dir",
+				skillRoot,
+				"camunda-ai-agents",
+			],
+		},
+		{
+			command: "gh",
+			args: [
+				"skill",
+				"install",
+				"camunda/skills",
+				"camunda-bpmn",
+				"--agent",
+				"claude-code",
+				"--scope",
+				"user",
+			],
+		},
+		{
+			command: "gh",
+			args: [
+				"skill",
+				"install",
+				"camunda/skills",
+				"camunda-c8ctl",
+				"--agent",
+				"claude-code",
+				"--scope",
+				"user",
+			],
+		},
+	]);
+});
+
+test("fails when available Camunda skills cannot be listed", () => {
+	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
+	const installedSkills = [
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "https://github.com/camunda/skills",
+			path: join(skillRoot, "camunda-ai-agents"),
+		},
+	];
+
+	assert.throws(
+		() =>
+			runSkillInstall("claude-code", (_command, args) => ({
+				status: 0,
+				stdout: args[1] === "list" ? JSON.stringify(installedSkills) : "",
+				stderr: "",
+			})),
+		/no available Camunda skills/i,
+	);
 });
 
 test("surfaces GitHub CLI skill install failures", () => {

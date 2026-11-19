@@ -63,6 +63,29 @@ function buildSkillListArgs(harness: string): string[] {
 	];
 }
 
+function buildSkillDiscoveryArgs(): string[] {
+	return ["skill", "install", CAMUNDA_SKILLS_REPOSITORY];
+}
+
+function buildSkillInstallSpecificArgs({
+	harness,
+	skill,
+}: {
+	harness: string;
+	skill: string;
+}): string[] {
+	return [
+		"skill",
+		"install",
+		CAMUNDA_SKILLS_REPOSITORY,
+		skill,
+		"--agent",
+		harness,
+		"--scope",
+		"user",
+	];
+}
+
 function buildSkillUpdateArgs(skills: string[], directory: string): string[] {
 	return ["skill", "update", "--all", "--dir", directory, ...skills];
 }
@@ -101,6 +124,22 @@ function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
 		skills.push({ name: entry.skillName, directory: dirname(entry.path) });
 	}
 	return skills;
+}
+
+function availableCamundaSkills(stdout: string): string[] {
+	const names = stdout
+		.split(/\r?\n/)
+		.map((line) => line.split("\t", 1)[0].trim())
+		.filter((name) => name.length > 0);
+	if (names.length === 0) {
+		throw new Error("GitHub CLI returned no available Camunda skills.");
+	}
+	if (names.some((name) => !/^[a-z0-9][a-z0-9._/-]*$/i.test(name))) {
+		throw new Error(
+			"GitHub CLI returned an invalid available Camunda skills list.",
+		);
+	}
+	return [...new Set(names)];
 }
 
 function joinForPlatform(platform: string, ...paths: string[]): string {
@@ -220,6 +259,12 @@ export function runSkillInstall(
 		return;
 	}
 
+	const availableResult = runner("gh", buildSkillDiscoveryArgs());
+	requireSuccessfulSkillCommand(availableResult, "list available");
+	const available = availableCamundaSkills(availableResult.stdout);
+	const installedNames = new Set(installed.map(({ name }) => name));
+	const missing = available.filter((skill) => !installedNames.has(skill));
+
 	const byDirectory = new Map<string, string[]>();
 	for (const skill of installed) {
 		const skills = byDirectory.get(skill.directory) ?? [];
@@ -230,6 +275,12 @@ export function runSkillInstall(
 		requireSuccessfulSkillCommand(
 			runner("gh", buildSkillUpdateArgs(skills, directory)),
 			"update",
+		);
+	}
+	for (const skill of missing) {
+		requireSuccessfulSkillCommand(
+			runner("gh", buildSkillInstallSpecificArgs({ harness, skill })),
+			"install",
 		);
 	}
 }

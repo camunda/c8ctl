@@ -21,7 +21,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -88,7 +88,7 @@ function runInteractive(
 		: mkdtempSync(join(tmpdir(), "c8ctl-setup-test-"));
 	return new Promise((resolveRun, rejectRun) => {
 		const child = spawn(
-			"node",
+			process.execPath,
 			[
 				"--experimental-strip-types",
 				"--import",
@@ -164,7 +164,8 @@ function runInteractive(
  * - a fixture HOME with a `.claude` directory, so harness detection
  *   finds Claude Code and every harness config root (HOME, USERPROFILE,
  *   APPDATA, XDG_CONFIG_HOME) points into the fixture — a harness found
- *   on the host PATH can never write to a real user config
+ *   outside the fixture cannot be discovered
+ * - PATH contains only fixture executables
  * - the fetch/fs/child-process stub preload
  */
 function stubbedExecution({
@@ -203,7 +204,7 @@ function stubbedExecution({
 			nodeArgs: ["--import", SETUP_STUB],
 			env: {
 				C8CTL_OUTPUT_MODE: "text",
-				PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+				PATH: bin,
 				HOME: home,
 				USERPROFILE: home,
 				APPDATA: join(home, "AppData", "Roaming"),
@@ -267,6 +268,15 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(payload.blueprint, "rocket-launch");
 			// Nothing was scaffolded, though --yes would execute in text mode.
 			assert.ok(!existsSync(join(stub.cwd, "rocket-launch")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("setup execution limits PATH to fixture executables", () => {
+		const stub = stubbedExecution();
+		try {
+			assert.strictEqual(stub.options.env.PATH, join(stub.cwd, "bin"));
 		} finally {
 			stub.cleanup();
 		}
@@ -617,8 +627,14 @@ describe("c8ctl setup", () => {
 					return parsed.map(String);
 				});
 			assert.deepStrictEqual(
-				ghCalls.map((args) => args[1]),
-				["list", "install", "list", "update"],
+				ghCalls.map((args) => args.slice(0, 4)),
+				[
+					["skill", "list", "--agent", "claude-code"],
+					["skill", "install", "camunda/skills", "--all"],
+					["skill", "list", "--agent", "claude-code"],
+					["skill", "install", "camunda/skills"],
+					["skill", "update", "--all", "--dir"],
+				],
 			);
 			// No suffixed copies, ever.
 			assert.ok(!existsSync(join(stub.cwd, "rocket-launch-1")));
