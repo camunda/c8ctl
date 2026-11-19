@@ -77,6 +77,8 @@ export interface PluginCtx {
 			config: MultiSelectConfig<T>,
 		) => Promise<MultiSelectResult<T>>;
 		confirm: (config: ConfirmConfig) => Promise<ConfirmResult>;
+		/** True when stdin is an interactive terminal and prompts can render. */
+		isInteractive: () => boolean;
 	};
 	/** Lazily-resolved Camunda client. Reading triggers credential resolution. */
 	readonly client: CamundaClient;

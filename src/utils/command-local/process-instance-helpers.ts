@@ -20,6 +20,16 @@ import {
 import { isRecord } from "../../core/index.ts";
 
 /**
+ * Extract process ID from BPMN file content.
+ * Shared by `c8ctl run` and the setup plugin, which starts a blueprint's
+ * process.
+ */
+export function extractProcessId(bpmnContent: string): string | null {
+	const match = bpmnContent.match(/process[^>]+id="([^"]+)"/);
+	return match ? match[1] : null;
+}
+
+/**
  * Builds an explicit empty-result message for `c8ctl list process-instance`,
  * naming the filters that were actually applied so the user understands the
  * scope of the query that returned nothing.

@@ -376,7 +376,9 @@ describe("c8ctl setup", () => {
 			"setup",
 		);
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
-		assert.match(result.stdout, /Usage: c8ctl setup/);
+		// setup is a default plugin: the host renders the plugin help shape.
+		assert.match(result.stdout, /c8ctl setup — Guided first-run setup/);
+		assert.match(result.stdout, /\(plugin: c8ctl-plugin-setup /);
 		assert.match(result.stdout, /Nothing is installed without your say\./);
 		assert.match(result.stdout, /\[SUCCESS\]/);
 		assert.match(result.stdout, /--no-modeler/);
@@ -396,9 +398,11 @@ describe("c8ctl setup", () => {
 			"--help",
 		);
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+		// setup moved to a default plugin: it is listed under Plugin
+		// Commands, and its examples are aggregated into the Examples section.
 		assert.match(
 			result.stdout,
-			/Guided first-run setup: install a local cluster/,
+			/Plugin Commands:[\s\S]*setup\s+Guided first-run setup for local Camunda 8 development/,
 		);
 		assert.match(result.stdout, /c8ctl setup --yes/);
 		assert.match(result.stdout, /c8ctl setup --remove/);
@@ -1685,18 +1689,25 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("a failed deploy closes the title line before its diagnostics", async () => {
+	test("a failed deploy prints the child diagnostics below its status line", async () => {
 		const stub = stubbedExecution({ failStep: "deploy-blueprint" });
 		try {
 			const result = await c8WithOptions(stub.options, "setup", "--yes");
 			assert.strictEqual(result.status, 1, result.stdout);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Deploy and start the process", "ERROR");
-			// The deploy helper renders through the step's logger, so its
-			// diagnostics close the title line instead of colliding with it.
-			assert.match(out, /^ {2}Deploy and start the process$/m);
-			assert.match(out, /✗ Deployment failed/);
-			// SilentError: the helper rendered the failure — no summary reprint.
+			// The deploy runs as a `c8ctl deploy` child whose diagnostics are
+			// buffered and printed after the step's status line — they never
+			// collide with the open title line or its spinner.
+			const statusAt = out.indexOf("Deploy and start the process");
+			const diagnosticsAt = out.indexOf("✗ Deployment failed");
+			assert.ok(
+				diagnosticsAt > statusAt,
+				"diagnostics must follow the status line",
+			);
+			// The child rendered the failure with its own indentation — the
+			// step's dump re-indents those lines, so the child's two-space
+			// problem detail never surfaces as a four-space summary line.
 			assert.doesNotMatch(out, /^ {4}INVALID_ARGUMENT$/m);
 			// No instance was started, so the box must not claim one is
 			// running — only the Project/Guide references remain.

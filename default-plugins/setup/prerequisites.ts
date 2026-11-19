@@ -7,7 +7,7 @@
  * the real runtime as the default, so every outcome is testable.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
 
@@ -58,14 +58,16 @@ export const MANUAL_SETUP_LINKS: readonly {
 
 function readRequiredNodeRange(): string | undefined {
 	try {
-		// src/utils/command-local/ and dist/utils/command-local/ are both
-		// three levels below the package root.
-		const pkg: unknown = JSON.parse(
-			readFileSync(
-				join(import.meta.dirname, "..", "..", "..", "package.json"),
-				"utf-8",
-			),
-		);
+		// The plugin's layout differs between development
+		// (default-plugins/setup/, two levels below the repo root) and the
+		// bundled package (dist/default-plugins/setup/, three levels below
+		// the package root) — take the first candidate that exists.
+		const packageJson = [
+			join(import.meta.dirname, "..", "..", "package.json"),
+			join(import.meta.dirname, "..", "..", "..", "package.json"),
+		].find((candidate) => existsSync(candidate));
+		if (!packageJson) return undefined;
+		const pkg: unknown = JSON.parse(readFileSync(packageJson, "utf-8"));
 		const engines =
 			pkg && typeof pkg === "object" && "engines" in pkg
 				? pkg.engines

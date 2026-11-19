@@ -19,7 +19,7 @@ import {
 	MANUAL_SETUP_LINKS,
 	type PrerequisiteFetch,
 	REQUIRED_NODE_RANGE,
-} from "../../src/utils/index.ts";
+} from "../../default-plugins/setup/prerequisites.ts";
 
 const DEFAULT_HOST = "https://downloads.camunda.cloud/release/camunda/c8run/";
 

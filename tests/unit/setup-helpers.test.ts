@@ -18,7 +18,7 @@ import {
 	SETUP_STEPS,
 	setupPlanPayload,
 	startStepSpinner,
-} from "../../src/utils/index.ts";
+} from "../../default-plugins/setup/helpers.ts";
 
 const BRAND_BLUE = "\x1b[38;2;79;57;246m";
 

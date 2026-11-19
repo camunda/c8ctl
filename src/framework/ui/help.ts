@@ -541,7 +541,10 @@ export function showHelp(): void {
 	let pluginExamples = "";
 	for (const cmd of pluginCommandsInfo) {
 		for (const ex of cmd.examples ?? []) {
-			pluginExamples += `\n  ${ex.command.padEnd(35)}${ex.description}`;
+			// Match generateExamplesSection: at least two spaces between the
+			// command and its description, however long the command is.
+			const padding = Math.max(2, 36 - ex.command.length - 2);
+			pluginExamples += `\n  ${ex.command}${" ".repeat(padding)}${ex.description}`;
 		}
 	}
 

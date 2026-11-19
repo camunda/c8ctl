@@ -1,0 +1,36 @@
+# c8ctl-plugin-setup
+
+Default c8ctl plugin providing the guided first-run setup for local Camunda 8
+development.
+
+## Commands
+
+- `c8ctl setup` — the guided wizard: start a local cluster (downloading
+  Camunda 8 Run on first run), install Desktop Modeler, create a starter
+  project from a blueprint, deploy and run it, and set up AI assistant
+  tooling (skills, MCP servers). Nothing is installed without a selection or
+  `--yes`.
+- `c8ctl setup --yes` — set up the defaults without prompting (Rocket Launch
+  blueprint).
+- `c8ctl setup --remove [--stop-cluster]` — preview and remove setup-managed
+  MCP entries, Camunda skills, and blueprint files; `--stop-cluster` also
+  stops the local cluster without purging its data. Desktop Modeler is not
+  removed.
+
+## Architecture
+
+The wizard orchestrates the commands that own each capability instead of
+reimplementing them: `c8ctl cluster start`/`stop` (cluster plugin),
+`c8ctl modeler install` (modeler plugin), `c8ctl skills install` (skills
+plugin), `c8ctl mcp install` and `c8ctl deploy` (core). Children run pinned
+to text output; their progress is buffered and surfaces only when a step
+fails.
+
+## Flags
+
+`--modeler`, `--no-modeler`, `--docs-mcp`, `--remove`, `--stop-cluster`, plus
+the global `--yes`, `--json`, `--dry-run`, `--quiet`, and `--verbose` flags.
+
+**Exit codes:** `0` when every selected step succeeded or nothing was
+installed for lack of a go-ahead; `1` when arguments failed validation or any
+step or removal action failed (remaining eligible steps still ran).

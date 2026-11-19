@@ -4,17 +4,12 @@
 // barrel (`../utils/index.ts`), never from deep utils files. Intra-utils imports
 // use direct sibling paths. Enforced by
 // tests/unit/layering-import-boundary.test.ts (Rules A and B).
-export * from "./command-local/blueprint-scaffold.ts";
 export * from "./command-local/deploy-version.ts";
 export * from "./command-local/mcp-install-helpers.ts";
 export * from "./command-local/mcp-proxy-helpers.ts";
 export * from "./command-local/open-helpers.ts";
 export * from "./command-local/process-instance-helpers.ts";
 export * from "./command-local/search-helpers.ts";
-export * from "./command-local/setup-detectors.ts";
-export * from "./command-local/setup-helpers.ts";
-export * from "./command-local/setup-prerequisites.ts";
-export * from "./command-local/setup-removal.ts";
 export * from "./command-local/skills-install-helpers.ts";
 export * from "./command-local/watch-constants.ts";
 export * from "./shared/camunda-json.ts";

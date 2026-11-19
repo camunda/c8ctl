@@ -41,6 +41,7 @@ import {
 	parseFlags,
 	parseVerbArgs,
 	confirm as promptConfirm,
+	isInteractive as promptIsInteractive,
 	multiSelect as promptMultiSelect,
 	select as promptSelect,
 	refreshCompletionsIfStale,
@@ -431,6 +432,7 @@ async function main() {
 				select: promptSelect,
 				multiSelect: promptMultiSelect,
 				confirm: promptConfirm,
+				isInteractive: promptIsInteractive,
 			},
 			get client() {
 				if (!_pluginClient) _pluginClient = createClient(pluginProfile);

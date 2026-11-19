@@ -37,56 +37,70 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
-import { extname, join, resolve } from "node:path";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, DEFAULT_PROFILE, SilentError } from "../core/index.ts";
+import { DEFAULT_PROFILE, renderCommandFailure } from "../../src/core/index.ts";
+import type {
+	PluginCommands,
+	PluginCtx,
+	PluginMetadata,
+} from "../../src/framework/plugins/plugin-loader.ts";
 import {
-	type CommandContext,
-	defineCommand,
-	isInteractive,
-	multiSelect,
-	select,
-} from "../framework/index.ts";
+	detectMcpHarnesses,
+	writeMcpConfig,
+} from "../../src/utils/command-local/mcp-install-helpers.ts";
+import { extractProcessId } from "../../src/utils/command-local/process-instance-helpers.ts";
 import {
 	CAMUNDA_SKILLS_REPOSITORY,
-	checkLocalClusterHealth,
-	checkPrerequisites,
+	detectInstalledHarnesses,
+	removeCamundaSkill,
+} from "../../src/utils/command-local/skills-install-helpers.ts";
+import {
+	removeSetupBlueprint,
+	SETUP_BLUEPRINTS,
+	type SetupBlueprint,
+	scaffoldSetupBlueprint,
+	setupBlueprintById,
+} from "./blueprint-scaffold.ts";
+import { checkLocalClusterHealth } from "./detectors.ts";
+import {
 	createLineForwarder,
 	defaultSelection,
-	detectInstalledHarnesses,
 	enforceComponentDependencies,
 	formatStepResult,
 	formatStepStatusSuffix,
-	inspectSetupRemovalInventory,
 	isClusterProgressLine,
-	MANUAL_SETUP_LINKS,
-	planMcpConfigs,
-	removeCamundaSkill,
-	removeSetupBlueprint,
 	renderNextSteps,
 	renderWelcomeBanner,
-	SETUP_BLUEPRINTS,
 	SETUP_COMPONENTS,
 	SETUP_STEPS,
 	type SetupComponentId,
-	type SetupRemovalInventory,
 	type SetupStepId,
 	type StepSpinner,
-	scaffoldSetupBlueprint,
-	setupBlueprintById,
 	setupPlanPayload,
 	startStepSpinner,
-	writeMcpConfig,
-} from "../utils/index.ts";
-import { deployResources } from "./helpers/deploy-helpers.ts";
-import { buildMcpConnection } from "./mcp.ts";
-import { extractProcessId } from "./run.ts";
+} from "./helpers.ts";
+import { checkPrerequisites, MANUAL_SETUP_LINKS } from "./prerequisites.ts";
+import {
+	inspectSetupRemovalInventory,
+	type SetupRemovalInventory,
+} from "./removal.ts";
 
-/** Flags the setup handler reads, as declared in the command registry. */
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
+
+/** Flags the setup handler reads, as declared in the plugin's flag table. */
 interface SetupFlags {
 	readonly modeler?: boolean;
 	readonly "no-modeler"?: boolean;
@@ -143,12 +157,9 @@ function effectiveBlueprint(
 
 // ── Step executors ─────────────────────────────────────────────────
 
-type StepExecutor = (
-	ctx: CommandContext,
-	run: SetupRun,
-) => Promise<void> | void;
+type StepExecutor = (ctx: PluginCtx, run: SetupRun) => Promise<void> | void;
 
-async function runPrerequisites(ctx: CommandContext): Promise<void> {
+async function runPrerequisites(ctx: PluginCtx): Promise<void> {
 	const results = await checkPrerequisites();
 	for (const result of results) {
 		ctx.logger.info(
@@ -170,10 +181,20 @@ async function runPrerequisites(ctx: CommandContext): Promise<void> {
 	}
 }
 
-/** The CLI's own entry point, for self-invoking plugin commands. */
-const CLI_ENTRY = realpathSync(
-	resolve(import.meta.dirname, `../index${extname(import.meta.filename)}`),
-);
+/**
+ * The CLI's own entry point, for self-invoking c8ctl commands. The plugin
+ * sits at default-plugins/setup/ in development (entry: src/index.ts) and
+ * at dist/default-plugins/setup/ once bundled (entry: dist/index.js) —
+ * take the first candidate that exists.
+ */
+const CLI_ENTRY = (() => {
+	const dir = realpathSync(import.meta.dirname);
+	const candidates = [
+		resolve(dir, "..", "..", "index.js"),
+		resolve(dir, "..", "..", "src", "index.ts"),
+	];
+	return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+})();
 
 /**
  * Run a c8ctl command as a child process and map its exit code onto a
@@ -186,20 +207,24 @@ const CLI_ENTRY = realpathSync(
  * drops noise like the c8run download progress, `//> 42% …`) and feeds
  * the step's output buffer (via ctx.logger) — it surfaces only when the
  * step fails, except lines `promoteStdoutLine` marks essential. stderr
- * passes through immediately: warnings and failure diagnostics are
- * actionable either way. The child is pinned to text mode so its lines
- * stay plain and filterable no matter the session's output mode.
+ * buffers the same way by default, so a step's failure diagnostics print
+ * after its closed title line; `stderrPassthrough` opts into immediate
+ * printing for the cluster children, whose warnings are actionable while
+ * the cluster keeps starting. The child is pinned to text mode so its
+ * lines stay plain and filterable no matter the session's output mode.
  */
 function spawnC8ctl(
-	ctx: CommandContext,
+	ctx: PluginCtx,
 	argv: string[],
 	{
 		skipStdoutLine,
 		promoteStdoutLine,
+		stderrPassthrough = false,
 		extraEnv,
 	}: {
 		skipStdoutLine?: (line: string) => boolean;
 		promoteStdoutLine?: (line: string) => boolean;
+		stderrPassthrough?: boolean;
 		extraEnv?: Record<string, string>;
 	} = {},
 ): Promise<void> {
@@ -228,7 +253,10 @@ function spawnC8ctl(
 		});
 		const err = createLineForwarder({
 			write: (line) =>
-				ctx.logger.info(line, { stream: "stderr", essential: true }),
+				ctx.logger.info(line, {
+					stream: "stderr",
+					essential: stderrPassthrough,
+				}),
 			skip: () => false,
 		});
 		child.stdout?.setEncoding("utf-8");
@@ -250,17 +278,19 @@ function spawnC8ctl(
 	});
 }
 
-function spawnClusterStart(ctx: CommandContext): Promise<void> {
+function spawnClusterStart(ctx: PluginCtx): Promise<void> {
 	return spawnC8ctl(ctx, ["cluster", "start"], {
 		skipStdoutLine: isClusterProgressLine,
+		stderrPassthrough: true,
 	});
 }
 
-function spawnClusterStop(ctx: CommandContext): Promise<void> {
+function spawnClusterStop(ctx: PluginCtx): Promise<void> {
 	// Removal reports every child line, matching the previous dedicated
-	// spawner whose stdout forwarder marked all lines essential.
+	// spawner whose forwarders marked all lines essential.
 	return spawnC8ctl(ctx, ["cluster", "stop"], {
 		promoteStdoutLine: () => true,
+		stderrPassthrough: true,
 	});
 }
 
@@ -268,10 +298,7 @@ function spawnClusterStop(ctx: CommandContext): Promise<void> {
 const CLUSTER_HEALTH_TIMEOUT_MS = 120_000;
 const CLUSTER_HEALTH_POLL_MS = 2_000;
 
-async function runClusterStart(
-	ctx: CommandContext,
-	run: SetupRun,
-): Promise<void> {
+async function runClusterStart(ctx: PluginCtx, run: SetupRun): Promise<void> {
 	await spawnClusterStart(ctx);
 	const deadline = Date.now() + CLUSTER_HEALTH_TIMEOUT_MS;
 	for (;;) {
@@ -292,7 +319,7 @@ async function runClusterStart(
 	}
 }
 
-async function runModelerInstall(ctx: CommandContext): Promise<void> {
+async function runModelerInstall(ctx: PluginCtx): Promise<void> {
 	// The modeler plugin owns the installation; setup runs it as a child
 	// process. Always quiet: the installer's progress chatter is noise next
 	// to the step report — the step's status line is the signal. Failures
@@ -301,7 +328,7 @@ async function runModelerInstall(ctx: CommandContext): Promise<void> {
 }
 
 async function runBlueprintScaffold(
-	ctx: CommandContext,
+	ctx: PluginCtx,
 	run: SetupRun,
 ): Promise<void> {
 	const id = run.blueprintId ?? SETUP_BLUEPRINTS[0].id;
@@ -318,7 +345,7 @@ async function runBlueprintScaffold(
 }
 
 async function runBlueprintDeploy(
-	ctx: CommandContext,
+	ctx: PluginCtx,
 	run: SetupRun,
 ): Promise<void> {
 	const { logger } = ctx;
@@ -347,22 +374,35 @@ async function runBlueprintDeploy(
 	}
 
 	// Both mutations target the cluster the health check just probed: the
-	// built-in local profile and its default tenant. An explicit profile
-	// and tenant win over the session and CAMUNDA_* env vars, so neither
-	// a remote active profile nor a preselected tenant can redirect the
-	// first-run deployment.
-	await deployResources([deployDir], {
-		profile: DEFAULT_PROFILE,
-		basePath: directory,
-		verbose: ctx.verbose,
-		tenantId: LOCAL_TENANT_ID,
-		// The step report is the signal; its progress render is noise here.
-		// The step's buffered logger routes failure diagnostics through the
-		// title-closing hook instead of colliding with the open title line.
-		quiet: true,
-		suppressSkippedLog: true,
-		logger: ctx.logger,
-	});
+	// built-in local profile and its default tenant. The deploy runs as a
+	// `c8ctl deploy` child process — deploy-helpers is command-private, so
+	// the plugin orchestrates the command that owns it. The child pins the
+	// tenant through CAMUNDA_DEFAULT_TENANT_ID and runs with a throwaway
+	// data dir so a session's preselected tenant cannot redirect the
+	// first-run deployment; --profile local likewise wins over CAMUNDA_*
+	// env vars.
+	const deployDataDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-deploy-"));
+	try {
+		await spawnC8ctl(
+			ctx,
+			[
+				"deploy",
+				deployDir,
+				"--profile",
+				DEFAULT_PROFILE,
+				"--quiet",
+				...(ctx.verbose ? ["--verbose"] : []),
+			],
+			{
+				extraEnv: {
+					CAMUNDA_DEFAULT_TENANT_ID: LOCAL_TENANT_ID,
+					C8CTL_DATA_DIR: deployDataDir,
+				},
+			},
+		);
+	} finally {
+		rmSync(deployDataDir, { recursive: true, force: true });
+	}
 
 	const processFile = join(directory, blueprint.processFile);
 	const processId = extractProcessId(readFileSync(processFile, "utf-8"));
@@ -370,13 +410,15 @@ async function runBlueprintDeploy(
 		throw new Error(`Could not find a process id in ${blueprint.processFile}.`);
 	}
 	logger.info(`Starting a ${blueprint.name} process instance...`);
-	const created = await createClient(DEFAULT_PROFILE).createProcessInstance({
-		processDefinitionId: ProcessDefinitionId.assumeExists(processId),
-		tenantId: TenantId.assumeExists(LOCAL_TENANT_ID),
-		...(blueprint.startVariables !== undefined && {
-			variables: blueprint.startVariables,
-		}),
-	});
+	const created = await c8ctl
+		.createClient(DEFAULT_PROFILE)
+		.createProcessInstance({
+			processDefinitionId: ProcessDefinitionId.assumeExists(processId),
+			tenantId: TenantId.assumeExists(LOCAL_TENANT_ID),
+			...(blueprint.startVariables !== undefined && {
+				variables: blueprint.startVariables,
+			}),
+		});
 	logger.info(`Process instance created: ${created.processInstanceKey}`);
 	run.instanceStarted = true;
 }
@@ -384,7 +426,7 @@ async function runBlueprintDeploy(
 const NO_HARNESS_HINT =
 	"Install Claude Code, GitHub Copilot CLI or Cursor, then re-run c8ctl setup.";
 
-async function runSkillsInstall(ctx: CommandContext): Promise<void> {
+async function runSkillsInstall(ctx: PluginCtx): Promise<void> {
 	const harnesses = detectInstalledHarnesses();
 	if (harnesses.length === 0) {
 		ctx.logger.info(
@@ -404,22 +446,34 @@ async function runSkillsInstall(ctx: CommandContext): Promise<void> {
 	}
 }
 
+/**
+ * The core `mcp install` command owns MCP configuration; setup runs it as
+ * a child process pinned to the local profile (the docs server needs no
+ * profile). The child's "MCP configuration: …" lines are the step's
+ * takeaway, so they are promoted to essential output while its remaining
+ * chatter stays buffered.
+ */
 function runMcpInstall(docs: boolean): StepExecutor {
-	return (ctx) => {
-		const plans = planMcpConfigs({
-			requested: [],
-			operation: "install",
-			docs,
-			orchestration: !docs,
-			alias: "camunda",
-			connection: docs ? undefined : buildMcpConnection(DEFAULT_PROFILE),
-		});
-		for (const plan of plans) {
-			writeMcpConfig(plan);
-			ctx.logger.info(`MCP configuration: ${plan.harness} (${plan.path})`, {
-				essential: true,
-			});
+	return async (ctx) => {
+		// Pre-flight with the same detection rules the installer uses, so
+		// a machine without a known harness soft-skips instead of failing
+		// the step on the child's "no harness" error.
+		if (detectMcpHarnesses().length === 0) {
+			ctx.logger.info(
+				`No supported AI coding harness detected — nothing to configure. ${NO_HARNESS_HINT}`,
+				{ essential: true },
+			);
+			return;
 		}
+		await spawnC8ctl(
+			ctx,
+			docs
+				? ["mcp", "install", "--docs"]
+				: ["mcp", "install", "--profile", DEFAULT_PROFILE],
+			{
+				promoteStdoutLine: (line) => line.startsWith("MCP configuration: "),
+			},
+		);
 		if (docs) {
 			ctx.logger.info(
 				"The docs server asks you to sign in in a browser on first use.",
@@ -431,32 +485,6 @@ function runMcpInstall(docs: boolean): StepExecutor {
 	};
 }
 
-/** planMcpConfigs throws this when the machine has no known harness. */
-function isNoHarnessError(error: unknown): boolean {
-	return (
-		error instanceof Error &&
-		error.message.startsWith("No supported MCP harness was detected")
-	);
-}
-
-function guardedMcpInstall(docs: boolean): StepExecutor {
-	const executor = runMcpInstall(docs);
-	return async (ctx, run) => {
-		try {
-			await executor(ctx, run);
-		} catch (error) {
-			if (isNoHarnessError(error)) {
-				ctx.logger.info(
-					`No supported AI coding harness detected — nothing to configure. ${NO_HARNESS_HINT}`,
-					{ essential: true },
-				);
-				return;
-			}
-			throw error;
-		}
-	};
-}
-
 const STEP_EXECUTORS: Record<SetupStepId, StepExecutor> = {
 	prerequisites: runPrerequisites,
 	"start-cluster": runClusterStart,
@@ -464,8 +492,8 @@ const STEP_EXECUTORS: Record<SetupStepId, StepExecutor> = {
 	"scaffold-blueprint": runBlueprintScaffold,
 	"deploy-blueprint": runBlueprintDeploy,
 	"install-skills": runSkillsInstall,
-	"cluster-mcp": guardedMcpInstall(false),
-	"docs-mcp": guardedMcpInstall(true),
+	"cluster-mcp": runMcpInstall(false),
+	"docs-mcp": runMcpInstall(true),
 };
 
 // ── The step runner ────────────────────────────────────────────────
@@ -485,10 +513,10 @@ interface BufferedLine {
  * errors, which precede a failing step's diagnostics — reopens after.
  */
 function withBufferedOutput(
-	ctx: CommandContext,
+	ctx: PluginCtx,
 	buffer: BufferedLine[],
 	aroundPassthrough: (emit: () => void, options?: { resume: boolean }) => void,
-): CommandContext {
+): PluginCtx {
 	const { logger } = ctx;
 	const bufferedLogger = Object.create(logger, {
 		info: {
@@ -525,7 +553,10 @@ function withBufferedOutput(
 			},
 		},
 	});
-	return { ...ctx, logger: bufferedLogger };
+	// Prototype-chain override, not a spread: spreading PluginCtx would
+	// evaluate its lazy `client` getter and resolve credentials for a step
+	// that may never talk to a cluster.
+	return Object.create(ctx, { logger: { value: bufferedLogger } });
 }
 
 /**
@@ -538,7 +569,7 @@ function withBufferedOutput(
  * the state steps handed along (e.g. the scaffolded project directory).
  */
 async function executePlan(
-	ctx: CommandContext,
+	ctx: PluginCtx,
 	selected: ReadonlySet<SetupComponentId>,
 	blueprintId: string | undefined,
 	{ color }: { color: boolean },
@@ -657,13 +688,9 @@ async function executePlan(
 					essential: true,
 				});
 			}
-			// A SilentError was already rendered in full by its helper
-			// (e.g. the deploy diagnostics) — don't print the summary again.
-			if (!(error instanceof SilentError)) {
-				const message = error instanceof Error ? error.message : String(error);
-				for (const line of message.split("\n")) {
-					logger.info(`    ${line}`, { essential: true });
-				}
+			const message = error instanceof Error ? error.message : String(error);
+			for (const line of message.split("\n")) {
+				logger.info(`    ${line}`, { essential: true });
 			}
 			// Errors may carry a recovery hint (e.g. scaffold errors) — the
 			// message alone is not actionable without it.
@@ -790,17 +817,13 @@ function setupRemovalPreview(
 	};
 }
 
-function removalFailure(
-	ctx: CommandContext,
-	action: string,
-	error: unknown,
-): void {
+function removalFailure(ctx: PluginCtx, action: string, error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
 	ctx.logger.error(`Could not ${action}: ${message}`);
 }
 
 async function applySetupRemoval(
-	ctx: CommandContext,
+	ctx: PluginCtx,
 	inventory: SetupRemovalInventory,
 	stopCluster: boolean,
 ): Promise<void> {
@@ -914,7 +937,7 @@ async function applySetupRemoval(
 }
 
 async function runSetupRemoval(
-	ctx: CommandContext,
+	ctx: PluginCtx,
 	stopCluster: boolean,
 ): Promise<void> {
 	const { logger } = ctx;
@@ -922,9 +945,9 @@ async function runSetupRemoval(
 	const preview = setupRemovalPreview(inventory, stopCluster);
 	const jsonMode = logger.mode === "json";
 
-	if (ctx.isDryRun || jsonMode) {
+	if (ctx.dryRun || jsonMode) {
 		logger.json({
-			...(ctx.isDryRun ? { dryRun: true } : {}),
+			...(ctx.dryRun ? { dryRun: true } : {}),
 			...preview.payload,
 		});
 		return;
@@ -942,9 +965,9 @@ async function runSetupRemoval(
 		return;
 	}
 
-	const interactive = !ctx.quiet && isInteractive() && !ctx.yes;
+	const interactive = !ctx.quiet && ctx.prompt.isInteractive() && !ctx.yes;
 	if (interactive) {
-		const confirmation = await select({
+		const confirmation = await ctx.prompt.select({
 			message: "Remove the listed setup components?",
 			options: [
 				{ label: "Keep these components", value: false },
@@ -974,7 +997,7 @@ async function runSetupRemoval(
 
 // ── The command ────────────────────────────────────────────────────
 
-export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
+async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 	const { logger } = ctx;
 
 	if (flags["stop-cluster"] && !flags.remove) {
@@ -987,11 +1010,11 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 			);
 		}
 		await runSetupRemoval(ctx, flags["stop-cluster"] === true);
-		return { kind: "none" };
+		return;
 	}
 
 	// Custom dry-run payload: setup performs local installs, not one API call.
-	if (ctx.isDryRun) {
+	if (ctx.dryRun) {
 		const selected = applyComponentFlags(defaultSelection(), flags);
 		logger.json({
 			dryRun: true,
@@ -999,12 +1022,13 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 				blueprint: effectiveBlueprint(selected),
 			}),
 		});
-		return { kind: "none" };
+		return;
 	}
 
 	const jsonMode = logger.mode === "json";
 	// JSON mode never prompts: the plan payload must not block on a TTY menu.
-	const interactive = !jsonMode && isInteractive() && !ctx.yes && !ctx.quiet;
+	const interactive =
+		!jsonMode && ctx.prompt.isInteractive() && !ctx.yes && !ctx.quiet;
 	// The step report goes to stdout — color its status tags only when
 	// stdout is a terminal, so piped output stays plain text.
 	const color = process.stdout.isTTY === true;
@@ -1021,7 +1045,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 
 	let selected: ReadonlySet<SetupComponentId>;
 	if (interactive) {
-		const result = await multiSelect({
+		const result = await ctx.prompt.multiSelect({
 			message: "What should we set up for you?",
 			options: SETUP_COMPONENTS.map((c) => ({
 				label: c.label,
@@ -1034,7 +1058,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		});
 		if (result.cancelled) {
 			logger.info("Cancelled — nothing was changed.");
-			return { kind: "none" };
+			return;
 		}
 		selected = new Set(result.values);
 	} else {
@@ -1045,7 +1069,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	// Every question comes before any work: pick the blueprint next.
 	let blueprintId = effectiveBlueprint(selected);
 	if (selected.has("blueprint") && interactive) {
-		const choice = await select({
+		const choice = await ctx.prompt.select({
 			message: "Which starter blueprint should we install?",
 			options: SETUP_BLUEPRINTS.map((b) => ({
 				label: b.name,
@@ -1055,14 +1079,14 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		});
 		if (choice.cancelled) {
 			logger.info("Cancelled — nothing was changed.");
-			return { kind: "none" };
+			return;
 		}
 		blueprintId = choice.value;
 	}
 
 	if (jsonMode) {
 		logger.json(setupPlanPayload(selected, { blueprint: blueprintId }));
-		return { kind: "none" };
+		return;
 	}
 
 	// Without an interactive selection or --yes there is no go-ahead:
@@ -1071,7 +1095,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 		logger.info(
 			'Nothing was installed. Run "c8ctl setup --yes" to set everything up, or run interactively to choose what gets installed.',
 		);
-		return { kind: "none" };
+		return;
 	}
 
 	// No surprise browser windows: the docs MCP sign-in opens one when
@@ -1132,9 +1156,113 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 			{ essential: true },
 		);
 		process.exitCode = 1;
-		return { kind: "none" };
+		return;
 	}
 
 	logger.success("Setup finished.");
-	return { kind: "none" };
-});
+}
+
+async function setupHandler(
+	_args: string[],
+	flagsRecord: Record<string, unknown> | undefined,
+	ctx?: PluginCtx,
+): Promise<void> {
+	if (!ctx) throw new Error("setup requires the plugin host context");
+	const flags: SetupFlags = {
+		modeler: flagsRecord?.modeler === true,
+		"no-modeler": flagsRecord?.["no-modeler"] === true,
+		"docs-mcp": flagsRecord?.["docs-mcp"] === true,
+		remove: flagsRecord?.remove === true,
+		"stop-cluster": flagsRecord?.["stop-cluster"] === true,
+	};
+	try {
+		await runSetup(ctx, flags);
+	} catch (error) {
+		renderCommandFailure(ctx.logger, "Failed to setup", error, {
+			verbose: ctx.verbose,
+		});
+		process.exitCode = 1;
+	}
+}
+
+const SETUP_HELP_DESCRIPTION = `Guided first-run setup: install a local cluster, a starter blueprint project, and AI assistant tooling.
+
+The wizard offers to start a local cluster (downloading Camunda 8 Run on first run), install Desktop Modeler, create a starter project from a blueprint, deploy and run it, and set up AI assistant tooling. Nothing is installed without your say.
+
+Each step announces its title and ends in [SUCCESS], [ERROR] or [SKIPPED]; a step's own output is shown only when it fails, and a failed step does not stop the rest. The blueprint and the cluster MCP server need the local cluster — deselect the cluster and both options are disabled.
+
+A browser window opens when the local cluster reports healthy; the docs MCP server asks you to sign in in a browser on first use — announced up front.
+
+A run without a selection (piped output, CI) installs nothing unless you pass --yes; --json prints the plan without executing. The starter blueprint is chosen in the wizard; a non-interactive --yes run uses Rocket Launch.
+
+Exit code 0: every selected setup step succeeded, or nothing was installed for lack of a go-ahead (wizard cancelled with Escape; a piped, --quiet or JSON-mode run without --yes; --json or --dry-run printing the plan). Ctrl+C ends the wizard by signal (130 on POSIX shells). A re-run reuses finished work where possible; the deploy, process start and skills install repeat by design. Exit code 1: arguments failed validation, or a step failed — other eligible steps still ran, while dependents (and the deploy finale after any failure) were skipped.
+
+--remove shows setup-managed MCP entries, Camunda skills, and marker-listed blueprint files before removing them. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. Desktop Modeler is not removed. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
+
+--stop-cluster is available only with --remove. It stops the local cluster without purging runtime data or deleting downloaded binaries.
+
+Removal exits 0 when every requested action succeeds, and 1 if any action fails; the other removal actions still run.`;
+
+export const metadata: PluginMetadata = {
+	name: "setup",
+	description: "Guided first-run setup for local Camunda 8 development",
+	commands: {
+		setup: {
+			description: "Guided first-run setup for local Camunda 8 development",
+			helpDescription: SETUP_HELP_DESCRIPTION,
+			examples: [
+				{
+					command: "c8ctl setup",
+					description: "Run the guided setup wizard",
+				},
+				{
+					command: "c8ctl setup --yes",
+					description: "Set up the defaults, without prompting",
+				},
+				{
+					command: "c8ctl setup --remove",
+					description: "Preview setup-managed components to remove",
+				},
+				{
+					command: "c8ctl setup --remove --yes",
+					description: "Remove the previewed setup-managed components",
+				},
+				{
+					command: "c8ctl setup --remove --stop-cluster --yes",
+					description: "Also stop the local cluster without purging its data",
+				},
+			],
+		},
+	},
+};
+
+export const commands: PluginCommands = {
+	setup: {
+		flags: {
+			modeler: {
+				type: "boolean",
+				description: "Install Desktop Modeler, whatever the selection",
+			},
+			"no-modeler": {
+				type: "boolean",
+				description: "Do not install Desktop Modeler",
+			},
+			"docs-mcp": {
+				type: "boolean",
+				description:
+					"Also configure the docs MCP server (off unless selected or flagged)",
+			},
+			remove: {
+				type: "boolean",
+				description:
+					"Preview and remove setup-managed MCP entries, skills, and blueprint files",
+			},
+			"stop-cluster": {
+				type: "boolean",
+				description:
+					"With --remove, stop the local cluster without purging its data",
+			},
+		},
+		handler: setupHandler,
+	},
+};

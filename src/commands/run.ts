@@ -15,16 +15,7 @@ import {
 } from "@camunda8/orchestration-cluster-api";
 import { resolveTenantId } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
-import { parseVariablesFlag } from "../utils/index.ts";
-
-/**
- * Extract process ID from BPMN file content.
- * Shared with `c8ctl setup`, which starts a blueprint's process.
- */
-export function extractProcessId(bpmnContent: string): string | null {
-	const match = bpmnContent.match(/process[^>]+id="([^"]+)"/);
-	return match ? match[1] : null;
-}
+import { extractProcessId, parseVariablesFlag } from "../utils/index.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
 
