@@ -1,7 +1,23 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	unlinkSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { dirname, posix, win32 } from "node:path";
+import {
+	basename,
+	dirname,
+	isAbsolute,
+	posix,
+	relative,
+	resolve,
+	sep,
+	win32,
+} from "node:path";
 import { isRecord } from "../../core/index.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -93,6 +109,11 @@ function buildSkillUpdateArgs(skills: string[], directory: string): string[] {
 interface InstalledCamundaSkill {
 	readonly name: string;
 	readonly directory: string;
+	readonly path: string;
+}
+
+export interface CamundaSkillInstallation extends InstalledCamundaSkill {
+	readonly harness: string;
 }
 
 function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
@@ -121,7 +142,11 @@ function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
 		) {
 			throw new Error("GitHub CLI returned incomplete Camunda skill metadata.");
 		}
-		skills.push({ name: entry.skillName, directory: dirname(entry.path) });
+		skills.push({
+			name: entry.skillName,
+			directory: dirname(entry.path),
+			path: entry.path,
+		});
 	}
 	return skills;
 }
@@ -268,13 +293,180 @@ function runCommand(
 	});
 }
 
+export async function listCamundaSkills(
+	harness: string,
+	runner: SkillInstallRunner = runCommand,
+): Promise<CamundaSkillInstallation[]> {
+	const listed = await runner("gh", buildSkillListArgs(harness));
+	requireSuccessfulSkillCommand(listed, "check for installed");
+	return installedCamundaSkills(listed.stdout).map((skill) => ({
+		...skill,
+		harness,
+	}));
+}
+
+function isWithinPath(root: string, candidate: string): boolean {
+	const relativePath = relative(root, candidate);
+	return (
+		relativePath === "" ||
+		(relativePath !== ".." &&
+			!relativePath.startsWith(`..${sep}`) &&
+			!isAbsolute(relativePath))
+	);
+}
+
+function harnessSkillDirectories({
+	harness,
+	env,
+	home,
+	platform,
+}: {
+	harness: string;
+	env: Env;
+	home: string;
+	platform: string;
+}): string[] {
+	return harnessConfigDirectories({ harness, env, home, platform }).map(
+		(directory) => resolve(joinForPlatform(platform, directory, "skills")),
+	);
+}
+
+interface SkillRemovalOptions {
+	env?: Env;
+	home?: string;
+	platform?: string;
+}
+
+export function hasCamundaUserSkillsDirectory(
+	harness: string,
+	{
+		env = process.env,
+		home,
+		platform = process.platform,
+	}: SkillRemovalOptions = {},
+): boolean {
+	const userHome =
+		home ??
+		(platform === "win32"
+			? env.USERPROFILE || env.HOME || homedir()
+			: env.HOME || homedir());
+	return harnessSkillDirectories({
+		harness,
+		env,
+		home: userHome,
+		platform,
+	}).some(
+		(directory) =>
+			statSync(directory, { throwIfNoEntry: false })?.isDirectory() === true,
+	);
+}
+
+function skillRemovalLocation(
+	skill: CamundaSkillInstallation,
+	{ env = process.env, home, platform = process.platform }: SkillRemovalOptions,
+): { directory: string; root: string } {
+	const userHome =
+		home ??
+		(platform === "win32"
+			? env.USERPROFILE || env.HOME || homedir()
+			: env.HOME || homedir());
+	if (!isAbsolute(skill.path)) {
+		throw new Error(
+			`Cannot safely remove Camunda skill "${skill.name}": GitHub CLI returned a non-absolute path.`,
+		);
+	}
+
+	const directory = resolve(skill.path);
+	const skillName = skill.name.split(/[\\/]/).at(-1);
+	if (!skillName || basename(directory) !== skillName) {
+		throw new Error(
+			`Cannot safely remove Camunda skill "${skill.name}": its listed path does not match the skill name.`,
+		);
+	}
+
+	const roots = harnessSkillDirectories({
+		harness: skill.harness,
+		env,
+		home: userHome,
+		platform,
+	});
+	const root = roots.find(
+		(candidate) =>
+			candidate !== directory && isWithinPath(candidate, directory),
+	);
+	if (!root) {
+		throw new Error(
+			`Cannot safely remove Camunda skill "${skill.name}" from ${skill.path}: the path is outside the ${skill.harness} user skills directory.`,
+		);
+	}
+	return { directory, root };
+}
+
+export function camundaSkillRemovalPath(
+	skill: CamundaSkillInstallation,
+	options: SkillRemovalOptions = {},
+): string {
+	return skillRemovalLocation(skill, options).directory;
+}
+
+/**
+ * Remove a listed Camunda skill directory without following a skill or parent
+ * symlink outside the harness's user-scope skills directory.
+ */
+export function removeCamundaSkill(
+	skill: CamundaSkillInstallation,
+	options: SkillRemovalOptions = {},
+): void {
+	const { directory, root } = skillRemovalLocation(skill, options);
+	const directoryInfo = lstatSync(directory, { throwIfNoEntry: false });
+	if (!directoryInfo) return;
+	if (directoryInfo.isSymbolicLink()) {
+		const rootInfo = statSync(root, { throwIfNoEntry: false });
+		if (!rootInfo?.isDirectory()) {
+			throw new Error(
+				`Cannot safely remove Camunda skill "${skill.name}": its user skills directory is unavailable.`,
+			);
+		}
+		const rootRealPath = realpathSync(root);
+		const parentRealPath = realpathSync(dirname(directory));
+		if (!isWithinPath(rootRealPath, parentRealPath)) {
+			throw new Error(
+				`Cannot safely remove Camunda skill "${skill.name}": its parent directory resolves outside the user skills directory.`,
+			);
+		}
+		unlinkSync(directory);
+		return;
+	}
+	if (!directoryInfo.isDirectory()) {
+		throw new Error(
+			`Cannot safely remove Camunda skill "${skill.name}": its listed path is not a directory.`,
+		);
+	}
+
+	const rootInfo = statSync(root, { throwIfNoEntry: false });
+	if (!rootInfo?.isDirectory()) {
+		throw new Error(
+			`Cannot safely remove Camunda skill "${skill.name}": its user skills directory is unavailable.`,
+		);
+	}
+	const rootRealPath = realpathSync(root);
+	const directoryRealPath = realpathSync(directory);
+	if (
+		!isWithinPath(rootRealPath, directoryRealPath) ||
+		directoryRealPath === rootRealPath
+	) {
+		throw new Error(
+			`Cannot safely remove Camunda skill "${skill.name}": its directory resolves outside the user skills directory.`,
+		);
+	}
+	rmSync(directory, { recursive: true });
+}
+
 export async function runSkillInstall(
 	harness: string,
 	runner: SkillInstallRunner = runCommand,
 ): Promise<void> {
-	const listed = await runner("gh", buildSkillListArgs(harness));
-	requireSuccessfulSkillCommand(listed, "check for installed");
-	const installed = installedCamundaSkills(listed.stdout);
+	const installed = await listCamundaSkills(harness, runner);
 	if (installed.length === 0) {
 		requireSuccessfulSkillCommand(
 			await runner("gh", buildSkillInstallArgs(harness)),

@@ -61,9 +61,12 @@ import {
 	enforceComponentDependencies,
 	formatStepResult,
 	formatStepStatusSuffix,
+	inspectSetupRemovalInventory,
 	isClusterProgressLine,
 	MANUAL_SETUP_LINKS,
 	planMcpConfigs,
+	removeCamundaSkill,
+	removeSetupBlueprint,
 	renderNextSteps,
 	renderWelcomeBanner,
 	runSkillInstall,
@@ -71,6 +74,7 @@ import {
 	SETUP_COMPONENTS,
 	SETUP_STEPS,
 	type SetupComponentId,
+	type SetupRemovalInventory,
 	type SetupStepId,
 	type StepSpinner,
 	scaffoldSetupBlueprint,
@@ -89,6 +93,8 @@ interface SetupFlags {
 	readonly modeler?: boolean;
 	readonly "no-modeler"?: boolean;
 	readonly "docs-mcp"?: boolean;
+	readonly remove?: boolean;
+	readonly "stop-cluster"?: boolean;
 }
 
 /**
@@ -215,6 +221,42 @@ function spawnClusterStart(ctx: CommandContext): Promise<void> {
 			} else {
 				rejectPromise(
 					new Error(`c8ctl cluster start failed (exit code ${code}).`),
+				);
+			}
+		});
+	});
+}
+
+function spawnClusterStop(ctx: CommandContext): Promise<void> {
+	return new Promise((resolvePromise, rejectPromise) => {
+		const child = spawn(process.execPath, [CLI_ENTRY, "cluster", "stop"], {
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, C8CTL_OUTPUT_MODE: "text" },
+		});
+		const forward = (stream: "stdout" | "stderr") =>
+			createLineForwarder({
+				write: (line) => ctx.logger.info(line, { stream, essential: true }),
+				skip: () => false,
+			});
+		const out = forward("stdout");
+		const err = forward("stderr");
+		child.stdout?.setEncoding("utf-8");
+		child.stderr?.setEncoding("utf-8");
+		child.stdout?.on("data", (chunk: string) => out.push(chunk));
+		child.stderr?.on("data", (chunk: string) => err.push(chunk));
+		child.on("error", (error) =>
+			rejectPromise(
+				new Error(`Could not run c8ctl cluster stop: ${error.message}`),
+			),
+		);
+		child.on("close", (code) => {
+			out.flush();
+			err.flush();
+			if (code === 0) {
+				resolvePromise();
+			} else {
+				rejectPromise(
+					new Error(`c8ctl cluster stop failed (exit code ${code}).`),
 				);
 			}
 		});
@@ -641,10 +683,312 @@ async function executePlan(
 	return { failures, run };
 }
 
+function setupRemovalPreview(
+	inventory: SetupRemovalInventory,
+	stopCluster: boolean,
+): {
+	text: string;
+	payload: {
+		command: "setup";
+		action: "remove";
+		preview: true;
+		items: Record<string, unknown>[];
+		warnings?: string[];
+	};
+} {
+	const items: Record<string, unknown>[] = [];
+	const warnings: string[] = [];
+	const lines = ["Setup removal preview:"];
+
+	for (const { plan, servers, preservedServers } of inventory.mcp) {
+		for (const server of servers) {
+			items.push({
+				type: "mcp-server",
+				harness: plan.harness,
+				server,
+				path: plan.path,
+			});
+			lines.push(
+				`  Remove MCP server "${server}" for ${plan.harness} from ${plan.path}`,
+			);
+		}
+		for (const server of preservedServers) {
+			const warning = `Preserved foreign MCP server "${server}" for ${plan.harness} in ${plan.path}; it does not match setup-managed configuration.`;
+			warnings.push(warning);
+			lines.push(`  ${warning}`);
+		}
+	}
+
+	for (const failure of inventory.mcpPlanningFailures) {
+		const warning = `Could not inspect MCP configuration for ${failure.harness}: ${failure.message}. That configuration was left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
+	}
+
+	for (const failure of inventory.skillDiscoveryFailures) {
+		const warning = `Could not inspect Camunda skills for ${failure.harness}: ${failure.message}. Those skills were left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
+	}
+
+	for (const failure of inventory.blueprintPlanningFailures) {
+		const warning = `Could not inspect setup blueprint marker in ${failure.directory}: ${failure.message}. That project was left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
+	}
+
+	for (const skill of inventory.skills) {
+		items.push({
+			type: "skill",
+			harness: skill.harness,
+			name: skill.name,
+			path: skill.path,
+		});
+		lines.push(
+			`  Remove Camunda skill "${skill.name}" for ${skill.harness} (${skill.path}; all contents will be removed)`,
+		);
+	}
+
+	for (const blueprint of inventory.blueprints) {
+		const files = [...new Set([...blueprint.files, ".c8ctl-blueprint.json"])];
+		items.push({
+			type: "blueprint",
+			id: blueprint.blueprint.id,
+			name: blueprint.blueprint.name,
+			directory: blueprint.directory,
+			files,
+		});
+		lines.push(
+			`  Remove ${blueprint.blueprint.name} blueprint files from ${blueprint.directory}:`,
+		);
+		for (const file of files) lines.push(`    ${file}`);
+	}
+
+	if (stopCluster) {
+		items.push({ type: "local-cluster", action: "stop" });
+		lines.push(
+			"  Stop the local cluster with `c8ctl cluster stop` (downloaded binaries and runtime data will be kept)",
+		);
+	}
+
+	if (items.length === 0)
+		lines.push("  No setup-managed components were found.");
+	lines.push(
+		"  Listed skill directories and blueprint files may contain local edits; those contents will be removed. Untracked blueprint files and Desktop Modeler are not removed.",
+	);
+	lines.push("Nothing was removed.");
+
+	return {
+		text: lines.join("\n"),
+		payload: {
+			command: "setup",
+			action: "remove",
+			preview: true,
+			items,
+			...(warnings.length > 0 ? { warnings } : {}),
+		},
+	};
+}
+
+function removalFailure(
+	ctx: CommandContext,
+	action: string,
+	error: unknown,
+): void {
+	const message = error instanceof Error ? error.message : String(error);
+	ctx.logger.error(`Could not ${action}: ${message}`);
+}
+
+async function applySetupRemoval(
+	ctx: CommandContext,
+	inventory: SetupRemovalInventory,
+	stopCluster: boolean,
+): Promise<void> {
+	const { logger } = ctx;
+	let failures =
+		inventory.mcpPlanningFailures.length +
+		inventory.skillDiscoveryFailures.length +
+		inventory.blueprintPlanningFailures.length;
+	for (const failure of inventory.mcpPlanningFailures) {
+		logger.error(
+			`Could not inspect MCP configuration for ${failure.harness}: ${failure.message}. That configuration was left untouched.`,
+		);
+	}
+	for (const failure of inventory.skillDiscoveryFailures) {
+		logger.error(
+			`Could not inspect Camunda skills for ${failure.harness}: ${failure.message}. Those skills were left untouched.`,
+		);
+	}
+	for (const failure of inventory.blueprintPlanningFailures) {
+		logger.error(
+			`Could not inspect setup blueprint marker in ${failure.directory}: ${failure.message}. That project was left untouched.`,
+		);
+	}
+
+	if (stopCluster) {
+		try {
+			await spawnClusterStop(ctx);
+			logger.info(
+				"Stopped the local cluster; downloaded binaries and runtime data were kept.",
+				{ essential: true },
+			);
+		} catch (error) {
+			failures += 1;
+			removalFailure(ctx, "stop the local cluster", error);
+		}
+	}
+
+	for (const { plan, servers } of inventory.mcp) {
+		try {
+			writeMcpConfig(plan);
+			for (const server of servers) {
+				logger.info(
+					`Removed MCP server "${server}" for ${plan.harness} from ${plan.path}.`,
+					{ essential: true },
+				);
+			}
+		} catch (error) {
+			failures += 1;
+			removalFailure(
+				ctx,
+				`remove MCP configuration for ${plan.harness} (${plan.path})`,
+				error,
+			);
+		}
+	}
+
+	for (const skill of inventory.skills) {
+		try {
+			removeCamundaSkill(skill);
+			logger.info(
+				`Removed Camunda skill "${skill.name}" for ${skill.harness} (${skill.path}).`,
+				{ essential: true },
+			);
+		} catch (error) {
+			failures += 1;
+			removalFailure(
+				ctx,
+				`remove Camunda skill "${skill.name}" for ${skill.harness}`,
+				error,
+			);
+		}
+	}
+
+	for (const blueprint of inventory.blueprints) {
+		try {
+			const result = removeSetupBlueprint(blueprint);
+			if (result.remainingFiles.length > 0) {
+				throw new Error(
+					`Marker-listed files could not be removed: ${result.remainingFiles.join(", ")}.`,
+				);
+			}
+			logger.info(
+				`Removed ${blueprint.blueprint.name} blueprint files from ${blueprint.directory}.`,
+				{ essential: true },
+			);
+			if (result.directoryExists) {
+				const message =
+					resolve(blueprint.directory) === resolve(process.cwd())
+						? `Kept ${blueprint.directory} because it is the current working directory.`
+						: `Kept untracked files in ${blueprint.directory}; remove them manually if desired.`;
+				logger.info(message, { essential: true });
+			}
+		} catch (error) {
+			failures += 1;
+			removalFailure(
+				ctx,
+				`remove the ${blueprint.blueprint.name} blueprint from ${blueprint.directory}`,
+				error,
+			);
+		}
+	}
+
+	if (failures > 0) {
+		process.exitCode = 1;
+		logger.info(`Setup removal finished with ${failures} failed action(s).`, {
+			essential: true,
+		});
+	} else {
+		logger.info("Setup removal finished.", { essential: true });
+	}
+}
+
+async function runSetupRemoval(
+	ctx: CommandContext,
+	stopCluster: boolean,
+): Promise<void> {
+	const { logger } = ctx;
+	const inventory = await inspectSetupRemovalInventory();
+	const preview = setupRemovalPreview(inventory, stopCluster);
+	const jsonMode = logger.mode === "json";
+
+	if (ctx.isDryRun || jsonMode) {
+		logger.json({
+			...(ctx.isDryRun ? { dryRun: true } : {}),
+			...preview.payload,
+		});
+		return;
+	}
+
+	logger.output(preview.text);
+	if (preview.payload.items.length === 0) {
+		if (
+			inventory.mcpPlanningFailures.length > 0 ||
+			inventory.skillDiscoveryFailures.length > 0 ||
+			inventory.blueprintPlanningFailures.length > 0
+		) {
+			process.exitCode = 1;
+		}
+		return;
+	}
+
+	const interactive = !ctx.quiet && isInteractive() && !ctx.yes;
+	if (interactive) {
+		const confirmation = await select({
+			message: "Remove the listed setup components?",
+			options: [
+				{ label: "Keep these components", value: false },
+				{ label: "Remove the listed components", value: true },
+			],
+		});
+		if (confirmation.cancelled || !confirmation.value) {
+			logger.info("Cancelled — nothing was removed.", { essential: true });
+			return;
+		}
+	} else if (!ctx.yes) {
+		const command = [
+			"c8ctl",
+			"setup",
+			"--remove",
+			...(stopCluster ? ["--stop-cluster"] : []),
+			"--yes",
+		].join(" ");
+		logger.info(`Nothing was removed. Run "${command}" to confirm.`, {
+			essential: true,
+		});
+		return;
+	}
+
+	await applySetupRemoval(ctx, inventory, stopCluster);
+}
+
 // ── The command ────────────────────────────────────────────────────
 
 export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 	const { logger } = ctx;
+
+	if (flags["stop-cluster"] && !flags.remove) {
+		throw new Error("--stop-cluster can only be used with --remove.");
+	}
+	if (flags.remove) {
+		if (flags.modeler || flags["no-modeler"] || flags["docs-mcp"]) {
+			throw new Error(
+				"--remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.",
+			);
+		}
+		await runSetupRemoval(ctx, flags["stop-cluster"] === true);
+		return { kind: "none" };
+	}
 
 	// Custom dry-run payload: setup performs local installs, not one API call.
 	if (ctx.isDryRun) {

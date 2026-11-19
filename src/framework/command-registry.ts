@@ -1835,6 +1835,18 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl setup --yes",
 				description: "Set up the defaults, without prompting",
 			},
+			{
+				command: "c8ctl setup --remove",
+				description: "Preview setup-managed components to remove",
+			},
+			{
+				command: "c8ctl setup --remove --yes",
+				description: "Remove the previewed setup-managed components",
+			},
+			{
+				command: "c8ctl setup --remove --stop-cluster --yes",
+				description: "Also stop the local cluster without purging its data",
+			},
 		],
 		helpNotes: [
 			"The wizard offers to start a local cluster (downloading Camunda 8 Run",
@@ -1862,14 +1874,30 @@ export const COMMAND_REGISTRY = {
 			"by design. Exit code 1: arguments failed validation, or a step",
 			"failed — other eligible steps still ran, while dependents (and",
 			"the deploy finale after any failure) were skipped.",
+			"",
+			"--remove shows setup-managed MCP entries, Camunda skills, and",
+			"marker-listed blueprint files before removing them. Confirm in the",
+			"interactive prompt or pass --yes in non-interactive use. --json and",
+			"--dry-run print only the removal preview. Local edits in skill folders",
+			"and listed blueprint files are removed; untracked blueprint files are",
+			"kept. Desktop Modeler is not removed. --remove cannot be combined with",
+			"--modeler, --no-modeler, or --docs-mcp.",
+			"--stop-cluster is available only with --remove. It stops the local",
+			"cluster without purging runtime data or deleting downloaded binaries.",
+			"Removal exits 0 when every requested action succeeds, and 1 if any",
+			"action fails; the other removal actions still run.",
 		],
 		docsNotes: [
+			"**Removal:** `c8ctl setup --remove` previews setup-managed MCP entries, Camunda skills, and marker-listed blueprint files. Confirm at the prompt or use `--yes` in non-interactive use. `--json` and `--dry-run` only print the preview. Local edits in skill directories and listed blueprint files are removed; untracked blueprint files are kept. Desktop Modeler is not removed. `--remove` cannot be combined with `--modeler`, `--no-modeler`, or `--docs-mcp`.",
+			"",
+			"`--stop-cluster` can be combined with `--remove` to stop the local cluster. It does not purge runtime data or delete downloaded binaries.",
+			"",
 			"**Exit codes:**",
 			"",
 			"| Code | Meaning |",
 			"|------|---------|",
-			"| `0` | Every selected step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |",
-			"| `1` | Arguments failed validation before any step ran, or one or more steps failed. The remaining eligible steps still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |",
+			"| `0` | Every selected setup step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. All requested removal actions also succeeded. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |",
+			"| `1` | Arguments failed validation before any step ran, one or more setup steps failed, or one or more removal actions failed. The remaining eligible setup steps or removal actions still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |",
 		],
 		resources: [],
 		flags: {
@@ -1885,6 +1913,16 @@ export const COMMAND_REGISTRY = {
 				type: "boolean",
 				description:
 					"Also configure the docs MCP server (off unless selected or flagged)",
+			},
+			remove: {
+				type: "boolean",
+				description:
+					"Preview and remove setup-managed MCP entries, skills, and blueprint files",
+			},
+			"stop-cluster": {
+				type: "boolean",
+				description:
+					"With --remove, stop the local cluster without purging its data",
 			},
 		},
 	},

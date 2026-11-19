@@ -14,13 +14,16 @@
 
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	rmdirSync,
 	statSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isRecord } from "../../core/index.ts";
 
 export interface BlueprintSource {
@@ -166,6 +169,19 @@ export interface ScaffoldedSetupBlueprint {
 	readonly blueprint: SetupBlueprint;
 	readonly directory: string;
 	readonly files: string[];
+}
+
+export interface SetupBlueprintRemoval {
+	readonly blueprint: SetupBlueprint;
+	readonly directory: string;
+	readonly files: readonly string[];
+	readonly markerContent: string;
+}
+
+export interface SetupBlueprintRemovalResult {
+	readonly removedFiles: readonly string[];
+	readonly remainingFiles: readonly string[];
+	readonly directoryExists: boolean;
 }
 
 export class BlueprintScaffoldError extends Error {
@@ -417,6 +433,265 @@ function readMarker(directory: string): BlueprintMarker | undefined {
 		// Unreadable or invalid JSON — treat the directory as foreign.
 	}
 	return undefined;
+}
+
+function readRemovalMarker(
+	directory: string,
+): { marker: BlueprintMarker; content: string } | undefined {
+	const rootInfo = lstatSync(directory, { throwIfNoEntry: false });
+	if (!rootInfo || rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+		return undefined;
+	}
+
+	const markerPath = join(directory, MARKER_FILE);
+	const markerInfo = lstatSync(markerPath, { throwIfNoEntry: false });
+	if (!markerInfo) return undefined;
+	if (markerInfo.isSymbolicLink() || !markerInfo.isFile()) {
+		throw new BlueprintScaffoldError(
+			`Cannot safely inspect the blueprint marker in ${directory}.`,
+			{ hint: "Inspect the marker manually before removing this project." },
+		);
+	}
+
+	const content = readFileSync(markerPath, "utf-8");
+	let value: unknown;
+	try {
+		value = JSON.parse(content);
+	} catch (error) {
+		throw new BlueprintScaffoldError(
+			`Cannot safely remove the blueprint in ${directory}: its marker is invalid.`,
+			{
+				hint: "Repair or remove the marker manually before trying again.",
+				cause: error,
+			},
+		);
+	}
+	if (!isBlueprintMarker(value)) {
+		throw new BlueprintScaffoldError(
+			`Cannot safely remove the blueprint in ${directory}: its marker is invalid.`,
+			{ hint: "Repair or remove the marker manually before trying again." },
+		);
+	}
+
+	const blueprint = SETUP_BLUEPRINTS.find(
+		(candidate) => candidate.id === value.id,
+	);
+	if (!blueprint) {
+		throw new BlueprintScaffoldError(
+			`Cannot safely remove the blueprint in ${directory}: "${value.id}" is not a supported setup blueprint.`,
+		);
+	}
+	if (
+		value.files.some(
+			(file) => !isSafeRelativePath(file) || file === MARKER_FILE,
+		) ||
+		new Set(value.files).size !== value.files.length
+	) {
+		throw new BlueprintScaffoldError(
+			`Cannot safely remove the blueprint in ${directory}: its file list is invalid.`,
+			{ hint: "Repair or remove the marker manually before trying again." },
+		);
+	}
+
+	return {
+		marker: { id: value.id, files: value.files },
+		content,
+	};
+}
+
+/**
+ * Find setup-generated blueprint projects in the current directory or its
+ * immediate children. Only projects with a valid setup marker are included.
+ */
+export function planSetupBlueprintRemovals({
+	cwd = process.cwd(),
+	onError,
+}: {
+	cwd?: string;
+	onError?: (directory: string, error: unknown) => void;
+} = {}): SetupBlueprintRemoval[] {
+	const root = resolve(cwd);
+	const directories = [
+		root,
+		...SETUP_BLUEPRINTS.map((blueprint) => resolve(root, blueprint.id)),
+	];
+	const seen = new Set<string>();
+	const removals: SetupBlueprintRemoval[] = [];
+
+	for (const directory of directories) {
+		if (seen.has(directory)) continue;
+		seen.add(directory);
+
+		try {
+			const result = readRemovalMarker(directory);
+			if (!result) continue;
+			const blueprint = SETUP_BLUEPRINTS.find(
+				(candidate) => candidate.id === result.marker.id,
+			);
+			if (!blueprint) {
+				throw new BlueprintScaffoldError(
+					`Cannot safely remove the blueprint in ${directory}: its marker is unsupported.`,
+				);
+			}
+			removals.push({
+				blueprint,
+				directory,
+				files: result.marker.files,
+				markerContent: result.content,
+			});
+		} catch (error) {
+			if (!onError) throw error;
+			onError(directory, error);
+		}
+	}
+	return removals;
+}
+
+function isWithinBlueprint(directory: string, candidate: string): boolean {
+	const relativePath = relative(resolve(directory), resolve(candidate));
+	return (
+		relativePath === "" ||
+		(relativePath !== ".." &&
+			!relativePath.startsWith(`..${sep}`) &&
+			!isAbsolute(relativePath))
+	);
+}
+
+function hasSafeDirectoryChain(directory: string, candidate: string): boolean {
+	const root = resolve(directory);
+	const target = resolve(candidate);
+	if (!isWithinBlueprint(root, target)) return false;
+	const rootInfo = lstatSync(root, { throwIfNoEntry: false });
+	if (!rootInfo || rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+		return false;
+	}
+	const relativePath = relative(root, target);
+	if (relativePath === "") return true;
+
+	let current = root;
+	for (const segment of relativePath.split(sep)) {
+		current = join(current, segment);
+		const info = lstatSync(current, { throwIfNoEntry: false });
+		if (!info || info.isSymbolicLink() || !info.isDirectory()) return false;
+	}
+	return true;
+}
+
+/**
+ * Remove only files listed by a valid setup marker. The caller must display
+ * the file list and get explicit confirmation before calling this function.
+ */
+export function removeSetupBlueprint(
+	removal: SetupBlueprintRemoval,
+): SetupBlueprintRemovalResult {
+	const directory = resolve(removal.directory);
+	const current = readRemovalMarker(directory);
+	if (
+		!current ||
+		current.content !== removal.markerContent ||
+		current.marker.id !== removal.blueprint.id
+	) {
+		throw new BlueprintScaffoldError(
+			`The blueprint in ${directory} changed after the removal preview. Review it and try again.`,
+		);
+	}
+
+	const rootInfo = lstatSync(directory, { throwIfNoEntry: false });
+	if (!rootInfo || rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+		throw new BlueprintScaffoldError(
+			`Cannot safely remove the blueprint in ${directory}: its project directory changed.`,
+		);
+	}
+
+	const removedFiles: string[] = [];
+	const remainingFiles: string[] = [];
+	for (const relativePath of current.marker.files) {
+		let parent = directory;
+		let missingParent = false;
+		let unsafeParent = false;
+		for (const segment of relativePath.split("/").slice(0, -1)) {
+			parent = join(parent, segment);
+			const parentInfo = lstatSync(parent, { throwIfNoEntry: false });
+			if (!parentInfo) {
+				missingParent = true;
+				break;
+			}
+			if (parentInfo.isSymbolicLink() || !parentInfo.isDirectory()) {
+				unsafeParent = true;
+				break;
+			}
+		}
+		if (missingParent) continue;
+		if (unsafeParent) {
+			remainingFiles.push(relativePath);
+			continue;
+		}
+
+		const target = join(parent, relativePath.split("/").at(-1) ?? "");
+		if (!isWithinBlueprint(directory, target)) {
+			throw new BlueprintScaffoldError(
+				`Cannot safely remove the blueprint file ${relativePath} from ${directory}.`,
+			);
+		}
+		const targetInfo = lstatSync(target, { throwIfNoEntry: false });
+		if (!targetInfo) continue;
+		if (targetInfo.isSymbolicLink() || targetInfo.isFile()) {
+			unlinkSync(target);
+			removedFiles.push(relativePath);
+		} else {
+			remainingFiles.push(relativePath);
+		}
+	}
+
+	if (remainingFiles.length === 0) {
+		const markerPath = join(directory, MARKER_FILE);
+		if (readFileSync(markerPath, "utf-8") !== removal.markerContent) {
+			throw new BlueprintScaffoldError(
+				`The blueprint marker in ${directory} changed during removal. Review it and try again.`,
+			);
+		}
+		unlinkSync(markerPath);
+		removedFiles.push(MARKER_FILE);
+	} else {
+		remainingFiles.push(MARKER_FILE);
+	}
+
+	const parentDirectories = new Set<string>();
+	for (const relativePath of current.marker.files) {
+		let parent = dirname(join(directory, ...relativePath.split("/")));
+		while (parent !== directory) {
+			parentDirectories.add(parent);
+			const next = dirname(parent);
+			if (next === parent) break;
+			parent = next;
+		}
+	}
+	for (const parent of [...parentDirectories].sort(
+		(left, right) => right.length - left.length,
+	)) {
+		if (
+			hasSafeDirectoryChain(directory, parent) &&
+			readdirSync(parent).length === 0
+		) {
+			rmdirSync(parent);
+		}
+	}
+
+	const finalRootInfo = lstatSync(directory, { throwIfNoEntry: false });
+	if (
+		resolve(directory) !== resolve(process.cwd()) &&
+		finalRootInfo?.isDirectory() &&
+		!finalRootInfo.isSymbolicLink() &&
+		readdirSync(directory).length === 0
+	) {
+		rmdirSync(directory);
+	}
+
+	return {
+		removedFiles,
+		remainingFiles,
+		directoryExists: existsSync(directory),
+	};
 }
 
 function destinationPath(directory: string, relativePath: string): string {

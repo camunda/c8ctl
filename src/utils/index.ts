@@ -15,6 +15,7 @@ export * from "./command-local/search-helpers.ts";
 export * from "./command-local/setup-detectors.ts";
 export * from "./command-local/setup-helpers.ts";
 export * from "./command-local/setup-prerequisites.ts";
+export * from "./command-local/setup-removal.ts";
 export * from "./command-local/skills-install-helpers.ts";
 export * from "./command-local/watch-constants.ts";
 export * from "./shared/camunda-json.ts";

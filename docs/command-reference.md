@@ -1047,20 +1047,29 @@ Guided first-run setup: install a local cluster, a starter blueprint project, an
 | `--modeler` | boolean |  | Install Desktop Modeler, whatever the selection |
 | `--no-modeler` | boolean |  | Do not install Desktop Modeler |
 | `--docs-mcp` | boolean |  | Also configure the docs MCP server (off unless selected or flagged) |
+| `--remove` | boolean |  | Preview and remove setup-managed MCP entries, skills, and blueprint files |
+| `--stop-cluster` | boolean |  | With --remove, stop the local cluster without purging its data |
 
 **Examples:**
 
 ```bash
 c8ctl setup                                                 # Run the guided setup wizard
 c8ctl setup --yes                                           # Set up the defaults, without prompting
+c8ctl setup --remove                                        # Preview setup-managed components to remove
+c8ctl setup --remove --yes                                  # Remove the previewed setup-managed components
+c8ctl setup --remove --stop-cluster --yes                   # Also stop the local cluster without purging its data
 ```
+
+**Removal:** `c8ctl setup --remove` previews setup-managed MCP entries, Camunda skills, and marker-listed blueprint files. Confirm at the prompt or use `--yes` in non-interactive use. `--json` and `--dry-run` only print the preview. Local edits in skill directories and listed blueprint files are removed; untracked blueprint files are kept. Desktop Modeler is not removed. `--remove` cannot be combined with `--modeler`, `--no-modeler`, or `--docs-mcp`.
+
+`--stop-cluster` can be combined with `--remove` to stop the local cluster. It does not purge runtime data or delete downloaded binaries.
 
 **Exit codes:**
 
 | Code | Meaning |
 |------|---------|
-| `0` | Every selected step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |
-| `1` | Arguments failed validation before any step ran, or one or more steps failed. The remaining eligible steps still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |
+| `0` | Every selected setup step succeeded — or nothing was installed for lack of a go-ahead: the wizard was cancelled with Escape (Ctrl+C ends it by signal — 130 on POSIX shells), a non-interactive, `--quiet` or JSON-mode run had no `--yes`, or `--json`/`--dry-run` printed the plan only. All requested removal actions also succeeded. A re-run exits `0` again: finished work is reused where possible, while the blueprint deploy and start and the skills install repeat by design and must succeed again. |
+| `1` | Arguments failed validation before any step ran, one or more setup steps failed, or one or more removal actions failed. The remaining eligible setup steps or removal actions still ran; steps depending on a failed one were skipped, and the deploy finale is skipped after any failure. Fix the reported cause and re-run — it picks up where the failure left off, reusing finished work where possible. |
 
 ---
 

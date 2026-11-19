@@ -14,14 +14,16 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -39,6 +41,16 @@ const SETUP_STUB = pathToFileURL(
 const BRAND_BLUE = "\x1b[38;2;79;57;246m";
 const PROMPT_TEXT = "What should we set up for you?";
 const BLUEPRINT_PROMPT_TEXT = "Which starter blueprint should we install?";
+
+function vscodeMcpConfigPath(home: string): string {
+	const appData =
+		process.platform === "darwin"
+			? join(home, "Library", "Application Support")
+			: process.platform === "win32"
+				? join(home, "AppData", "Roaming")
+				: join(home, ".config");
+	return join(appData, "Code", "User", "mcp.json");
+}
 
 interface InteractiveResult {
 	status: number | null;
@@ -367,6 +379,9 @@ describe("c8ctl setup", () => {
 		assert.match(result.stdout, /Nothing is installed without your say\./);
 		assert.match(result.stdout, /\[SUCCESS\]/);
 		assert.match(result.stdout, /--no-modeler/);
+		assert.match(result.stdout, /--remove/);
+		assert.match(result.stdout, /--stop-cluster/);
+		assert.match(result.stdout, /Desktop Modeler is not removed/);
 		// The documented exit-code contract.
 		assert.match(result.stdout, /Exit code 0/);
 		assert.match(result.stdout, /Exit code 1: arguments failed validation/);
@@ -385,12 +400,15 @@ describe("c8ctl setup", () => {
 			/Guided first-run setup: install a local cluster/,
 		);
 		assert.match(result.stdout, /c8ctl setup --yes/);
+		assert.match(result.stdout, /c8ctl setup --remove/);
 	});
 
 	test("completion lists the setup verb", async () => {
 		const result = await c8("completion", "bash");
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(result.stdout, /setup/);
+		assert.match(result.stdout, /--remove/);
+		assert.match(result.stdout, /--stop-cluster/);
 	});
 
 	test("--yes runs every selected step and reports [SUCCESS] per step", async () => {
@@ -783,6 +801,791 @@ describe("c8ctl setup", () => {
 			(s: { title: string }) => s.title === "Configure the docs MCP server",
 		);
 		assert.strictEqual(docsStep.status, "planned");
+	});
+
+	test("--remove previews setup-owned files and requires confirmation", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--docs-mcp",
+			);
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintDir = join(stub.cwd, "rocket-launch");
+			const editedBlueprint = join(blueprintDir, "rocket-launch.bpmn");
+			writeFileSync(editedBlueprint, "user edits\n");
+			writeFileSync(join(blueprintDir, "notes.txt"), "keep this file\n");
+
+			const mcpConfigPath = join(stub.home, ".claude", ".claude.json");
+			const mcpConfig: unknown = JSON.parse(
+				readFileSync(mcpConfigPath, "utf-8"),
+			);
+			assert.ok(isRecord(mcpConfig) && isRecord(mcpConfig.mcpServers));
+			mcpConfig.mcpServers.personal = { url: "https://example.invalid/mcp" };
+			writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
+
+			const preview = await c8WithOptions(stub.options, "setup", "--remove");
+			assert.strictEqual(preview.status, 0, preview.stderr + preview.stdout);
+			assert.match(preview.stdout, /Setup removal preview/);
+			assert.match(preview.stdout, /camunda.*\.claude\.json/);
+			assert.match(preview.stdout, /camunda-docs/);
+			assert.match(preview.stdout, /camunda-c8ctl/);
+			assert.match(preview.stdout, /rocket-launch\.bpmn/);
+			assert.match(preview.stdout, /local edits/i);
+			assert.match(preview.stdout, /Nothing was removed/);
+			assert.ok(existsSync(editedBlueprint));
+			assert.ok(existsSync(join(blueprintDir, ".c8ctl-blueprint.json")));
+			assert.ok(
+				existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+			assert.ok(isRecord(mcpConfig.mcpServers.camunda));
+
+			const removed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removed.status, 0, removed.stderr + removed.stdout);
+			assert.match(removed.stdout, /Setup removal finished/);
+			assert.ok(!existsSync(editedBlueprint));
+			assert.ok(!existsSync(join(blueprintDir, ".c8ctl-blueprint.json")));
+			assert.ok(existsSync(join(blueprintDir, "notes.txt")));
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(mcpConfigPath, "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) && isRecord(remainingConfig.mcpServers),
+			);
+			assert.deepStrictEqual(remainingConfig.mcpServers, {
+				personal: { url: "https://example.invalid/mcp" },
+			});
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("skips skill discovery when no user skills directory exists", async () => {
+		const stub = stubbedExecution({ failStep: "list-skills" });
+		const ghCapture = join(stub.cwd, "gh-calls.jsonl");
+		stub.options.env.C8CTL_SETUP_STUB_GH_CAPTURE = ghCapture;
+		try {
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 0, removal.stderr + removal.stdout);
+			assert.ok(!existsSync(ghCapture));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("continues removing known setup artifacts when skill discovery fails", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--docs-mcp",
+			);
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			stub.options.env.C8CTL_SETUP_STUB_FAIL = "list-skills";
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 1, removal.stderr + removal.stdout);
+			assert.match(
+				`${removal.stderr}\n${removal.stdout}`,
+				/Could not inspect Camunda skills for claude-code/,
+			);
+			assert.ok(
+				existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", ".c8ctl-blueprint.json")),
+			);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) && isRecord(remainingConfig.mcpServers),
+			);
+			assert.ok(!Object.hasOwn(remainingConfig.mcpServers, "camunda"));
+			assert.ok(!Object.hasOwn(remainingConfig.mcpServers, "camunda-docs"));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("continues removal when MCP inspection fails for other harnesses", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const cursorConfigPath = join(stub.home, ".cursor", "mcp.json");
+			mkdirSync(join(stub.home, ".cursor"), { recursive: true });
+			writeFileSync(cursorConfigPath, "{");
+
+			const vscodeConfigPath = vscodeMcpConfigPath(stub.home);
+			mkdirSync(dirname(vscodeConfigPath), { recursive: true });
+			writeFileSync(vscodeConfigPath, JSON.stringify({ servers: [] }));
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--stop-cluster",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Could not inspect MCP configuration for cursor/);
+			assert.match(output, /Could not inspect MCP configuration for vscode/);
+			assert.match(output, /Stopped the local cluster/);
+			assert.strictEqual(readFileSync(cursorConfigPath, "utf-8"), "{");
+			assert.strictEqual(
+				readFileSync(vscodeConfigPath, "utf-8"),
+				JSON.stringify({ servers: [] }),
+			);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) && isRecord(remainingConfig.mcpServers),
+			);
+			assert.ok(!Object.hasOwn(remainingConfig.mcpServers, "camunda"));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("continues cleanup when blueprint marker inspection fails", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const malformedMarkerPath = join(stub.cwd, ".c8ctl-blueprint.json");
+			writeFileSync(malformedMarkerPath, "{");
+			const unreadableMarkerPath = join(
+				stub.cwd,
+				"service-worker",
+				".c8ctl-blueprint.json",
+			);
+			mkdirSync(unreadableMarkerPath, { recursive: true });
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--stop-cluster",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.strictEqual(
+				(
+					output.match(/Warning: Could not inspect setup blueprint marker/g) ??
+					[]
+				).length,
+				2,
+				output,
+			);
+			assert.match(output, /Stopped the local cluster/);
+			assert.match(output, /Removed MCP server "camunda"/);
+			assert.match(output, /Removed Camunda skill "camunda-c8ctl"/);
+			assert.strictEqual(readFileSync(malformedMarkerPath, "utf-8"), "{");
+			assert.ok(statSync(unreadableMarkerPath).isDirectory());
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", ".c8ctl-blueprint.json")),
+			);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) && isRecord(remainingConfig.mcpServers),
+			);
+			assert.ok(!Object.hasOwn(remainingConfig.mcpServers, "camunda"));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("reports blueprint inspection failures when no artifacts are removable", async () => {
+		const stub = stubbedExecution();
+		try {
+			const malformedMarkerPath = join(stub.cwd, ".c8ctl-blueprint.json");
+			writeFileSync(malformedMarkerPath, "{");
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Warning: Could not inspect setup blueprint marker/);
+			assert.match(output, /No setup-managed components were found/);
+			assert.strictEqual(readFileSync(malformedMarkerPath, "utf-8"), "{");
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("preserves foreign MCP entries while removing setup-owned artifacts", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--docs-mcp",
+			);
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const mcpConfigPath = join(stub.home, ".claude", ".claude.json");
+			const mcpConfig: unknown = JSON.parse(
+				readFileSync(mcpConfigPath, "utf-8"),
+			);
+			assert.ok(isRecord(mcpConfig) && isRecord(mcpConfig.mcpServers));
+			const foreignDocs = {
+				type: "http",
+				url: "https://example.invalid/mcp",
+			};
+			mcpConfig.mcpServers["camunda-docs"] = foreignDocs;
+			writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 0, removal.stderr + removal.stdout);
+			assert.match(
+				removal.stdout,
+				/Preserved foreign MCP server "camunda-docs"/,
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(mcpConfigPath, "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) && isRecord(remainingConfig.mcpServers),
+			);
+			assert.ok(!Object.hasOwn(remainingConfig.mcpServers, "camunda"));
+			assert.deepStrictEqual(
+				remainingConfig.mcpServers["camunda-docs"],
+				foreignDocs,
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("coalesces removals when harness configs share a target", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--docs-mcp",
+			);
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const claudeConfigPath = join(stub.home, ".claude", ".claude.json");
+			const claudeConfig: unknown = JSON.parse(
+				readFileSync(claudeConfigPath, "utf-8"),
+			);
+			assert.ok(isRecord(claudeConfig) && isRecord(claudeConfig.mcpServers));
+			claudeConfig.mcpServers.personal = {
+				url: "https://personal.example.invalid/mcp",
+			};
+			claudeConfig.servers = {
+				camunda: {
+					command: process.execPath,
+					args: ["index.ts", "mcp-proxy", "--profile", "local"],
+					env: { C8CTL_DATA_DIR: join(stub.home, "data") },
+				},
+				"camunda-docs": {
+					type: "http",
+					url: "https://camunda-docs.mcp.kapa.ai",
+				},
+				personal: { url: "https://other.example.invalid/mcp" },
+			};
+			writeFileSync(claudeConfigPath, JSON.stringify(claudeConfig));
+
+			const vscodeConfigPath = vscodeMcpConfigPath(stub.home);
+			mkdirSync(dirname(vscodeConfigPath), { recursive: true });
+			symlinkSync(claudeConfigPath, vscodeConfigPath, "file");
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 0, removal.stderr + removal.stdout);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(claudeConfigPath, "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) &&
+					isRecord(remainingConfig.mcpServers) &&
+					isRecord(remainingConfig.servers),
+			);
+			assert.deepStrictEqual(remainingConfig.mcpServers, {
+				personal: { url: "https://personal.example.invalid/mcp" },
+			});
+			assert.deepStrictEqual(remainingConfig.servers, {
+				personal: { url: "https://other.example.invalid/mcp" },
+			});
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("removal JSON and dry-run only preview, and cluster stop requires removal", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintFile = join(
+				stub.cwd,
+				"rocket-launch",
+				"rocket-launch.bpmn",
+			);
+			const skillDirectory = join(
+				stub.home,
+				".claude",
+				"skills",
+				"camunda-c8ctl",
+			);
+			const jsonPreview = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--stop-cluster",
+				"--json",
+			);
+			assert.strictEqual(jsonPreview.status, 0, jsonPreview.stderr);
+			const jsonPayload: unknown = JSON.parse(jsonPreview.stdout);
+			assert.ok(isRecord(jsonPayload) && Array.isArray(jsonPayload.items));
+			assert.strictEqual(jsonPayload.preview, true);
+			assert.ok(
+				jsonPayload.items.some(
+					(item: unknown) => isRecord(item) && item.type === "local-cluster",
+				),
+			);
+			assert.ok(existsSync(blueprintFile));
+			assert.ok(existsSync(skillDirectory));
+
+			const dryRun = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--dry-run",
+			);
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			const dryRunPayload: unknown = JSON.parse(dryRun.stdout);
+			assert.ok(isRecord(dryRunPayload));
+			assert.strictEqual(dryRunPayload.dryRun, true);
+			assert.strictEqual(dryRunPayload.preview, true);
+			assert.ok(existsSync(blueprintFile));
+			assert.ok(existsSync(skillDirectory));
+
+			const stopPreview = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--stop-cluster",
+			);
+			assert.strictEqual(
+				stopPreview.status,
+				0,
+				stopPreview.stderr + stopPreview.stdout,
+			);
+			assert.match(
+				stopPreview.stdout,
+				/Run "c8ctl setup --remove --stop-cluster --yes" to confirm/,
+			);
+			assert.ok(existsSync(blueprintFile));
+			assert.ok(existsSync(skillDirectory));
+
+			const invalid = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--stop-cluster",
+			);
+			assert.strictEqual(invalid.status, 1);
+			assert.match(
+				invalid.stderr,
+				/--stop-cluster can only be used with --remove/,
+			);
+
+			const removed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--stop-cluster",
+				"--yes",
+			);
+			assert.strictEqual(removed.status, 0, removed.stderr + removed.stdout);
+			assert.match(removed.stdout, /Stopped local Camunda 8 cluster/);
+			assert.match(removed.stdout, /runtime data were kept/);
+			assert.ok(!existsSync(blueprintFile));
+			assert.ok(!existsSync(skillDirectory));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("interactive removal asks before changing setup artifacts", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintFile = join(
+				stub.cwd,
+				"rocket-launch",
+				"rocket-launch.bpmn",
+			);
+			const cancelled = await runInteractive(
+				[
+					{
+						waitFor: "Remove the listed setup components?",
+						keys: "\x1b",
+					},
+				],
+				{
+					args: ["--remove"],
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(
+				cancelled.status,
+				0,
+				cancelled.stderr + cancelled.stdout,
+			);
+			assert.match(cancelled.stdout, /Cancelled — nothing was removed/);
+			assert.ok(existsSync(blueprintFile));
+
+			const confirmed = await runInteractive(
+				[
+					{
+						waitFor: "Remove the listed setup components?",
+						keys: "\x1b[B\r",
+					},
+				],
+				{
+					args: ["--remove"],
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			assert.strictEqual(
+				confirmed.status,
+				0,
+				confirmed.stderr + confirmed.stdout,
+			);
+			assert.match(confirmed.stdout, /Setup removal finished/);
+			assert.ok(!existsSync(blueprintFile));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("keeps the empty blueprint directory when removal runs from that directory", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintDirectory = join(stub.cwd, "rocket-launch");
+			const removed = await c8WithOptions(
+				{ ...stub.options, cwd: blueprintDirectory },
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removed.status, 0, removed.stderr + removed.stdout);
+			assert.ok(existsSync(blueprintDirectory));
+			assert.deepStrictEqual(readdirSync(blueprintDirectory), []);
+			assert.match(
+				removed.stdout,
+				/because it is the current working directory/,
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("fails on marker-listed directories while continuing other cleanup", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintFile = join(
+				stub.cwd,
+				"rocket-launch",
+				"rocket-launch.bpmn",
+			);
+			rmSync(blueprintFile);
+			mkdirSync(blueprintFile);
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 1, removal.stderr + removal.stdout);
+			assert.match(
+				`${removal.stderr}\n${removal.stdout}`,
+				/Could not remove the .* blueprint/,
+			);
+			assert.ok(existsSync(blueprintFile));
+			assert.ok(
+				existsSync(join(stub.cwd, "rocket-launch", ".c8ctl-blueprint.json")),
+			);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("does not prune directories reached through symlink ancestors", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintDirectory = join(stub.cwd, "rocket-launch");
+			const outsideDirectory = join(stub.cwd, "outside");
+			const nestedDirectory = join(outsideDirectory, "nested");
+			mkdirSync(nestedDirectory, { recursive: true });
+			const markerPath = join(blueprintDirectory, ".c8ctl-blueprint.json");
+			const marker: unknown = JSON.parse(readFileSync(markerPath, "utf-8"));
+			assert.ok(isRecord(marker) && Array.isArray(marker.files));
+			assert.ok(typeof marker.id === "string");
+			const files = marker.files.filter(
+				(file: unknown): file is string => typeof file === "string",
+			);
+			files.push("linked/nested/file.txt");
+			writeFileSync(markerPath, JSON.stringify({ id: marker.id, files }));
+			symlinkSync(
+				outsideDirectory,
+				join(blueprintDirectory, "linked"),
+				process.platform === "win32" ? "junction" : "dir",
+			);
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 1, removal.stderr + removal.stdout);
+			assert.match(
+				`${removal.stderr}\n${removal.stdout}`,
+				/Could not remove the .* blueprint/,
+			);
+			assert.ok(existsSync(nestedDirectory));
+			assert.ok(existsSync(join(blueprintDirectory, "linked")));
+			assert.ok(existsSync(markerPath));
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("preserves an out-of-scope skill while removing other setup artifacts", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const outsideSkill = join(stub.cwd, "outside", "camunda-c8ctl");
+			mkdirSync(outsideSkill, { recursive: true });
+			const outsideFile = join(outsideSkill, "SKILL.md");
+			writeFileSync(outsideFile, "preserve this file\n");
+			stub.options.env.C8CTL_SETUP_STUB_SKILL_PATH = outsideSkill;
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 1);
+			assert.match(
+				removal.stderr,
+				/outside the claude-code user skills directory/,
+			);
+			assert.ok(existsSync(outsideFile));
+			assert.ok(
+				existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", ".c8ctl-blueprint.json")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("removal rejects blueprint markers that escape the project directory", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintDirectory = join(stub.cwd, "rocket-launch");
+			const outsideFile = join(stub.cwd, "keep.txt");
+			writeFileSync(outsideFile, "preserve this file\n");
+			writeFileSync(
+				join(blueprintDirectory, ".c8ctl-blueprint.json"),
+				JSON.stringify({
+					id: "rocket-launch",
+					files: ["../keep.txt"],
+				}),
+			);
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Could not inspect setup blueprint marker/);
+			assert.match(output, /file list is invalid/);
+			assert.ok(existsSync(outsideFile));
+			assert.ok(existsSync(join(blueprintDirectory, "rocket-launch.bpmn")));
+			assert.ok(existsSync(join(blueprintDirectory, ".c8ctl-blueprint.json")));
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) && isRecord(remainingConfig.mcpServers),
+			);
+			assert.ok(!Object.hasOwn(remainingConfig.mcpServers, "camunda"));
+		} finally {
+			stub.cleanup();
+		}
 	});
 
 	test("a rerun reuses the existing blueprint project instead of failing", async () => {
