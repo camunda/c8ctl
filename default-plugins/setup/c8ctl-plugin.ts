@@ -69,7 +69,6 @@ import {
 import {
 	removeSetupBlueprint,
 	SETUP_BLUEPRINTS,
-	type SetupBlueprint,
 	scaffoldSetupBlueprint,
 	setupBlueprintById,
 } from "./blueprint-scaffold.ts";
