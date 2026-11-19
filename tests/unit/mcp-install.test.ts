@@ -12,7 +12,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
@@ -268,6 +268,7 @@ test("repeat installation preserves client-added tool restrictions and uninstall
 
 test("a drifted c8ctl-managed entry is updated on re-install; a foreign entry still conflicts", async (t) => {
 	const s = sandbox(t);
+	const oldNode = join(s.home, "old", basename(process.execPath));
 	await addProfile(s);
 	assert.equal((await s.run("use", "profile", "work")).status, 0);
 	const installed = await s.run("mcp", "install", "claude-code");
@@ -285,7 +286,7 @@ test("a drifted c8ctl-managed entry is updated on re-install; a foreign entry st
 	const camunda = drifted.mcpServers.camunda;
 	assert.ok(isRecord(camunda) && Array.isArray(camunda.args));
 	assert.ok(isRecord(camunda.env));
-	camunda.command = "/usr/local/bin/node";
+	camunda.command = oldNode;
 	camunda.args[0] = "/usr/local/lib/node_modules/@camunda8/cli/dist/index.js";
 	delete camunda.type;
 	camunda.tools = ["search_process_definitions"];
@@ -306,7 +307,7 @@ test("a drifted c8ctl-managed entry is updated on re-install; a foreign entry st
 	const after = serversAt(s.paths["claude-code"], "claude-code").camunda;
 	assert.ok(isRecord(after) && isRecord(after.env));
 	// Managed fields are rewritten to the current connection…
-	assert.notEqual(after.command, "/usr/local/bin/node");
+	assert.equal(after.command, process.execPath);
 	assert.deepEqual(after.args, current.args);
 	assert.equal(after.type, "stdio");
 	assert.equal(after.env.C8CTL_DATA_DIR, s.env.C8CTL_DATA_DIR);
@@ -327,6 +328,7 @@ test("a drifted c8ctl-managed entry is updated on re-install; a foreign entry st
 
 test("updating a drifted entry preserves JSONC comments", async (t) => {
 	const s = sandbox(t);
+	const oldNode = join(s.home, "old", basename(process.execPath));
 	await addProfile(s);
 	assert.equal((await s.run("use", "profile", "work")).status, 0);
 	s.write(
@@ -336,7 +338,7 @@ test("updating a drifted entry preserves JSONC comments", async (t) => {
 	"servers": {
 		"camunda": {
 			"type": "stdio",
-			"command": "/usr/local/bin/node",
+			"command": ${JSON.stringify(oldNode)},
 			// restrict the exposed tools
 			"tools": ["search_process_definitions"],
 			"args": ["/old/c8ctl/dist/index.js", "mcp-proxy", "--profile", "work"],
@@ -351,7 +353,8 @@ test("updating a drifted entry preserves JSONC comments", async (t) => {
 	assert.match(content, /keep this note/);
 	assert.match(content, /restrict the exposed tools/);
 	assert.match(content, /"tools": \[\s*"search_process_definitions"\]/);
-	assert.doesNotMatch(content, /\/old\/c8ctl|\/usr\/local\/bin\/node/);
+	assert.doesNotMatch(content, /\/old\/c8ctl/);
+	assert.ok(!content.includes(JSON.stringify(oldNode)));
 	assert.ok(
 		content.includes(
 			`"C8CTL_DATA_DIR": ${JSON.stringify(s.env.C8CTL_DATA_DIR)}`,

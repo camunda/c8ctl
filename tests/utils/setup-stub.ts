@@ -40,7 +40,7 @@ import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { PassThrough } from "node:stream";
 
 // ── Desktop Modeler looks installed ────────────────────────────────
@@ -58,6 +58,7 @@ syncBuiltinESMExports();
 // ── Fixtures ───────────────────────────────────────────────────────
 
 const COMMIT_SHA = "a".repeat(40);
+const CAMUNDA_SKILL_NAMES = ["camunda-c8ctl"];
 
 const ROCKET_LAUNCH_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
@@ -255,10 +256,59 @@ Object.defineProperty(childProcess, "spawn", {
 const realSpawnSync = childProcess.spawnSync;
 Object.defineProperty(childProcess, "spawnSync", {
 	value: (...args: unknown[]) => {
-		// Skills install through the GitHub CLI (`gh skill install …`).
+		// Skill discovery, installation, and updates use the GitHub CLI.
 		if (basename(String(args[0])) === "gh") {
-			if (failStep === "install-skills") {
+			const commandArgs = Array.isArray(args[1]) ? args[1].map(String) : [];
+			const skillRoot = join(process.env.HOME ?? "", ".claude", "skills");
+			const skillMarker = join(skillRoot, ".c8ctl-installed");
+			const installedSkillNames = fs.existsSync(skillMarker)
+				? fs
+						.readFileSync(skillMarker, "utf8")
+						.split(/\r?\n/)
+						.filter((name) => name.length > 0)
+				: [];
+			const capture = process.env.C8CTL_SETUP_STUB_GH_CAPTURE;
+			if (capture) {
+				fs.appendFileSync(capture, `${JSON.stringify(commandArgs)}\n`);
+			}
+			if (commandArgs[1] === "list") {
+				return {
+					status: 0,
+					stdout: JSON.stringify(
+						installedSkillNames.map((skillName) => ({
+							skillName,
+							sourceURL: "https://github.com/camunda/skills",
+							path: join(skillRoot, skillName),
+						})),
+					),
+					stderr: "",
+				};
+			}
+			if (commandArgs[1] === "install" && commandArgs.length === 3) {
+				return {
+					status: 0,
+					stdout: CAMUNDA_SKILL_NAMES.map(
+						(skillName) => `${skillName}\tCamunda skill`,
+					).join("\n"),
+					stderr: "",
+				};
+			}
+			if (
+				failStep === "install-skills" &&
+				commandArgs[1] === "install" &&
+				commandArgs.length > 3
+			) {
 				return { status: 1, stdout: "", stderr: "stubbed gh failure" };
+			}
+			if (commandArgs[1] === "install") {
+				fs.mkdirSync(skillRoot, { recursive: true });
+				const requestedSkills = commandArgs.includes("--all")
+					? CAMUNDA_SKILL_NAMES
+					: [commandArgs[3]].filter((skillName) => skillName !== undefined);
+				fs.writeFileSync(
+					skillMarker,
+					[...new Set([...installedSkillNames, ...requestedSkills])].join("\n"),
+				);
 			}
 			return { status: 0, stdout: "", stderr: "" };
 		}
