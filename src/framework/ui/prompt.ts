@@ -70,6 +70,9 @@ import { createInterface, emitKeypressEvents } from "node:readline";
 
 const ESC = "\x1b[";
 const CLEAR_LINE = `${ESC}2K`;
+/** Erase from the cursor to end of line: clears the stale tail of a
+ * wrapped row whose new content is shorter than the previous render's. */
+const CLEAR_TO_EOL = `${ESC}0K`;
 const CURSOR_UP = (n: number) => `${ESC}${n}A`;
 const CURSOR_TO_COL = (n: number) => `${ESC}${n}G`;
 const HIDE_CURSOR = `${ESC}?25l`;
@@ -674,7 +677,7 @@ export async function multiSelect<T>(
 			for (const row of rows) {
 				if (row.kind === "header") {
 					out.write(
-						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${BOLD}${row.label}${RESET}\n`,
+						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${BOLD}${row.label}${RESET}${CLEAR_TO_EOL}\n`,
 					);
 					continue;
 				}
@@ -696,13 +699,17 @@ export async function multiSelect<T>(
 				else if (highlighted) label = `${BOLD}${opt.label}${RESET}`;
 				const desc = opt.description ? ` ${DIM}${opt.description}${RESET}` : "";
 				const why = reason !== undefined ? ` ${YELLOW}⚠ ${reason}${RESET}` : "";
+				// CLEAR_TO_EOL after the content: a row that wraps to the
+				// same number of physical lines as last time can still be
+				// shorter on its continuation line (a reason disappeared)
+				// — erase the stale tail.
 				out.write(
-					`${CLEAR_LINE}${CURSOR_TO_COL(1)}${indent}${pointer} ${box} ${label}${desc}${why}\n`,
+					`${CLEAR_LINE}${CURSOR_TO_COL(1)}${indent}${pointer} ${box} ${label}${desc}${why}${CLEAR_TO_EOL}\n`,
 				);
 			}
 			const footer = footerText();
 			out.write(
-				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}\n`,
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${CLEAR_TO_EOL}\n`,
 			);
 			// A repaint can be shorter than the previous render (a reason
 			// or the footer collapsed to fewer wrapped lines). Erase the

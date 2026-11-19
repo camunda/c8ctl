@@ -90,9 +90,10 @@ function renderScreen(
 	// ANSI introducer as a string: biome's noControlCharactersInRegex
 	// keeps control characters out of regex literals.
 	const CSI = "\x1b\\[";
-	// Cursor-up, clear-line, cursor-to-col-1, cursor visibility, styles.
+	// Cursor-up, clear-line, clear-to-EOL, cursor-to-col-1, visibility,
+	// styles.
 	const tokens = text.split(
-		new RegExp(`(${CSI}(?:\\d+A|2K|1G|\\?25[hl]|[0-9;]*m))`),
+		new RegExp(`(${CSI}(?:\\d+A|2K|0K|1G|\\?25[hl]|[0-9;]*m))`),
 	);
 	for (const token of tokens) {
 		const up = new RegExp(`^${CSI}(\\d+)A$`).exec(token);
@@ -102,6 +103,10 @@ function renderScreen(
 		}
 		if (token === "\x1b[2K") {
 			screen[line] = "";
+			continue;
+		}
+		if (token === "\x1b[0K") {
+			screen[line] = screen[line].slice(0, col);
 			continue;
 		}
 		if (token === "\x1b[1G") {
@@ -115,7 +120,12 @@ function renderScreen(
 				col = 0;
 				continue;
 			}
-			screen[line] += ch;
+			// Terminals overwrite at the cursor column, they don't append.
+			const existing = screen[line];
+			screen[line] =
+				col < existing.length
+					? existing.slice(0, col) + ch + existing.slice(col + 1)
+					: existing + " ".repeat(col - existing.length) + ch;
 			col += 1;
 			if (col >= cols) {
 				line = Math.min(rows - 1, line + 1);
@@ -637,6 +647,55 @@ describe("multiSelect()", () => {
 				stripVTControlCharacters(io.text()),
 				/enable it to unlock this option/,
 			);
+		});
+
+		test("an unblocked wrapped row leaves no stale reason on its continuation line", async () => {
+			const io = fakeTTY();
+			// The grouped blueprint row wraps to two physical lines in both
+			// states (112 chars blocked, 83 unblocked), so the render never
+			// shrinks and the leftover-tail erasure must happen where the
+			// row is rewritten.
+			type(io, " ", " ");
+			const done = multiSelect({
+				message: "Pick",
+				options: [
+					{
+						label: "Local cluster",
+						value: "cluster",
+						checked: true,
+						group: "Essentials",
+					},
+					{
+						label: "Starter blueprint",
+						value: "blueprint",
+						checked: true,
+						description:
+							"A working example project, deployed and started for you",
+						group: "Essentials",
+						requires: [
+							{ value: "cluster", reason: "requires the local cluster" },
+						],
+					},
+				],
+				io,
+			});
+			// Snapshot the screen after the third render (initial + both
+			// toggles), before confirming.
+			for (let i = 0; i < 1000; i++) {
+				if (io.text().split("Starter blueprint").length - 1 >= 3) break;
+				await new Promise((resolveSpin) => setImmediate(resolveSpin));
+			}
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.ok(
+				visible.every((l) => !l.includes("requires the local cluster")),
+				`stale reason survived the repaint: ${JSON.stringify(visible)}`,
+			);
+			setImmediate(() => io.input.write(ENTER));
+			const result = await done;
+			assert.ok(result.interactive && !result.cancelled);
+			// The blueprint stays off: re-enabling the requirement does
+			// not bring back a hidden checkmark.
+			assert.deepStrictEqual(result.values, ["cluster"]);
 		});
 
 		test("a repaint that shrinks the menu erases stale wrapped lines", async () => {
