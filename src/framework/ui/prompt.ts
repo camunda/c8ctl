@@ -77,6 +77,7 @@ const SHOW_CURSOR = `${ESC}?25h`;
 const DIM = `${ESC}2m`;
 const BOLD = `${ESC}1m`;
 const CYAN = `${ESC}36m`;
+const INVERSE = `${ESC}7m`;
 const RESET = `${ESC}0m`;
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -610,7 +611,7 @@ export async function multiSelect<T>(
 				const reason = state.reasons[i];
 				const pointer = highlighted ? `${CYAN}❯${RESET}` : " ";
 				const box =
-					state.effective[i] && !reason ? `${CYAN}[x]${RESET}` : "[ ]";
+					state.effective[i] && !reason ? `${INVERSE}[x]${RESET}` : "[ ]";
 				const label = highlighted ? `${BOLD}${opt.label}${RESET}` : opt.label;
 				const desc = opt.description ? ` ${DIM}${opt.description}${RESET}` : "";
 				const blocked = reason ? ` ${DIM}— ${reason}${RESET}` : "";

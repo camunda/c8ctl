@@ -420,6 +420,14 @@ describe("multiSelect()", () => {
 		assert.match(plain, /\[x\] Charlie/);
 	});
 
+	test("uses inverse video for checked markers on either terminal theme", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		assert.ok(io.text().includes("\x1b[7m[x]\x1b[0m"));
+		assert.ok(io.text().includes("[ ] Bravo"));
+	});
+
 	test("renders the key hint below the message", async () => {
 		const io = fakeTTY();
 		type(io, ENTER);
