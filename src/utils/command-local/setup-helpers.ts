@@ -273,6 +273,53 @@ export function formatStepResult(
 	return `  ${title}${formatStepStatusSuffix(title, status, width, { color })}`;
 }
 
+// ── Step activity spinner ──────────────────────────────────────────
+
+/**
+ * Braille frames cycled while a step runs. Ten frames at 80 ms give a
+ * smooth, quiet tick that reads as "working" without scrolling output.
+ */
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_INTERVAL_MS = 80;
+
+export interface StepSpinner {
+	/** Stop ticking. Idempotent; the caller redraws or closes the line. */
+	readonly stop: () => void;
+}
+
+/**
+ * Animate a spinner on a step's open title line: every interval the
+ * line is redrawn as `\r  ${title} ${frame}`, so the glyph spins in
+ * place and the eventual status tag overwrites it. Terminal-only — the
+ * caller starts one only when stdout is a TTY, so piped and --quiet
+ * output never see a frame. The interval is unref'd: a stuck step can
+ * never keep the process alive through the spinner alone.
+ */
+export function startStepSpinner({
+	title,
+	write,
+	intervalMs = SPINNER_INTERVAL_MS,
+}: {
+	title: string;
+	write: (text: string) => void;
+	intervalMs?: number;
+}): StepSpinner {
+	let frame = 0;
+	const timer = setInterval(() => {
+		write(`\r  ${title} ${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]}`);
+		frame += 1;
+	}, intervalMs);
+	timer.unref();
+	let stopped = false;
+	return {
+		stop() {
+			if (stopped) return;
+			stopped = true;
+			clearInterval(timer);
+		},
+	};
+}
+
 // ── Welcome banner ─────────────────────────────────────────────────
 
 /** Block-letter c8ctl wordmark, 6 rows. */

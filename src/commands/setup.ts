@@ -3,8 +3,11 @@
  *
  * Prints the welcome banner, asks what to set up (checkbox list with
  * dependencies plus a blueprint choice), then runs every selected step.
- * Each step ends in a `[SUCCESS]`, `[ERROR]` or `[SKIPPED]` line in an
- * aligned column (green, red and dim on a terminal); a failed step
+ * While a step runs on a terminal, a braille spinner ticks on its open
+ * title line so long steps don't look frozen (piped and --quiet output
+ * stays static). Each step ends in a `[SUCCESS]`, `[ERROR]` or
+ * `[SKIPPED]` line in an aligned column (green, red and dim on a
+ * terminal); a failed step
  * prints its error on the following lines and the remaining steps still
  * run. Steps whose dependencies failed are skipped with the unmet steps
  * named.
@@ -69,9 +72,11 @@ import {
 	SETUP_STEPS,
 	type SetupComponentId,
 	type SetupStepId,
+	type StepSpinner,
 	scaffoldSetupBlueprint,
 	setupBlueprintById,
 	setupPlanPayload,
+	startStepSpinner,
 	writeMcpConfig,
 } from "../utils/index.ts";
 import { deployResources } from "./helpers/deploy-helpers.ts";
@@ -523,22 +528,38 @@ async function executePlan(
 		}
 
 		// The title line stays open: the status tag completes it. Essential
-		// step output closes it first, so it never garbles mid-line.
+		// step output closes it first, so it never garbles mid-line. On a
+		// terminal the open line gets a spinner so long steps don't look
+		// frozen; piped and --quiet runs keep the plain, static line.
 		let titleOpen = false;
+		let spinner: StepSpinner | null = null;
 		if (!ctx.quiet) {
 			process.stdout.write(`  ${step.title}`);
 			titleOpen = true;
+			if (color) {
+				spinner = startStepSpinner({
+					title: step.title,
+					write: (text) => process.stdout.write(text),
+				});
+			}
 		}
 		const closeTitle = () => {
 			if (titleOpen) {
-				process.stdout.write("\n");
+				spinner?.stop();
+				// With a spinner the line ends in a frame glyph — rewrite it
+				// from the carriage return so the frame doesn't linger.
+				process.stdout.write(spinner ? `\r  ${step.title}\n` : "\n");
 				titleOpen = false;
 			}
 		};
 		const reportStatus = (status: "success" | "error") => {
 			if (titleOpen) {
+				spinner?.stop();
+				const suffix = formatStepStatusSuffix(step.title, status, width, {
+					color,
+				});
 				process.stdout.write(
-					`${formatStepStatusSuffix(step.title, status, width, { color })}\n`,
+					spinner ? `\r  ${step.title}${suffix}\n` : `${suffix}\n`,
 				);
 				titleOpen = false;
 			} else {
