@@ -35,7 +35,15 @@ c8ctl skills install --harness cursor
 
 Without `--harness`, c8ctl detects Claude Code (`claude` or `~/.claude`) and GitHub Copilot CLI (`copilot` or `~/.copilot`) and installs into each detected harness. Explicit harness values are GitHub CLI agent IDs; use `gh skill install --help` for the supported list. c8ctl passes the selected ID and user scope to GitHub CLI, which resolves the host-specific skill directory for the current OS.
 
-GitHub CLI 2.90 or later is required; its skill commands are currently in preview. GitHub CLI resolves the latest tagged version of `camunda/skills`, or the default branch's current commit when the repository has no release tags. Re-running the command updates the same skill directories without duplicates. It overwrites local edits to the Camunda skill files.
+GitHub CLI 2.90 or later is required; its skill commands are currently in preview. GitHub CLI resolves the latest tagged version of `camunda/skills`, or the default branch's current commit when the repository has no release tags. Re-running checks for upstream updates and updates the same skill directories without duplicates. If a skill is already up to date, c8ctl leaves it in place, so local edits are preserved. An upstream update may replace edited files.
+
+To deliberately restore one skill to upstream content, first find its name and `SKILL.md` path with `gh skill list --scope user --agent <agent-id>`, then run:
+
+```bash
+gh skill update --force --dir <skill-directory> <skill-name>
+```
+
+`<skill-directory>` is the directory containing the skill's `SKILL.md`. The `--force` option replaces edited skill files even when upstream has not changed; it does not remove extra local files.
 
 The harness adapter contract is a GitHub CLI agent ID: c8ctl passes it to `gh skill install --agent` and uses user scope, while GitHub CLI resolves the OS-specific skill directory and records source metadata. Auto-detection currently covers Claude Code and GitHub Copilot CLI. To add automatic detection for another harness, add its executable and user config directory to the detector table in `skills-install-helpers.ts`; other agent IDs supported by GitHub CLI can already be selected explicitly with `--harness`.
 

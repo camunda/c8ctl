@@ -2003,7 +2003,8 @@ export const COMMAND_REGISTRY = {
 		helpFooterLabel: "Install Camunda skills",
 		helpNotes: [
 			"Requires GitHub CLI 2.90 or later; its skill commands are in preview.",
-			"Re-run to update the same skill directories; local edits to Camunda skills are overwritten.",
+			"Re-run to update the same skill directories without duplicates when upstream changes. Local edits to up-to-date skills are preserved; upstream updates may replace edited files.",
+			"To restore one skill's upstream files, use `gh skill update --force --dir <skill-directory> <skill-name>`; find names and paths with `gh skill list --scope user --agent <agent-id>`. Extra local files are retained.",
 			"Use a GitHub CLI agent ID for --harness. See `gh skill install --help` for supported IDs.",
 		],
 		hasDetailedHelp: true,

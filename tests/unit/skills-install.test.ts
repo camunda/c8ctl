@@ -322,6 +322,24 @@ test("skills help documents the install action and harness selector", async () =
 	assert.match(result.stdout, /--harness/i);
 });
 
+test("skills help explains local-edit preservation and explicit restoration", async () => {
+	const result = await c8("help", "skills");
+
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(
+		result.stdout,
+		/local edits to up-to-date skills are preserved/i,
+	);
+	assert.match(
+		result.stdout,
+		/gh skill update --force --dir <skill-directory> <skill-name>/i,
+	);
+	assert.doesNotMatch(
+		result.stdout,
+		/local edits to Camunda skills are overwritten/i,
+	);
+});
+
 test("skills install dry-run reports the source and selected harness", async () => {
 	const result = await c8(
 		"skills",
