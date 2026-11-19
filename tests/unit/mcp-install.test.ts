@@ -354,7 +354,7 @@ test("updating a drifted entry preserves JSONC comments", async (t) => {
 	assert.match(content, /restrict the exposed tools/);
 	assert.match(content, /"tools": \[\s*"search_process_definitions"\]/);
 	assert.doesNotMatch(content, /\/old\/c8ctl/);
-	assert.ok(!content.includes(oldNode));
+	assert.ok(!content.includes(JSON.stringify(oldNode)));
 	assert.ok(
 		content.includes(
 			`"C8CTL_DATA_DIR": ${JSON.stringify(s.env.C8CTL_DATA_DIR)}`,

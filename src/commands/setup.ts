@@ -25,7 +25,8 @@
  * --quiet or JSON-mode run had no --yes, or --json / --dry-run printed
  * the plan only). A re-run reuses finished work where possible; it
  * repeats the blueprint deploy and start by design, leaves correct MCP
- * entries untouched, and only updates skills that are out of date.
+ * entries untouched, updates out-of-date skills, and installs missing
+ * skills.
  * 1 when arguments failed validation or any step failed — the
  * remaining eligible steps still ran, dependents of a failed step (and
  * the deploy finale after any failure) were skipped, and re-running
