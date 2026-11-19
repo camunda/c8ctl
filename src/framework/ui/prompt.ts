@@ -686,14 +686,10 @@ export async function multiSelect<T>(
 			} else if (key.name === "space") {
 				retoggle(cursor);
 			} else if (key.sequence === "a") {
-				// "All" means every currently enabled option; disabled rows stay
-				// off, and an uncheck-all pass clears even those.
+				// Set every option together so dependencies enabled by this
+				// selection are included in the same all-toggle.
 				const checkAll = state.effective.some((isChecked) => !isChecked);
-				for (let i = 0; i < options.length; i++) {
-					if (!checkAll || state.reasons[i] === undefined) {
-						checked[i] = checkAll;
-					}
-				}
+				checked.fill(checkAll);
 				reevaluate();
 				render(false);
 			} else if (key.name === "return") {

@@ -498,6 +498,25 @@ describe("multiSelect()", () => {
 			},
 		];
 
+		test("select all checks options enabled by selecting their requirements", async () => {
+			const io = fakeTTY();
+			type(io, "a", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Cluster", value: "cluster" },
+					{
+						label: "Blueprint",
+						value: "blueprint",
+						requires: [{ value: "cluster", reason: "needs the local cluster" }],
+					},
+				],
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "blueprint"]);
+		});
+
 		test("unchecking the requirement forces the dependent off and shows why", async () => {
 			const io = fakeTTY();
 			// Space on the highlighted "Cluster" row unchecks it.
