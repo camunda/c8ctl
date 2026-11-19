@@ -731,6 +731,12 @@ function setupRemovalPreview(
 		lines.push(`  Warning: ${warning}`);
 	}
 
+	for (const failure of inventory.blueprintPlanningFailures) {
+		const warning = `Could not inspect setup blueprint marker in ${failure.directory}: ${failure.message}. That project was left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
+	}
+
 	for (const skill of inventory.skills) {
 		items.push({
 			type: "skill",
@@ -801,7 +807,8 @@ async function applySetupRemoval(
 	const { logger } = ctx;
 	let failures =
 		inventory.mcpPlanningFailures.length +
-		inventory.skillDiscoveryFailures.length;
+		inventory.skillDiscoveryFailures.length +
+		inventory.blueprintPlanningFailures.length;
 	for (const failure of inventory.mcpPlanningFailures) {
 		logger.error(
 			`Could not inspect MCP configuration for ${failure.harness}: ${failure.message}. That configuration was left untouched.`,
@@ -810,6 +817,11 @@ async function applySetupRemoval(
 	for (const failure of inventory.skillDiscoveryFailures) {
 		logger.error(
 			`Could not inspect Camunda skills for ${failure.harness}: ${failure.message}. Those skills were left untouched.`,
+		);
+	}
+	for (const failure of inventory.blueprintPlanningFailures) {
+		logger.error(
+			`Could not inspect setup blueprint marker in ${failure.directory}: ${failure.message}. That project was left untouched.`,
 		);
 	}
 
@@ -922,7 +934,8 @@ async function runSetupRemoval(
 	if (preview.payload.items.length === 0) {
 		if (
 			inventory.mcpPlanningFailures.length > 0 ||
-			inventory.skillDiscoveryFailures.length > 0
+			inventory.skillDiscoveryFailures.length > 0 ||
+			inventory.blueprintPlanningFailures.length > 0
 		) {
 			process.exitCode = 1;
 		}

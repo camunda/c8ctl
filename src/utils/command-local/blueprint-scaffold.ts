@@ -505,8 +505,10 @@ function readRemovalMarker(
  */
 export function planSetupBlueprintRemovals({
 	cwd = process.cwd(),
+	onError,
 }: {
 	cwd?: string;
+	onError?: (directory: string, error: unknown) => void;
 } = {}): SetupBlueprintRemoval[] {
 	const root = resolve(cwd);
 	const directories = [
@@ -520,22 +522,27 @@ export function planSetupBlueprintRemovals({
 		if (seen.has(directory)) continue;
 		seen.add(directory);
 
-		const result = readRemovalMarker(directory);
-		if (!result) continue;
-		const blueprint = SETUP_BLUEPRINTS.find(
-			(candidate) => candidate.id === result.marker.id,
-		);
-		if (!blueprint) {
-			throw new BlueprintScaffoldError(
-				`Cannot safely remove the blueprint in ${directory}: its marker is unsupported.`,
+		try {
+			const result = readRemovalMarker(directory);
+			if (!result) continue;
+			const blueprint = SETUP_BLUEPRINTS.find(
+				(candidate) => candidate.id === result.marker.id,
 			);
+			if (!blueprint) {
+				throw new BlueprintScaffoldError(
+					`Cannot safely remove the blueprint in ${directory}: its marker is unsupported.`,
+				);
+			}
+			removals.push({
+				blueprint,
+				directory,
+				files: result.marker.files,
+				markerContent: result.content,
+			});
+		} catch (error) {
+			if (!onError) throw error;
+			onError(directory, error);
 		}
-		removals.push({
-			blueprint,
-			directory,
-			files: result.marker.files,
-			markerContent: result.content,
-		});
 	}
 	return removals;
 }

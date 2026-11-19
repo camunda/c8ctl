@@ -27,12 +27,18 @@ export interface SetupMcpPlanningFailure {
 	readonly message: string;
 }
 
+export interface SetupBlueprintPlanningFailure {
+	readonly directory: string;
+	readonly message: string;
+}
+
 export interface SetupRemovalInventory {
 	readonly mcp: readonly SetupMcpRemoval[];
 	readonly mcpPlanningFailures: readonly SetupMcpPlanningFailure[];
 	readonly skills: readonly CamundaSkillInstallation[];
 	readonly skillDiscoveryFailures: readonly SetupSkillDiscoveryFailure[];
 	readonly blueprints: readonly SetupBlueprintRemoval[];
+	readonly blueprintPlanningFailures: readonly SetupBlueprintPlanningFailure[];
 }
 
 const SETUP_MCP_HARNESSES = [
@@ -103,11 +109,23 @@ export async function inspectSetupRemovalInventory({
 		}
 	}
 
+	const blueprintPlanningFailures: SetupBlueprintPlanningFailure[] = [];
+	const blueprints = planSetupBlueprintRemovals({
+		cwd,
+		onError: (directory, error) => {
+			blueprintPlanningFailures.push({
+				directory,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		},
+	});
+
 	return {
 		mcp,
 		mcpPlanningFailures,
 		skills,
 		skillDiscoveryFailures,
-		blueprints: planSetupBlueprintRemovals({ cwd }),
+		blueprints,
+		blueprintPlanningFailures,
 	};
 }
