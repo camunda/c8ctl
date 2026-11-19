@@ -85,7 +85,6 @@ import {
 } from "../utils/index.ts";
 import { deployResources } from "./helpers/deploy-helpers.ts";
 import { buildMcpConnection } from "./mcp.ts";
-import { installDesktopModeler } from "./modeler.ts";
 import { extractProcessId } from "./run.ts";
 
 /** Flags the setup handler reads, as declared in the command registry. */
@@ -178,40 +177,58 @@ const CLI_ENTRY = realpathSync(
 );
 
 /**
- * The cluster command lives in the built-in cluster plugin, which owns
- * process exit on failure — so setup runs it as a child process and maps
- * the exit code onto the step result. `cluster start` downloads Camunda 8
- * Run on first run, so this one step covers install and start.
+ * Run a c8ctl command as a child process and map its exit code onto a
+ * step result. Setup orchestrates the commands that own a capability —
+ * the cluster plugin, the modeler installer — instead of importing their
+ * internals, so a child failure surfaces as that command's own output
+ * followed by a step error.
  *
- * The child's stdout is streamed through a line filter that drops the
- * download progress lines (`//> 42% …`) and feeds the step's output
- * buffer (via ctx.logger) — it surfaces only when the step fails.
- * stderr passes through immediately: the plugin's warnings and failure
- * diagnostics are actionable either way. The child is pinned to text
- * mode so its lines stay plain and filterable no matter the session's
- * output mode.
+ * The child's stdout is streamed through a line filter (`skipStdoutLine`
+ * drops noise like the c8run download progress, `//> 42% …`) and feeds
+ * the step's output buffer (via ctx.logger) — it surfaces only when the
+ * step fails, except lines `promoteStdoutLine` marks essential. stderr
+ * passes through immediately: warnings and failure diagnostics are
+ * actionable either way. The child is pinned to text mode so its lines
+ * stay plain and filterable no matter the session's output mode.
  */
-function spawnClusterStart(ctx: CommandContext): Promise<void> {
+function spawnC8ctl(
+	ctx: CommandContext,
+	argv: string[],
+	{
+		skipStdoutLine,
+		promoteStdoutLine,
+		extraEnv,
+	}: {
+		skipStdoutLine?: (line: string) => boolean;
+		promoteStdoutLine?: (line: string) => boolean;
+		extraEnv?: Record<string, string>;
+	} = {},
+): Promise<void> {
+	const label = `c8ctl ${argv.join(" ")}`;
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(process.execPath, [CLI_ENTRY, "cluster", "start"], {
+		const child = spawn(process.execPath, [CLI_ENTRY, ...argv], {
 			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, C8CTL_OUTPUT_MODE: "text" },
+			env: { ...process.env, C8CTL_OUTPUT_MODE: "text", ...extraEnv },
 		});
-		const forward = (stream: "stdout" | "stderr", essential: boolean) =>
-			createLineForwarder({
-				write: (line) => ctx.logger.info(line, { stream, essential }),
-				skip: isClusterProgressLine,
-			});
-		const out = forward("stdout", false);
-		const err = forward("stderr", true);
+		const out = createLineForwarder({
+			write: (line) =>
+				ctx.logger.info(line, {
+					stream: "stdout",
+					essential: promoteStdoutLine?.(line) === true,
+				}),
+			skip: skipStdoutLine ?? (() => false),
+		});
+		const err = createLineForwarder({
+			write: (line) =>
+				ctx.logger.info(line, { stream: "stderr", essential: true }),
+			skip: () => false,
+		});
 		child.stdout?.setEncoding("utf-8");
 		child.stderr?.setEncoding("utf-8");
 		child.stdout?.on("data", (chunk: string) => out.push(chunk));
 		child.stderr?.on("data", (chunk: string) => err.push(chunk));
 		child.on("error", (error) =>
-			rejectPromise(
-				new Error(`Could not run c8ctl cluster start: ${error.message}`),
-			),
+			rejectPromise(new Error(`Could not run ${label}: ${error.message}`)),
 		);
 		child.on("close", (code) => {
 			out.flush();
@@ -219,47 +236,23 @@ function spawnClusterStart(ctx: CommandContext): Promise<void> {
 			if (code === 0) {
 				resolvePromise();
 			} else {
-				rejectPromise(
-					new Error(`c8ctl cluster start failed (exit code ${code}).`),
-				);
+				rejectPromise(new Error(`${label} failed (exit code ${code}).`));
 			}
 		});
 	});
 }
 
+function spawnClusterStart(ctx: CommandContext): Promise<void> {
+	return spawnC8ctl(ctx, ["cluster", "start"], {
+		skipStdoutLine: isClusterProgressLine,
+	});
+}
+
 function spawnClusterStop(ctx: CommandContext): Promise<void> {
-	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(process.execPath, [CLI_ENTRY, "cluster", "stop"], {
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, C8CTL_OUTPUT_MODE: "text" },
-		});
-		const forward = (stream: "stdout" | "stderr") =>
-			createLineForwarder({
-				write: (line) => ctx.logger.info(line, { stream, essential: true }),
-				skip: () => false,
-			});
-		const out = forward("stdout");
-		const err = forward("stderr");
-		child.stdout?.setEncoding("utf-8");
-		child.stderr?.setEncoding("utf-8");
-		child.stdout?.on("data", (chunk: string) => out.push(chunk));
-		child.stderr?.on("data", (chunk: string) => err.push(chunk));
-		child.on("error", (error) =>
-			rejectPromise(
-				new Error(`Could not run c8ctl cluster stop: ${error.message}`),
-			),
-		);
-		child.on("close", (code) => {
-			out.flush();
-			err.flush();
-			if (code === 0) {
-				resolvePromise();
-			} else {
-				rejectPromise(
-					new Error(`c8ctl cluster stop failed (exit code ${code}).`),
-				);
-			}
-		});
+	// Removal reports every child line, matching the previous dedicated
+	// spawner whose stdout forwarder marked all lines essential.
+	return spawnC8ctl(ctx, ["cluster", "stop"], {
+		promoteStdoutLine: () => true,
 	});
 }
 
@@ -292,14 +285,11 @@ async function runClusterStart(
 }
 
 async function runModelerInstall(ctx: CommandContext): Promise<void> {
-	// Always quiet: the installer's progress chatter is noise next to the
-	// step report — the step's status line is the signal. Failures still
-	// throw with diagnostics.
-	await installDesktopModeler({
-		isDryRun: false,
-		logger: ctx.logger,
-		quiet: true,
-	});
+	// The modeler plugin owns the installation; setup runs it as a child
+	// process. Always quiet: the installer's progress chatter is noise next
+	// to the step report — the step's status line is the signal. Failures
+	// still surface with the child's diagnostics.
+	await spawnC8ctl(ctx, ["modeler", "install", "--quiet"]);
 }
 
 async function runBlueprintScaffold(

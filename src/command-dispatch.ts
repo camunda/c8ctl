@@ -71,7 +71,6 @@ import {
 	correlateMessageCommand,
 	publishMessageCommand,
 } from "./commands/messages.ts";
-import { modelerInstallCommand } from "./commands/modeler.ts";
 import { feedbackCommand, openAppCommand } from "./commands/open.ts";
 import {
 	doctorPluginCommand,
@@ -266,9 +265,6 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	// `completion` is resourceless in the registry; the handler branches
 	// on ctx.resource (bash / zsh / fish / install).
 	["completion:", completionCommand],
-
-	// ── Local applications ─────────────────────────────────────────────
-	["modeler:install", modelerInstallCommand],
 
 	// ── Variables ───────────────────────────────────────────────────────
 	["set:variable", setVariableCommand],

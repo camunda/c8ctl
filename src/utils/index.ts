@@ -8,7 +8,6 @@ export * from "./command-local/blueprint-scaffold.ts";
 export * from "./command-local/deploy-version.ts";
 export * from "./command-local/mcp-install-helpers.ts";
 export * from "./command-local/mcp-proxy-helpers.ts";
-export * from "./command-local/modeler-helpers.ts";
 export * from "./command-local/open-helpers.ts";
 export * from "./command-local/process-instance-helpers.ts";
 export * from "./command-local/search-helpers.ts";

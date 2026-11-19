@@ -135,3 +135,40 @@ export function handleCommandError(
 	});
 	process.exit(1);
 }
+
+/**
+ * The rendering half of `handleCommandError` for plugin command handlers.
+ *
+ * A plugin handler that threw would surface through the host's top-level
+ * catch as an "Unexpected error" dump; rendering through this helper gives
+ * plugin commands the same user-facing failure shape built-in commands get
+ * from the framework. Unlike `handleCommandError` this returns instead of
+ * calling `process.exit`, so the plugin process drains naturally — the
+ * handler sets `process.exitCode = 1` after calling it.
+ *
+ * `SilentError` inputs render nothing (the caller already showed the
+ * user-facing message); under `verbose` the normalized error is thrown,
+ * matching `handleCommandError`.
+ */
+export function renderCommandFailure(
+	logger: Logger,
+	message: string,
+	error: unknown,
+	{ verbose = false }: { verbose?: boolean } = {},
+): void {
+	const normalizedError = normalizeToError(error, message);
+	if (verbose) {
+		throw normalizedError;
+	}
+	if (error instanceof SilentError) {
+		return;
+	}
+	if (normalizedError.message === message) {
+		logger.error(message);
+	} else {
+		logger.error(message, normalizedError);
+	}
+	logger.info("For more details on the error, run with the --verbose flag", {
+		essential: true,
+	});
+}

@@ -46,16 +46,6 @@ import { syncBuiltinESMExports } from "node:module";
 import { basename, join } from "node:path";
 import { PassThrough } from "node:stream";
 
-// ── Desktop Modeler looks installed ────────────────────────────────
-// macOS and Windows look the app up at fixed paths. The Linux lookup
-// searches PATH for a `camunda-modeler` executable instead — the tests
-// put a real fixture file on PATH for that.
-
-const originalExistsSync = fs.existsSync;
-fs.existsSync = (path: fs.PathLike): boolean =>
-	/Camunda Modeler\.app$|Camunda Modeler\.exe$/.test(String(path)) ||
-	originalExistsSync(path);
-
 syncBuiltinESMExports();
 
 // ── Fixtures ───────────────────────────────────────────────────────
@@ -340,6 +330,14 @@ Object.defineProperty(childProcess, "spawn", {
 				});
 			}
 			return fakeChild(1);
+		}
+		// The modeler install runs as a `c8ctl modeler install` child;
+		// report the already-installed skip so no real download happens.
+		if (argv.includes("modeler")) {
+			return fakeChild(0, {
+				stdout:
+					"Camunda Modeler is already installed at /stubbed/Camunda Modeler.app; skipping installation.\n",
+			});
 		}
 		// Skill discovery, installation, and updates use the GitHub CLI.
 		if (basename(String(command)) === "gh") {

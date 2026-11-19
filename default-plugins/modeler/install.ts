@@ -15,18 +15,31 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { Logger } from "../core/index.ts";
-import {
-	type CommandContext,
-	type CommandResult,
-	defineCommand,
-} from "../framework/index.ts";
+import type { Logger } from "../../src/core/index.ts";
 import {
 	latestStableModelerVersion,
 	MODELER_RELEASE_URL,
 	modelerMacArchiveName,
 	renderDownloadProgress,
-} from "../utils/index.ts";
+} from "./helpers.ts";
+
+/**
+ * The slice of the plugin host context the installer needs.
+ */
+export interface ModelerInstallContext {
+	isDryRun: boolean;
+	logger: Logger;
+	quiet: boolean;
+}
+
+/**
+ * What an install attempt produced. The plugin handler renders it the same
+ * way the command framework renders the matching CommandResult kinds.
+ */
+export type ModelerInstallResult =
+	| { kind: "info"; message: string }
+	| { kind: "success"; message: string }
+	| { kind: "dryRun"; info: Record<string, unknown> };
 
 const APP_BUNDLE_NAME = "Camunda Modeler.app";
 const SYSTEM_APPLICATIONS_DIR = "/Applications";
@@ -69,7 +82,7 @@ function errorMessage(error: unknown): string {
  * announcements); warnings and failure diagnostics still surface.
  */
 function reportProgress(
-	{ logger, quiet }: Pick<CommandContext, "logger" | "quiet">,
+	{ logger, quiet }: Pick<ModelerInstallContext, "logger" | "quiet">,
 	message: string,
 ): void {
 	if (!quiet) logger.info(message);
@@ -514,7 +527,7 @@ function installOnWindows({
 	isDryRun,
 	logger,
 	quiet,
-}: Pick<CommandContext, "isDryRun" | "logger" | "quiet">): CommandResult {
+}: ModelerInstallContext): ModelerInstallResult {
 	const localAppData =
 		process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
 	const installDir = join(localAppData, "Programs", "Camunda Modeler");
@@ -657,10 +670,7 @@ async function installOnLinux({
 	isDryRun,
 	logger,
 	quiet,
-}: Pick<
-	CommandContext,
-	"isDryRun" | "logger" | "quiet"
->): Promise<CommandResult> {
+}: ModelerInstallContext): Promise<ModelerInstallResult> {
 	const installedPath = findOnPath(LINUX_EXECUTABLE);
 	if (installedPath) {
 		return {
@@ -755,13 +765,12 @@ async function installOnLinux({
 
 /**
  * Install the latest Desktop Modeler for this OS, skipping when already
- * installed. Exported so `c8ctl setup` can run the same installation as a
- * wizard step without going through the command wrapper (whose error path
- * owns process exit).
+ * installed. Kept free of command-dispatch concerns so the plugin handler
+ * owns rendering and error mapping.
  */
 export async function installDesktopModeler(
-	ctx: Pick<CommandContext, "isDryRun" | "logger" | "quiet">,
-): Promise<CommandResult> {
+	ctx: ModelerInstallContext,
+): Promise<ModelerInstallResult> {
 	if (process.platform === "win32") return installOnWindows(ctx);
 	if (process.platform === "linux") return installOnLinux(ctx);
 	if (process.platform !== "darwin") {
@@ -852,9 +861,3 @@ export async function installDesktopModeler(
 		message: `Installed Camunda Modeler ${version} to ${destination}.`,
 	};
 }
-
-export const modelerInstallCommand = defineCommand(
-	"modeler",
-	"install",
-	(ctx) => installDesktopModeler(ctx),
-);
