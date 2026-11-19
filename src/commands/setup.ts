@@ -719,6 +719,12 @@ function setupRemovalPreview(
 		}
 	}
 
+	for (const failure of inventory.mcpPlanningFailures) {
+		const warning = `Could not inspect MCP configuration for ${failure.harness}: ${failure.message}. That configuration was left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
+	}
+
 	for (const failure of inventory.skillDiscoveryFailures) {
 		const warning = `Could not inspect Camunda skills for ${failure.harness}: ${failure.message}. Those skills were left untouched.`;
 		warnings.push(warning);
@@ -793,7 +799,14 @@ async function applySetupRemoval(
 	stopCluster: boolean,
 ): Promise<void> {
 	const { logger } = ctx;
-	let failures = inventory.skillDiscoveryFailures.length;
+	let failures =
+		inventory.mcpPlanningFailures.length +
+		inventory.skillDiscoveryFailures.length;
+	for (const failure of inventory.mcpPlanningFailures) {
+		logger.error(
+			`Could not inspect MCP configuration for ${failure.harness}: ${failure.message}. That configuration was left untouched.`,
+		);
+	}
 	for (const failure of inventory.skillDiscoveryFailures) {
 		logger.error(
 			`Could not inspect Camunda skills for ${failure.harness}: ${failure.message}. Those skills were left untouched.`,
@@ -907,7 +920,12 @@ async function runSetupRemoval(
 
 	logger.output(preview.text);
 	if (preview.payload.items.length === 0) {
-		if (inventory.skillDiscoveryFailures.length > 0) process.exitCode = 1;
+		if (
+			inventory.mcpPlanningFailures.length > 0 ||
+			inventory.skillDiscoveryFailures.length > 0
+		) {
+			process.exitCode = 1;
+		}
 		return;
 	}
 

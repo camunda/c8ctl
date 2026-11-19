@@ -269,6 +269,7 @@ export function planMcpConfigs({
 	alias,
 	connection,
 	preserveConflicts = false,
+	onError,
 }: {
 	requested: readonly string[];
 	operation: "install" | "uninstall";
@@ -277,136 +278,174 @@ export function planMcpConfigs({
 	alias: string;
 	connection?: Record<string, unknown>;
 	preserveConflicts?: boolean;
+	onError?: (harness: string, error: unknown) => void;
 }): McpConfigPlan[] {
-	return selectHarnesses(requested).map((harness) => {
-		const path = resolve(harness.path);
-		const existing = lstatSync(path, { throwIfNoEntry: false });
-		// Follow an existing config symlink without replacing the link itself.
-		const targetPath = existing ? realpathSync(path) : path;
-		const original = readOptionalFile(targetPath);
-		let content = original ?? "{}\n";
-		const errors: ParseError[] = [];
-		const parseOptions = {
-			disallowComments: harness.id !== "vscode",
-			allowTrailingComma: harness.id === "vscode",
-		};
-		const root = parseTree(content, errors, parseOptions);
-		if (errors.length > 0 || !root || root.type !== "object") {
-			throw new Error(
-				`Invalid MCP config in ${path}. Repair it before continuing.`,
-			);
-		}
-		const config: unknown = parse(content, undefined, parseOptions);
-		if (!isRecord(config)) throw new Error(`Expected an object in ${path}.`);
-		const servers = Object.hasOwn(config, harness.key)
-			? config[harness.key]
-			: {};
-		if (!isRecord(servers)) {
-			throw new Error(`Expected '${harness.key}' to be an object in ${path}.`);
-		}
-		for (const node of [root, findNodeAtLocation(root, [harness.key])]) {
-			const keys: unknown[] =
-				node?.children?.map((property) => property.children?.[0]?.value) ?? [];
-			if (new Set(keys).size !== keys.length) {
-				throw new Error(
-					`Duplicate configuration keys in ${path}. Repair them before continuing.`,
-				);
-			}
-		}
-		const entries: Array<{
-			name: string;
-			config: Record<string, unknown>;
-			docs: boolean;
-		}> = [];
-		if (orchestration) {
-			entries.push({
-				name: alias,
-				config: {
-					...(harness.stdioType ? { type: harness.stdioType } : {}),
-					...connection,
-				},
-				docs: false,
-			});
-		}
-		if (docs)
-			entries.push({
-				name: "camunda-docs",
-				config: docsEntry(harness),
-				docs: true,
-			});
-
-		const changes = entries.map((entry): McpChange => {
-			const present = Object.hasOwn(servers, entry.name);
-			const current = servers[entry.name];
-			const matches =
-				operation === "uninstall" && !entry.docs
-					? isOrchestrationEntry(current)
-					: matchesServerConfig(current, entry.config);
-			// An entry c8ctl installed earlier can drift when the install
-			// moved (another Node, a global vs. checkout install, a renamed
-			// profile): it is still ours, so install updates it in place
-			// instead of blocking a re-run. A foreign entry under the same
-			// name still conflicts. The docs entry carries no local paths,
-			// so only the orchestration entry can drift this way.
-			const owned = !entry.docs && isOrchestrationEntry(current);
-			if (present && !matches && !(operation === "install" && owned)) {
-				if (operation === "uninstall" && preserveConflicts) {
-					return { server: entry.name, status: "preserved" };
-				}
-				throw new Error(
-					`MCP entry '${entry.name}' conflicts in ${path}. Inspect it before changing it${entry.docs ? "." : ", or choose another --alias."}`,
-				);
-			}
-			const status =
-				operation === "install"
-					? !present
-						? "installed"
-						: matches
-							? "unchanged"
-							: "updated"
-					: present
-						? "removed"
-						: "absent";
-			if (status === "updated") {
-				content = updateManagedEntry({
-					content,
-					path: [harness.key, entry.name],
-					current: isRecord(current) ? current : {},
-					expected: entry.config,
-				});
-			} else if (status === "installed" || status === "removed") {
-				content = applyEdits(
-					content,
-					modify(
-						content,
-						[harness.key, entry.name],
-						operation === "install" ? entry.config : undefined,
-						{
-							formattingOptions: {
-								insertSpaces: true,
-								tabSize: 2,
-								eol: content.includes("\r\n") ? "\r\n" : "\n",
-							},
-						},
-					),
-				);
-			}
-			return {
-				server: entry.name,
-				status,
-				...(operation === "install" ? { config: entry.config } : {}),
+	type TargetPlans = {
+		original: string | undefined;
+		content: string;
+		mode: number;
+		plans: McpConfigPlan[];
+	};
+	const plans: McpConfigPlan[] = [];
+	const plansByTarget = new Map<string, TargetPlans>();
+	for (const harness of selectHarnesses(requested)) {
+		try {
+			const path = resolve(harness.path);
+			const existing = lstatSync(path, { throwIfNoEntry: false });
+			// Follow an existing config symlink without replacing the link itself.
+			const targetPath = existing ? realpathSync(path) : path;
+			const previous = plansByTarget.get(targetPath);
+			const original = previous
+				? previous.original
+				: readOptionalFile(targetPath);
+			let content = previous ? previous.content : (original ?? "{}\n");
+			const errors: ParseError[] = [];
+			const parseOptions = {
+				disallowComments: harness.id !== "vscode",
+				allowTrailingComma: harness.id === "vscode",
 			};
-		});
-		return {
-			harness: harness.id,
-			path,
-			targetPath,
-			original,
-			content,
-			mode: existing ? statSync(targetPath).mode & 0o600 : 0o600,
-			changes,
-		};
-	});
+			const root = parseTree(content, errors, parseOptions);
+			if (errors.length > 0 || !root || root.type !== "object") {
+				throw new Error(
+					`Invalid MCP config in ${path}. Repair it before continuing.`,
+				);
+			}
+			const config: unknown = parse(content, undefined, parseOptions);
+			if (!isRecord(config)) throw new Error(`Expected an object in ${path}.`);
+			const servers = Object.hasOwn(config, harness.key)
+				? config[harness.key]
+				: {};
+			if (!isRecord(servers)) {
+				throw new Error(
+					`Expected '${harness.key}' to be an object in ${path}.`,
+				);
+			}
+			for (const node of [root, findNodeAtLocation(root, [harness.key])]) {
+				const keys: unknown[] =
+					node?.children?.map((property) => property.children?.[0]?.value) ??
+					[];
+				if (new Set(keys).size !== keys.length) {
+					throw new Error(
+						`Duplicate configuration keys in ${path}. Repair them before continuing.`,
+					);
+				}
+			}
+			const entries: Array<{
+				name: string;
+				config: Record<string, unknown>;
+				docs: boolean;
+			}> = [];
+			if (orchestration) {
+				entries.push({
+					name: alias,
+					config: {
+						...(harness.stdioType ? { type: harness.stdioType } : {}),
+						...connection,
+					},
+					docs: false,
+				});
+			}
+			if (docs)
+				entries.push({
+					name: "camunda-docs",
+					config: docsEntry(harness),
+					docs: true,
+				});
+
+			const changes = entries.map((entry): McpChange => {
+				const present = Object.hasOwn(servers, entry.name);
+				const current = servers[entry.name];
+				const matches =
+					operation === "uninstall" && !entry.docs
+						? isOrchestrationEntry(current)
+						: matchesServerConfig(current, entry.config);
+				// An entry c8ctl installed earlier can drift when the install
+				// moved (another Node, a global vs. checkout install, a renamed
+				// profile): it is still ours, so install updates it in place
+				// instead of blocking a re-run. A foreign entry under the same
+				// name still conflicts. The docs entry carries no local paths,
+				// so only the orchestration entry can drift this way.
+				const owned = !entry.docs && isOrchestrationEntry(current);
+				if (present && !matches && !(operation === "install" && owned)) {
+					if (operation === "uninstall" && preserveConflicts) {
+						return { server: entry.name, status: "preserved" };
+					}
+					throw new Error(
+						`MCP entry '${entry.name}' conflicts in ${path}. Inspect it before changing it${entry.docs ? "." : ", or choose another --alias."}`,
+					);
+				}
+				const status =
+					operation === "install"
+						? !present
+							? "installed"
+							: matches
+								? "unchanged"
+								: "updated"
+						: present
+							? "removed"
+							: "absent";
+				if (status === "updated") {
+					content = updateManagedEntry({
+						content,
+						path: [harness.key, entry.name],
+						current: isRecord(current) ? current : {},
+						expected: entry.config,
+					});
+				} else if (status === "installed" || status === "removed") {
+					content = applyEdits(
+						content,
+						modify(
+							content,
+							[harness.key, entry.name],
+							operation === "install" ? entry.config : undefined,
+							{
+								formattingOptions: {
+									insertSpaces: true,
+									tabSize: 2,
+									eol: content.includes("\r\n") ? "\r\n" : "\n",
+								},
+							},
+						),
+					);
+				}
+				return {
+					server: entry.name,
+					status,
+					...(operation === "install" ? { config: entry.config } : {}),
+				};
+			});
+			const mode =
+				previous?.mode ??
+				(existing ? statSync(targetPath).mode & 0o600 : 0o600);
+			const plan: McpConfigPlan = {
+				harness: harness.id,
+				path,
+				targetPath,
+				original,
+				content,
+				mode,
+				changes,
+			};
+			const target: TargetPlans = previous ?? {
+				original,
+				content,
+				mode,
+				plans: [],
+			};
+			target.content = content;
+			target.plans.push(plan);
+			plansByTarget.set(targetPath, target);
+			plans.push(plan);
+		} catch (error) {
+			if (!onError) throw error;
+			onError(harness.id, error);
+		}
+	}
+
+	for (const target of plansByTarget.values()) {
+		for (const plan of target.plans) plan.content = target.content;
+	}
+	return plans;
 }
 
 export interface WriteMcpConfigOptions {
@@ -420,8 +459,8 @@ export interface WriteMcpConfigOptions {
  * Take the per-target cross-process lock (`<target>.lock`), created
  * exclusively so exactly one c8ctl writer holds it at a time. Held from
  * snapshot validation through replacement in `writeMcpConfig`, a second
- * writer observes the first's replacement and is rejected by the stale
- * snapshot check rather than silently discarding the other connection.
+ * writer observes the first's replacement and no-ops only when it matches
+ * the same planned final content; otherwise the stale-snapshot check rejects it.
  */
 function acquireConfigLock(
 	targetPath: string,
@@ -478,7 +517,9 @@ export function writeMcpConfig(
 			fsyncSync(fd);
 			closeSync(fd);
 			fd = undefined;
-			if (readOptionalFile(plan.targetPath) !== plan.original) {
+			const current = readOptionalFile(plan.targetPath);
+			if (current === plan.content) return;
+			if (current !== plan.original) {
 				throw new Error(
 					`MCP config changed during installation: ${plan.path}. Run the command again.`,
 				);

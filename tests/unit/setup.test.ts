@@ -23,7 +23,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -41,6 +41,16 @@ const SETUP_STUB = pathToFileURL(
 const BRAND_BLUE = "\x1b[38;2;79;57;246m";
 const PROMPT_TEXT = "What should we set up for you?";
 const BLUEPRINT_PROMPT_TEXT = "Which starter blueprint should we install?";
+
+function vscodeMcpConfigPath(home: string): string {
+	const appData =
+		process.platform === "darwin"
+			? join(home, "Library", "Application Support")
+			: process.platform === "win32"
+				? join(home, "AppData", "Roaming")
+				: join(home, ".config");
+	return join(appData, "Code", "User", "mcp.json");
+}
 
 interface InteractiveResult {
 	status: number | null;
@@ -929,6 +939,60 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("continues removal when MCP inspection fails for other harnesses", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const cursorConfigPath = join(stub.home, ".cursor", "mcp.json");
+			mkdirSync(join(stub.home, ".cursor"), { recursive: true });
+			writeFileSync(cursorConfigPath, "{");
+
+			const vscodeConfigPath = vscodeMcpConfigPath(stub.home);
+			mkdirSync(dirname(vscodeConfigPath), { recursive: true });
+			writeFileSync(vscodeConfigPath, JSON.stringify({ servers: [] }));
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--stop-cluster",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Could not inspect MCP configuration for cursor/);
+			assert.match(output, /Could not inspect MCP configuration for vscode/);
+			assert.match(output, /Stopped the local cluster/);
+			assert.strictEqual(readFileSync(cursorConfigPath, "utf-8"), "{");
+			assert.strictEqual(
+				readFileSync(vscodeConfigPath, "utf-8"),
+				JSON.stringify({ servers: [] }),
+			);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(join(stub.home, ".claude", ".claude.json"), "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) && isRecord(remainingConfig.mcpServers),
+			);
+			assert.ok(!Object.hasOwn(remainingConfig.mcpServers, "camunda"));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("preserves foreign MCP entries while removing setup-owned artifacts", async () => {
 		const stub = stubbedExecution();
 		try {
@@ -985,6 +1049,74 @@ describe("c8ctl setup", () => {
 				remainingConfig.mcpServers["camunda-docs"],
 				foreignDocs,
 			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("coalesces removals when harness configs share a target", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--yes",
+				"--docs-mcp",
+			);
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const claudeConfigPath = join(stub.home, ".claude", ".claude.json");
+			const claudeConfig: unknown = JSON.parse(
+				readFileSync(claudeConfigPath, "utf-8"),
+			);
+			assert.ok(isRecord(claudeConfig) && isRecord(claudeConfig.mcpServers));
+			claudeConfig.mcpServers.personal = {
+				url: "https://personal.example.invalid/mcp",
+			};
+			claudeConfig.servers = {
+				camunda: {
+					command: process.execPath,
+					args: ["index.ts", "mcp-proxy", "--profile", "local"],
+					env: { C8CTL_DATA_DIR: join(stub.home, "data") },
+				},
+				"camunda-docs": {
+					type: "http",
+					url: "https://camunda-docs.mcp.kapa.ai",
+				},
+				personal: { url: "https://other.example.invalid/mcp" },
+			};
+			writeFileSync(claudeConfigPath, JSON.stringify(claudeConfig));
+
+			const vscodeConfigPath = vscodeMcpConfigPath(stub.home);
+			mkdirSync(dirname(vscodeConfigPath), { recursive: true });
+			symlinkSync(claudeConfigPath, vscodeConfigPath, "file");
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 0, removal.stderr + removal.stdout);
+
+			const remainingConfig: unknown = JSON.parse(
+				readFileSync(claudeConfigPath, "utf-8"),
+			);
+			assert.ok(
+				isRecord(remainingConfig) &&
+					isRecord(remainingConfig.mcpServers) &&
+					isRecord(remainingConfig.servers),
+			);
+			assert.deepStrictEqual(remainingConfig.mcpServers, {
+				personal: { url: "https://personal.example.invalid/mcp" },
+			});
+			assert.deepStrictEqual(remainingConfig.servers, {
+				personal: { url: "https://other.example.invalid/mcp" },
+			});
 		} finally {
 			stub.cleanup();
 		}

@@ -22,8 +22,14 @@ export interface SetupSkillDiscoveryFailure {
 	readonly message: string;
 }
 
+export interface SetupMcpPlanningFailure {
+	readonly harness: string;
+	readonly message: string;
+}
+
 export interface SetupRemovalInventory {
 	readonly mcp: readonly SetupMcpRemoval[];
+	readonly mcpPlanningFailures: readonly SetupMcpPlanningFailure[];
 	readonly skills: readonly CamundaSkillInstallation[];
 	readonly skillDiscoveryFailures: readonly SetupSkillDiscoveryFailure[];
 	readonly blueprints: readonly SetupBlueprintRemoval[];
@@ -50,6 +56,7 @@ export async function inspectSetupRemovalInventory({
 		process.platform === "darwin" || process.platform === "win32"
 			? [...SETUP_MCP_HARNESSES, "claude-desktop"]
 			: [...SETUP_MCP_HARNESSES];
+	const mcpPlanningFailures: SetupMcpPlanningFailure[] = [];
 	const plans = planMcpConfigs({
 		requested: mcpHarnesses,
 		operation: "uninstall",
@@ -57,6 +64,12 @@ export async function inspectSetupRemovalInventory({
 		orchestration: true,
 		alias: "camunda",
 		preserveConflicts: true,
+		onError: (harness, error) => {
+			mcpPlanningFailures.push({
+				harness,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		},
 	});
 	const mcp = plans
 		.map(
@@ -92,6 +105,7 @@ export async function inspectSetupRemovalInventory({
 
 	return {
 		mcp,
+		mcpPlanningFailures,
 		skills,
 		skillDiscoveryFailures,
 		blueprints: planSetupBlueprintRemovals({ cwd }),
