@@ -538,7 +538,52 @@ describe("multiSelect()", () => {
 			assert.deepStrictEqual(result.values, []);
 			assert.match(
 				stripVTControlCharacters(io.text()),
-				/Blueprint.*— needs the local cluster/,
+				/Blueprint.*⚠ needs the local cluster/,
+			);
+		});
+
+		test("a blocked row is dimmed and its reason rendered in warning yellow", async () => {
+			const io = fakeTTY();
+			// Space on the highlighted "Cluster" row unchecks it.
+			type(io, " ", ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			const text = io.text();
+			// The whole blocked row is dimmed…
+			assert.ok(text.includes("\x1b[2mBlueprint\x1b[0m"));
+			// …and the reason stands out in yellow with a warning marker.
+			assert.ok(text.includes("\x1b[33m⚠ needs the local cluster\x1b[0m"));
+		});
+
+		test("the status line under the list explains the focused blocked row", async () => {
+			const io = fakeTTY();
+			// Cluster off, then move onto the blocked Blueprint row.
+			type(io, " ", DOWN, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/⚠ Blueprint needs the local cluster — enable it to unlock this option/,
+			);
+		});
+
+		test("the status line is blank when the focused row is not blocked", async () => {
+			const io = fakeTTY();
+			type(io, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.doesNotMatch(
+				stripVTControlCharacters(io.text()),
+				/enable it to unlock this option/,
 			);
 		});
 
@@ -593,6 +638,78 @@ describe("multiSelect()", () => {
 			assert.ok(!result.interactive);
 			assert.deepStrictEqual(result.values, []);
 			assert.match(result.hint, /Blueprint.*needs the local cluster/);
+		});
+	});
+
+	describe("groups", () => {
+		const GROUPED_OPTIONS = [
+			{
+				label: "Cluster",
+				value: "cluster",
+				checked: true,
+				group: "Essentials",
+			},
+			{
+				label: "Modeler",
+				value: "modeler",
+				checked: true,
+				group: "Essentials",
+			},
+			{ label: "Skills", value: "skills", group: "AI-assisted development" },
+		];
+
+		test("renders a header above each group and indents its options", async () => {
+			const io = fakeTTY();
+			type(io, ENTER);
+			await multiSelect({ message: "Pick", options: GROUPED_OPTIONS, io });
+			const plain = stripVTControlCharacters(io.text());
+			assert.match(plain, /^ {2}Essentials$/m);
+			assert.match(plain, /^ {2}AI-assisted development$/m);
+			// Grouped options sit two spaces deeper than their header.
+			assert.match(plain, / {4}❯ \[x\] Cluster/);
+			assert.match(plain, / {6}\[x\] Modeler/);
+			assert.match(plain, / {6}\[ \] Skills/);
+		});
+
+		test("headers are not focusable: the cursor moves option to option", async () => {
+			const io = fakeTTY();
+			// Cluster → Modeler → Skills; the header rows are skipped.
+			// Space on Skills checks it.
+			type(io, DOWN, DOWN, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "modeler", "skills"]);
+		});
+
+		test("a number key still toggles the matching option", async () => {
+			const io = fakeTTY();
+			type(io, "3", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "modeler", "skills"]);
+		});
+
+		test("non-interactive hint lists groups with indented options", async () => {
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io: fakePipe(),
+			});
+			assert.ok(!result.interactive);
+			assert.match(result.hint, / {2}Essentials\n/);
+			assert.match(result.hint, / {4}\[x\] Cluster/);
+			assert.match(
+				result.hint,
+				/ {2}AI-assisted development\n {4}\[ \] Skills/,
+			);
 		});
 	});
 });

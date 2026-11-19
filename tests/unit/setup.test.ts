@@ -252,6 +252,11 @@ describe("c8ctl setup", () => {
 			(c: { id: string }) => c.id === "docs-mcp",
 		);
 		assert.strictEqual(docsMcp.selected, false);
+		assert.strictEqual(docsMcp.group, "AI-assisted development");
+		const cluster = payload.components.find(
+			(c: { id: string }) => c.id === "cluster",
+		);
+		assert.strictEqual(cluster.group, "Essentials");
 	});
 
 	test("JSON mode never executes: it prints the plan only", async () => {
@@ -939,18 +944,31 @@ describe("c8ctl setup", () => {
 			);
 			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
+			// Components are grouped: section headers precede their options.
+			const menu = stripVTControlCharacters(result.stderr);
+			assert.match(menu, /^ {2}Essentials$/m);
+			assert.match(menu, /^ {2}AI-assisted development$/m);
+			assert.ok(
+				menu.indexOf("Essentials") < menu.indexOf("Local cluster"),
+				"the Essentials header does not precede its options",
+			);
+			assert.ok(
+				menu.indexOf("AI-assisted development") <
+					menu.indexOf("AI assistant skills"),
+				"the AI-assisted development header does not precede its options",
+			);
 			assert.ok(
 				!result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
 				"blueprint prompt should not render when the cluster is off",
 			);
 			assert.match(
 				stripVTControlCharacters(result.stderr),
-				/Starter blueprint.*— needs the local cluster/,
+				/Starter blueprint.*⚠ requires the local cluster/,
 			);
 			// The cluster MCP server depends on the cluster the same way.
 			assert.match(
 				stripVTControlCharacters(result.stderr),
-				/Cluster MCP server.*— needs the local cluster/,
+				/Cluster MCP server.*⚠ requires the local cluster/,
 			);
 			assert.ok(
 				result.stderr.includes(BRAND_BLUE),
