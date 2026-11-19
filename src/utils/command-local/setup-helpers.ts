@@ -53,6 +53,8 @@ export interface SetupComponent {
 	readonly label: string;
 	/** Why it is worth installing — shown dimmed next to the label. */
 	readonly why: string;
+	/** Section of the wizard's checkbox list this component sits under. */
+	readonly group: SetupComponentGroup;
 	/** Pre-checked state, also the non-interactive and --yes default. */
 	readonly defaultSelected: boolean;
 	/**
@@ -63,48 +65,60 @@ export interface SetupComponent {
 	readonly requires?: readonly { id: SetupComponentId; reason: string }[];
 }
 
+/** Wizard sections, in display order. */
+export type SetupComponentGroup = "Essentials" | "AI-assisted development";
+
 /**
- * Everything the setup wizard offers. The docs MCP server stays opt-in:
- * the onboarding decision is to add it only on request.
+ * Everything the setup wizard offers, grouped by what it is for: the
+ * Essentials get a local Camunda 8 running with something to look at,
+ * AI-assisted development wires the AI tooling into it. The docs MCP
+ * server stays opt-in: the onboarding decision is to add it only on
+ * request.
  */
 export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 	{
 		id: "cluster",
 		label: "Local cluster",
 		why: "Run Camunda 8 on this machine — no Docker, no cloud account",
+		group: "Essentials",
 		defaultSelected: true,
 	},
 	{
 		id: "modeler",
 		label: "Desktop Modeler",
 		why: "Draw BPMN diagrams and forms visually, deploy from the canvas",
+		group: "Essentials",
 		defaultSelected: true,
 	},
 	{
 		id: "blueprint",
 		label: "Starter blueprint",
 		why: "A working example project, deployed and started for you",
+		group: "Essentials",
 		defaultSelected: true,
-		requires: [{ id: "cluster", reason: "needs the local cluster" }],
+		requires: [{ id: "cluster", reason: "requires the local cluster" }],
 	},
 	{
 		id: "skills",
 		label: "AI assistant skills",
 		why: "Teach Claude Code / Copilot / Cursor how to build on Camunda 8",
+		group: "AI-assisted development",
 		defaultSelected: true,
-	},
-	{
-		id: "cluster-mcp",
-		label: "Cluster MCP server",
-		why: "Let your AI assistant inspect and operate your cluster",
-		defaultSelected: true,
-		requires: [{ id: "cluster", reason: "needs the local cluster" }],
 	},
 	{
 		id: "docs-mcp",
 		label: "Docs MCP server",
 		why: "Always-current Camunda 8 docs in your AI assistant (browser sign-in on first use)",
+		group: "AI-assisted development",
 		defaultSelected: false,
+	},
+	{
+		id: "cluster-mcp",
+		label: "Cluster MCP server",
+		why: "Let your AI assistant inspect and operate your cluster",
+		group: "AI-assisted development",
+		defaultSelected: true,
+		requires: [{ id: "cluster", reason: "requires the local cluster" }],
 	},
 ];
 
@@ -497,7 +511,12 @@ export function setupPlanPayload(
 	command: string;
 	preview: true;
 	blueprint: string | null;
-	components: readonly { id: string; label: string; selected: boolean }[];
+	components: readonly {
+		id: string;
+		label: string;
+		group: SetupComponentGroup;
+		selected: boolean;
+	}[];
 	steps: readonly {
 		title: string;
 		detail: string;
@@ -511,6 +530,7 @@ export function setupPlanPayload(
 		components: SETUP_COMPONENTS.map((c) => ({
 			id: c.id,
 			label: c.label,
+			group: c.group,
 			selected: selected.has(c.id),
 		})),
 		steps: SETUP_STEPS.map((step) => ({

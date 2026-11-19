@@ -684,6 +684,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx, flags) => {
 				description: c.why,
 				value: c.id,
 				checked: c.defaultSelected,
+				group: c.group,
 				requires: c.requires?.map((r) => ({ value: r.id, reason: r.reason })),
 			})),
 		});

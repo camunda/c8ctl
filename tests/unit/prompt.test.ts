@@ -74,6 +74,80 @@ function type(io: { input: PassThrough }, ...keys: string[]): void {
 	});
 }
 
+/**
+ * Replay prompt output onto a virtual screen, emulating line wrap at
+ * `cols`. Lets tests assert what the terminal actually shows after the
+ * last repaint — in particular that no stale fragments survive when a
+ * render is shorter than the one before it.
+ */
+function renderScreen(
+	text: string,
+	{ cols = 80, rows = 100 }: { cols?: number; rows?: number } = {},
+): string[] {
+	const screen: string[] = Array.from({ length: rows }, () => "");
+	let line = 0;
+	let col = 0;
+	// Delayed autowrap: a character written into the last column leaves
+	// the cursor on that cell; the wrap happens when the next printable
+	// character arrives. erase-to-EOL there erases the last character.
+	let pendingWrap = false;
+	// ANSI introducer as a string: biome's noControlCharactersInRegex
+	// keeps control characters out of regex literals.
+	const CSI = "\x1b\\[";
+	// Cursor-up, clear-line, clear-to-EOL, cursor-to-col-1, visibility,
+	// styles.
+	const tokens = text.split(
+		new RegExp(`(${CSI}(?:\\d+A|2K|0K|1G|\\?25[hl]|[0-9;]*m))`),
+	);
+	for (const token of tokens) {
+		const up = new RegExp(`^${CSI}(\\d+)A$`).exec(token);
+		if (up) {
+			line = Math.max(0, line - Number(up[1]));
+			pendingWrap = false;
+			continue;
+		}
+		if (token === "\x1b[2K") {
+			screen[line] = "";
+			pendingWrap = false;
+			continue;
+		}
+		if (token === "\x1b[0K") {
+			screen[line] = screen[line].slice(0, pendingWrap ? col - 1 : col);
+			continue;
+		}
+		if (token === "\x1b[1G") {
+			col = 0;
+			pendingWrap = false;
+			continue;
+		}
+		// SGR styles and cursor-visibility escapes neither print nor
+		// move the cursor — a pending wrap survives them.
+		if (token === "" || token.startsWith("\x1b[")) continue;
+		for (const ch of token) {
+			if (ch === "\n") {
+				line = Math.min(rows - 1, line + 1);
+				col = 0;
+				pendingWrap = false;
+				continue;
+			}
+			if (pendingWrap) {
+				line = Math.min(rows - 1, line + 1);
+				col = 0;
+				pendingWrap = false;
+			}
+			// Terminals overwrite at the cursor column, they don't append.
+			const existing = screen[line];
+			screen[line] =
+				col < existing.length
+					? existing.slice(0, col) + ch + existing.slice(col + 1)
+					: existing + " ".repeat(col - existing.length) + ch;
+			col += 1;
+			if (col === cols) pendingWrap = true;
+		}
+	}
+	return screen;
+}
+
 const ENV_KEYS = ["C8CTL_INTERACTIVE", "C8CTL_NON_INTERACTIVE", "CI"] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -538,8 +612,155 @@ describe("multiSelect()", () => {
 			assert.deepStrictEqual(result.values, []);
 			assert.match(
 				stripVTControlCharacters(io.text()),
-				/Blueprint.*— needs the local cluster/,
+				/Blueprint.*⚠ needs the local cluster/,
 			);
+		});
+
+		test("a blocked row is dimmed and its reason rendered in warning yellow", async () => {
+			const io = fakeTTY();
+			// Space on the highlighted "Cluster" row unchecks it.
+			type(io, " ", ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			const text = io.text();
+			// The whole blocked row is dimmed…
+			assert.ok(text.includes("\x1b[2mBlueprint\x1b[0m"));
+			// …and the reason stands out in yellow with a warning marker.
+			assert.ok(text.includes("\x1b[33m⚠ needs the local cluster\x1b[0m"));
+		});
+
+		test("the status line under the list explains the focused blocked row", async () => {
+			const io = fakeTTY();
+			// Cluster off, then move onto the blocked Blueprint row.
+			type(io, " ", DOWN, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/⚠ Blueprint needs the local cluster — enable it to unlock this option/,
+			);
+		});
+
+		test("the status line is blank when the focused row is not blocked", async () => {
+			const io = fakeTTY();
+			type(io, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.doesNotMatch(
+				stripVTControlCharacters(io.text()),
+				/enable it to unlock this option/,
+			);
+		});
+
+		test("an unblocked wrapped row leaves no stale reason on its continuation line", async () => {
+			const io = fakeTTY();
+			// The grouped blueprint row wraps to two physical lines in both
+			// states (112 chars blocked, 83 unblocked), so the render never
+			// shrinks and the leftover-tail erasure must happen where the
+			// row is rewritten.
+			type(io, " ", " ");
+			const done = multiSelect({
+				message: "Pick",
+				options: [
+					{
+						label: "Local cluster",
+						value: "cluster",
+						checked: true,
+						group: "Essentials",
+					},
+					{
+						label: "Starter blueprint",
+						value: "blueprint",
+						checked: true,
+						description:
+							"A working example project, deployed and started for you",
+						group: "Essentials",
+						requires: [
+							{ value: "cluster", reason: "requires the local cluster" },
+						],
+					},
+				],
+				io,
+			});
+			// Snapshot the screen after the third render (initial + both
+			// toggles), before confirming.
+			for (let i = 0; i < 1000; i++) {
+				if (io.text().split("Starter blueprint").length - 1 >= 3) break;
+				await new Promise((resolveSpin) => setImmediate(resolveSpin));
+			}
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.ok(
+				visible.every((l) => !l.includes("requires the local cluster")),
+				`stale reason survived the repaint: ${JSON.stringify(visible)}`,
+			);
+			setImmediate(() => io.input.write(ENTER));
+			const result = await done;
+			assert.ok(result.interactive && !result.cancelled);
+			// The blueprint stays off: re-enabling the requirement does
+			// not bring back a hidden checkmark.
+			assert.deepStrictEqual(result.values, ["cluster"]);
+		});
+
+		test("an exact-width row keeps its final character (delayed autowrap)", async () => {
+			const io = fakeTTY();
+			// 8 (pointer + checkbox) + 72 = exactly 80 columns. Under
+			// delayed autowrap the cursor sits on the final character, and
+			// a trailing erase-to-EOL would delete it. The first render
+			// happens synchronously, so the screen can be checked before
+			// any keypress.
+			const exactLabel = "A".repeat(72);
+			const done = multiSelect({
+				message: "Pick",
+				options: [{ label: exactLabel, value: "a", checked: true }],
+				io,
+			});
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.ok(
+				visible.some((l) => l.includes(exactLabel)),
+				`exact-width row lost its final character: ${JSON.stringify(visible)}`,
+			);
+			setImmediate(() => io.input.write(ENTER));
+			const result = await done;
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a"]);
+		});
+
+		test("a repaint that shrinks the menu erases stale wrapped lines", async () => {
+			const io = fakeTTY();
+			// Cluster off blocks the blueprint; moving onto its row shows
+			// the status line, which wraps past 80 columns; moving off
+			// collapses it to a blank line. The wrapped remainder of the
+			// old status line must not survive below the menu.
+			type(io, " ", DOWN, UP, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Local cluster", value: "cluster", checked: true },
+					{
+						label: "Starter blueprint",
+						value: "blueprint",
+						requires: [
+							{ value: "cluster", reason: "requires the local cluster" },
+						],
+					},
+				],
+				io,
+			});
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.deepStrictEqual(visible, [
+				"? Pick",
+				"  ↑/↓ move · space toggle · a all · enter confirm · esc cancel",
+				"  (none selected)",
+			]);
 		});
 
 		test("a blocked option cannot be toggled until its requirement is back", async () => {
@@ -593,6 +814,78 @@ describe("multiSelect()", () => {
 			assert.ok(!result.interactive);
 			assert.deepStrictEqual(result.values, []);
 			assert.match(result.hint, /Blueprint.*needs the local cluster/);
+		});
+	});
+
+	describe("groups", () => {
+		const GROUPED_OPTIONS = [
+			{
+				label: "Cluster",
+				value: "cluster",
+				checked: true,
+				group: "Essentials",
+			},
+			{
+				label: "Modeler",
+				value: "modeler",
+				checked: true,
+				group: "Essentials",
+			},
+			{ label: "Skills", value: "skills", group: "AI-assisted development" },
+		];
+
+		test("renders a header above each group and indents its options", async () => {
+			const io = fakeTTY();
+			type(io, ENTER);
+			await multiSelect({ message: "Pick", options: GROUPED_OPTIONS, io });
+			const plain = stripVTControlCharacters(io.text());
+			assert.match(plain, /^ {2}Essentials$/m);
+			assert.match(plain, /^ {2}AI-assisted development$/m);
+			// Grouped options sit two spaces deeper than their header.
+			assert.match(plain, / {4}❯ \[x\] Cluster/);
+			assert.match(plain, / {6}\[x\] Modeler/);
+			assert.match(plain, / {6}\[ \] Skills/);
+		});
+
+		test("headers are not focusable: the cursor moves option to option", async () => {
+			const io = fakeTTY();
+			// Cluster → Modeler → Skills; the header rows are skipped.
+			// Space on Skills checks it.
+			type(io, DOWN, DOWN, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "modeler", "skills"]);
+		});
+
+		test("a number key still toggles the matching option", async () => {
+			const io = fakeTTY();
+			type(io, "3", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "modeler", "skills"]);
+		});
+
+		test("non-interactive hint lists groups with indented options", async () => {
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io: fakePipe(),
+			});
+			assert.ok(!result.interactive);
+			assert.match(result.hint, / {2}Essentials\n/);
+			assert.match(result.hint, / {4}\[x\] Cluster/);
+			assert.match(
+				result.hint,
+				/ {2}AI-assisted development\n {4}\[ \] Skills/,
+			);
 		});
 	});
 });

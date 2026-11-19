@@ -70,6 +70,9 @@ import { createInterface, emitKeypressEvents } from "node:readline";
 
 const ESC = "\x1b[";
 const CLEAR_LINE = `${ESC}2K`;
+/** Erase from the cursor to end of line: clears the stale tail of a
+ * wrapped row whose new content is shorter than the previous render's. */
+const CLEAR_TO_EOL = `${ESC}0K`;
 const CURSOR_UP = (n: number) => `${ESC}${n}A`;
 const CURSOR_TO_COL = (n: number) => `${ESC}${n}G`;
 const HIDE_CURSOR = `${ESC}?25l`;
@@ -77,6 +80,7 @@ const SHOW_CURSOR = `${ESC}?25h`;
 const DIM = `${ESC}2m`;
 const BOLD = `${ESC}1m`;
 const CYAN = `${ESC}36m`;
+const YELLOW = `${ESC}33m`;
 const INVERSE = `${ESC}7m`;
 const RESET = `${ESC}0m`;
 
@@ -420,6 +424,13 @@ export interface MultiSelectOption<T> {
 	 * the requirement re-enables the row (still unchecked).
 	 */
 	requires?: readonly { value: T; reason: string }[];
+	/**
+	 * Section heading this option belongs to. Consecutive options with
+	 * the same group label render together under a non-interactive
+	 * header row and are indented beneath it. Headers are display-only:
+	 * the cursor and number keys address options, never headers.
+	 */
+	group?: string;
 }
 
 export interface MultiSelectConfig<T> {
@@ -505,13 +516,42 @@ function evaluateChecked<T>(
 	return { effective, reasons };
 }
 
+/** A renderable line: a group header, or one of the options. */
+type MultiSelectRow =
+	| { kind: "header"; label: string }
+	| { kind: "option"; index: number };
+
+/**
+ * Interleave group headers between options. A header is emitted when an
+ * option's group differs from the previous option's, so groups are
+ * contiguous runs — same-named sections are not merged.
+ */
+function buildRows<T>(
+	options: ReadonlyArray<MultiSelectOption<T>>,
+): MultiSelectRow[] {
+	const rows: MultiSelectRow[] = [];
+	let lastGroup: string | undefined;
+	for (const [index, opt] of options.entries()) {
+		if (opt.group !== undefined && opt.group !== lastGroup) {
+			rows.push({ kind: "header", label: opt.group });
+		}
+		lastGroup = opt.group;
+		rows.push({ kind: "option", index });
+	}
+	return rows;
+}
+
 /**
  * Present an interactive checkbox list.
  *
- * - **Interactive**: renders one row per option on stderr. Arrow keys
- *   move the highlight, Space (or the row's number) toggles it, `a`
- *   toggles all, Enter confirms — possibly with nothing checked — and
- *   Escape cancels. Returns the checked values in option order.
+ * - **Interactive**: renders one row per option on stderr, grouped
+ *   under non-interactive header rows when options carry a `group`.
+ *   Arrow keys move the highlight, Space (or the row's number) toggles
+ *   it, `a` toggles all, Enter confirms — possibly with nothing
+ *   checked — and Escape cancels. Options blocked by `requires` are
+ *   dimmed with their reason highlighted, and the line under the list
+ *   explains the focused blocked row. Returns the checked values in
+ *   option order.
  * - **Non-interactive**: returns the values of options marked
  *   `checked` with `interactive: false` and a `hint` string the caller
  *   can log.
@@ -535,11 +575,18 @@ export async function multiSelect<T>(
 			.filter((_opt, i) => effective[i])
 			.map((opt) => opt.value);
 		const lines: string[] = [`${message} (non-interactive, using defaults)`];
-		for (const [i, opt] of options.entries()) {
+		for (const row of buildRows(options)) {
+			if (row.kind === "header") {
+				lines.push(`  ${row.label}`);
+				continue;
+			}
+			const opt = options[row.index];
+			const indent = opt.group === undefined ? "  " : "    ";
 			const desc = opt.description ? ` — ${opt.description}` : "";
-			const reason = reasons[i] ? ` — ${reasons[i]}` : "";
+			const reason =
+				reasons[row.index] !== undefined ? ` — ⚠ ${reasons[row.index]}` : "";
 			lines.push(
-				`  ${effective[i] ? "[x]" : "[ ]"} ${opt.label}${desc}${reason}`,
+				`${indent}${effective[row.index] ? "[x]" : "[ ]"} ${opt.label}${desc}${reason}`,
 			);
 		}
 		lines.push("");
@@ -572,54 +619,117 @@ export async function multiSelect<T>(
 		}
 		reevaluate();
 
+		// Display rows interleave group headers with options. Group
+		// membership is fixed for the lifetime of the prompt, so the row
+		// list is built once; only the per-row state changes.
+		const rows = buildRows(options);
+
 		// Same wrap accounting as select(): rows wider than the terminal
 		// occupy extra physical lines that CURSOR_UP must traverse.
 		const cols = out.columns || 80;
 		const headerLines =
 			Math.max(1, Math.ceil((2 + message.length) / cols)) +
 			Math.max(1, Math.ceil((2 + keyHint.length) / cols));
-		const rowVisibleLength = (i: number): number => {
-			const opt = options[i];
-			const reason = state.reasons[i];
-			// "  ❯ " (4) + "[x] " (4) + label + optional " " + description
-			// + optional " — " + reason
+		const rowVisibleLength = (row: MultiSelectRow): number => {
+			if (row.kind === "header") return 2 + row.label.length;
+			const opt = options[row.index];
+			const reason = state.reasons[row.index];
+			// "  ❯ " (4) + "[x] " (4) + group indent (2 when grouped) + label
+			// + optional " " + description + optional " ⚠ " + reason
 			return (
 				8 +
+				(opt.group === undefined ? 0 : 2) +
 				opt.label.length +
 				(opt.description ? 1 + opt.description.length : 0) +
-				(reason ? 3 + reason.length : 0)
+				(reason !== undefined ? 3 + reason.length : 0)
 			);
+		};
+		/**
+		 * The line under the list names the focused row's unmet
+		 * requirement — the prominent explanation for a greyed-out
+		 * option. Blank when the focused row is not blocked. Always
+		 * rendered so the physical line count stays stable.
+		 */
+		const footerText = (): string | undefined => {
+			const reason = state.reasons[cursor];
+			if (reason === undefined) return undefined;
+			return `⚠ ${options[cursor].label} ${reason} — enable it to unlock this option`;
+		};
+		const footerVisibleLength = (): number => {
+			const text = footerText();
+			return text === undefined ? 0 : 2 + text.length;
 		};
 		// Recomputed per render: dependency reasons appear and disappear
 		// as options are toggled, changing how rows wrap.
 		const physicalLineCount = (): number =>
-			options.reduce(
-				(sum, _opt, i) =>
-					sum + Math.max(1, Math.ceil(rowVisibleLength(i) / cols)),
+			rows.reduce(
+				(sum, row) =>
+					sum + Math.max(1, Math.ceil(rowVisibleLength(row) / cols)),
 				0,
-			);
+			) + Math.max(1, Math.ceil(footerVisibleLength() / cols));
 		// Cursor rewinds must traverse the *previous* render's line count.
 		let lastRenderedLines = 0;
+
+		/**
+		 * Erase the stale tail of a wrapped row whose new content is
+		 * shorter than the previous render's — but only when the
+		 * content does not exactly fill its last physical line: under
+		 * delayed autowrap the cursor then sits on the final character,
+		 * and erase-to-EOL would delete it. An exactly-full line was
+		 * fully overwritten, so no stale tail can remain.
+		 */
+		const eraseTail = (visibleLength: number): string =>
+			visibleLength % cols === 0 ? "" : CLEAR_TO_EOL;
 
 		function render(firstRender: boolean) {
 			if (!firstRender) {
 				out.write(CURSOR_UP(lastRenderedLines));
 			}
-			for (let i = 0; i < options.length; i++) {
+			for (const row of rows) {
+				if (row.kind === "header") {
+					out.write(
+						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${BOLD}${row.label}${RESET}${eraseTail(2 + row.label.length)}\n`,
+					);
+					continue;
+				}
+				const i = row.index;
 				const opt = options[i];
 				const highlighted = i === cursor;
 				const reason = state.reasons[i];
+				const indent = opt.group === undefined ? "  " : "    ";
 				const pointer = highlighted ? `${CYAN}❯${RESET}` : " ";
 				const box =
-					state.effective[i] && !reason ? `${INVERSE}[x]${RESET}` : "[ ]";
-				const label = highlighted ? `${BOLD}${opt.label}${RESET}` : opt.label;
+					state.effective[i] && reason === undefined
+						? `${INVERSE}[x]${RESET}`
+						: "[ ]";
+				// A blocked row dims label and description, and the reason
+				// stands out in warning yellow instead of blending into the
+				// dimmed row.
+				let label = opt.label;
+				if (reason !== undefined) label = `${DIM}${opt.label}${RESET}`;
+				else if (highlighted) label = `${BOLD}${opt.label}${RESET}`;
 				const desc = opt.description ? ` ${DIM}${opt.description}${RESET}` : "";
-				const blocked = reason ? ` ${DIM}— ${reason}${RESET}` : "";
+				const why = reason !== undefined ? ` ${YELLOW}⚠ ${reason}${RESET}` : "";
 				out.write(
-					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${box} ${label}${desc}${blocked}\n`,
+					`${CLEAR_LINE}${CURSOR_TO_COL(1)}${indent}${pointer} ${box} ${label}${desc}${why}${eraseTail(rowVisibleLength(row))}\n`,
 				);
 			}
-			lastRenderedLines = physicalLineCount();
+			const footer = footerText();
+			out.write(
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${eraseTail(footerVisibleLength())}\n`,
+			);
+			// A repaint can be shorter than the previous render (a reason
+			// or the footer collapsed to fewer wrapped lines). Erase the
+			// leftover lines — otherwise their stale text survives below
+			// the menu, out of reach of the final clearMenu().
+			const painted = physicalLineCount();
+			for (let i = painted; i < lastRenderedLines; i++) {
+				out.write(`${CLEAR_LINE}\n`);
+			}
+			if (painted < lastRenderedLines) {
+				out.write(CURSOR_UP(lastRenderedLines - painted));
+			}
+			lastRenderedLines = painted;
 		}
 
 		/** Re-evaluate dependencies after a toggle, then repaint. */
