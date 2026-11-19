@@ -672,6 +672,32 @@ describe("c8ctl setup", () => {
 			}
 		});
 
+		test("a failed deploy does not reopen the spinner into its stderr diagnostics", async () => {
+			// deploy-helpers renders failure diagnostics straight to stderr;
+			// the error passthrough must close the title for good, or a
+			// reopened frame is stranded between "Deployment failed" and
+			// the detail lines on a shared terminal.
+			const stub = stubbedExecution({ failStep: "deploy-blueprint" });
+			try {
+				const result = await runOnTty(stub);
+				assert.strictEqual(result.status, 1, result.stdout);
+				const openings = result.stdout.match(
+					/\r {2}Deploy and start the process ⠋/g,
+				);
+				assert.strictEqual(
+					openings?.length ?? 0,
+					1,
+					"the deploy title reopened after the error passthrough",
+				);
+				const out = stripVTControlCharacters(result.stdout + result.stderr);
+				stepLine(out, "Deploy and start the process", "ERROR");
+				assert.match(out, /stubbed invalid deployment/);
+				assertNoLeftoverFrames(result.stdout);
+			} finally {
+				stub.cleanup();
+			}
+		});
+
 		test("a failed step stops the spinner and reports [ERROR] cleanly", async () => {
 			const stub = stubbedExecution({ failStep: "start-cluster" });
 			try {

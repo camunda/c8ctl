@@ -439,12 +439,13 @@ interface BufferedLine {
  * buffer is dropped and the step collapses to its status line; on
  * failure the buffer is flushed above the error. Essential lines,
  * warnings and errors pass through wrapped in `aroundPassthrough`, so
- * the step's title line closes before they print and reopens after.
+ * the step's title line closes before they print and — except for
+ * errors, which precede a failing step's diagnostics — reopens after.
  */
 function withBufferedOutput(
 	ctx: CommandContext,
 	buffer: BufferedLine[],
-	aroundPassthrough: (emit: () => void) => void,
+	aroundPassthrough: (emit: () => void, options?: { resume: boolean }) => void,
 ): CommandContext {
 	const { logger } = ctx;
 	const bufferedLogger = Object.create(logger, {
@@ -467,7 +468,13 @@ function withBufferedOutput(
 		},
 		error: {
 			value: (message: string, error?: Error) => {
-				aroundPassthrough(() => logger.error(message, error));
+				// A step that logs an error is failing, and its diagnostics
+				// may follow outside the wrapped logger (deploy-helpers
+				// writes them straight to stderr) — close the title for
+				// good instead of stranding a reopened frame among them.
+				aroundPassthrough(() => logger.error(message, error), {
+					resume: false,
+				});
 			},
 		},
 		success: {
@@ -564,10 +571,13 @@ async function executePlan(
 			titleOpen = false;
 			return hadSpinner;
 		};
-		const aroundPassthrough = (emit: () => void) => {
-			const resume = closeTitle();
+		const aroundPassthrough = (
+			emit: () => void,
+			{ resume = true }: { resume?: boolean } = {},
+		) => {
+			const reopen = closeTitle();
 			emit();
-			if (resume && stepActive) openTitle();
+			if (reopen && resume && stepActive) openTitle();
 		};
 		const reportStatus = (status: "success" | "error") => {
 			stepActive = false;
