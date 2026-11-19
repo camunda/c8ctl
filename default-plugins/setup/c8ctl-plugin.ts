@@ -713,6 +713,17 @@ async function executePlan(
 			);
 			succeeded.add(step.id);
 			reportStatus("success");
+			// A child's stderr carries actionable warnings (a failed Start Menu
+			// registration, a skipped version check) that the in-process
+			// commands used to show even on success — surface those below the
+			// status line while routine stdout progress stays collapsed.
+			for (const line of buffered) {
+				if (line.stream !== "stderr") continue;
+				logger.info(`    ${line.message}`, {
+					stream: line.stream,
+					essential: true,
+				});
+			}
 		} catch (error) {
 			failures += 1;
 			reportStatus("error");

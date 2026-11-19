@@ -236,6 +236,56 @@ function stubbedExecution({
 	};
 }
 
+/**
+ * Spawn `c8ctl` with both streams captured into one arrival-ordered
+ * string — the only way to assert output ordering across stdout and
+ * stderr, as a shared terminal would interleave them. Concatenating
+ * separately captured streams always places stderr last, even when it
+ * was emitted first.
+ */
+function runWithOrderedOutput(
+	options: { cwd: string; nodeArgs: string[]; env: Record<string, string> },
+	...args: string[]
+): Promise<{ status: number | null; output: string }> {
+	const forwardedDataDir = process.env.C8CTL_DATA_DIR;
+	const ownDataDir = forwardedDataDir
+		? undefined
+		: mkdtempSync(join(tmpdir(), "c8ctl-setup-test-"));
+	return new Promise((resolveRun, rejectRun) => {
+		const child = spawn(
+			process.execPath,
+			["--experimental-strip-types", ...options.nodeArgs, CLI, ...args],
+			{
+				stdio: ["ignore", "pipe", "pipe"],
+				cwd: options.cwd,
+				env: {
+					PATH: process.env.PATH,
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: forwardedDataDir ?? ownDataDir,
+					...options.env,
+				},
+			},
+		);
+		let output = "";
+		child.stdout.setEncoding("utf-8");
+		child.stderr.setEncoding("utf-8");
+		child.stdout.on("data", (chunk: string) => {
+			output += chunk;
+		});
+		child.stderr.on("data", (chunk: string) => {
+			output += chunk;
+		});
+		// Safety net only: a stuck child must not hang the test runner.
+		const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+		child.on("error", rejectRun);
+		child.on("close", (status) => {
+			clearTimeout(timer);
+			if (ownDataDir) rmSync(ownDataDir, { recursive: true, force: true });
+			resolveRun({ status, output });
+		});
+	});
+}
+
 /** Every step title followed by its status tag. */
 function stepLine(
 	out: string,
@@ -445,6 +495,9 @@ describe("c8ctl setup", () => {
 			assert.match(out, /^ {2}Install AI assistant skills$/m);
 			assert.match(out, /Checking Camunda skills \(camunda\/skills\) for /);
 			assert.match(out, /MCP configuration: /);
+			// A successful child's stderr warnings stay actionable — the
+			// deploy child's failed version check warns even on success.
+			assert.match(out, /Could not reach the server to check its version/);
 			// Everything else is held back: no c8run chatter, no progress
 			// percentages, no deploy progress, no prerequisite checklist.
 			assert.doesNotMatch(out, /\/\/>/);
@@ -1736,14 +1789,17 @@ describe("c8ctl setup", () => {
 	test("a failed deploy prints the child diagnostics below its status line", async () => {
 		const stub = stubbedExecution({ failStep: "deploy-blueprint" });
 		try {
-			const result = await c8WithOptions(stub.options, "setup", "--yes");
-			assert.strictEqual(result.status, 1, result.stdout);
-			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			const result = await runWithOrderedOutput(stub.options, "setup", "--yes");
+			assert.strictEqual(result.status, 1, result.output);
+			const out = stripVTControlCharacters(result.output);
 			stepLine(out, "Deploy and start the process", "ERROR");
 			// The deploy runs as a `c8ctl deploy` child whose diagnostics are
 			// buffered and printed after the step's status line — they never
-			// collide with the open title line or its spinner.
-			const statusAt = out.indexOf("Deploy and start the process");
+			// collide with the open title line or its spinner. Compared
+			// against the completed [ERROR] line in the arrival-ordered
+			// capture: the opening title also contains the step name.
+			const statusAt = out.search(/Deploy and start the process \.+ \[ERROR\]/);
+			assert.ok(statusAt !== -1, "completed status line missing");
 			const diagnosticsAt = out.indexOf("✗ Deployment failed");
 			assert.ok(
 				diagnosticsAt > statusAt,
