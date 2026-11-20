@@ -34,6 +34,9 @@ const PROGRESS_COLUMNS = 60;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
 const isLinux = process.platform === "linux";
+// Mirrors LINUX_LIFECYCLE_LOCK in default-plugins/modeler/install.ts.
+const LIFECYCLE_LOCK = "/tmp/c8ctl-modeler-lifecycle.lock";
+const LIFECYCLE_RECLAIM_LOCK = `${LIFECYCLE_LOCK}.reclaim`;
 
 const STALLED_RELEASE_INDEX = `
 		if (process.env.STALL_RELEASE_INDEX === "1") {
@@ -2016,7 +2019,7 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
-	test("removes a managed dangling launcher left by an interrupted removal", {
+	test("refuses to update a partially removed Linux installation, but removes it", {
 		skip: !isLinux,
 	}, async () => {
 		const sandbox = createLinuxSandbox();
@@ -2024,6 +2027,10 @@ describe("CLI behavioural: modeler install", () => {
 		try {
 			// The release directory is already gone; only the launcher remains.
 			symlinkSync("camunda-modeler-5.52.0-linux-x64/camunda-modeler", launcher);
+
+			const updated = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(updated.status, 1);
+			assert.match(updated.stdout + updated.stderr, /partially installed/);
 
 			const removed = await sandbox.remove({ FAKE_UID: "0" });
 			assert.strictEqual(removed.status, 0, removed.stderr);
@@ -2059,9 +2066,11 @@ describe("CLI behavioural: modeler install", () => {
 	}, async () => {
 		const sandbox = createLinuxSandbox();
 		addLinuxInstall(sandbox, "5.51.0");
-		// This test process is alive, so its lock can never go stale.
-		const lockPath = join(tmpdir(), "c8ctl-modeler-linux-lifecycle.lock");
-		writeFileSync(lockPath, String(process.pid));
+		// This test process is alive, so its lock is never reclaimed.
+		writeFileSync(
+			LIFECYCLE_LOCK,
+			JSON.stringify({ pid: process.pid, token: "test" }),
+		);
 
 		try {
 			for (const result of [
@@ -2076,7 +2085,7 @@ describe("CLI behavioural: modeler install", () => {
 			}
 			assert.deepStrictEqual(sandbox.toolCalls(), []);
 		} finally {
-			rmSync(lockPath, { force: true });
+			rmSync(LIFECYCLE_LOCK, { force: true });
 			sandbox.cleanup();
 		}
 	});
@@ -2087,16 +2096,102 @@ describe("CLI behavioural: modeler install", () => {
 		const sandbox = createLinuxSandbox();
 		addLinuxInstall(sandbox, "5.51.0");
 		// An unparsable owner counts as stale.
-		const lockPath = join(tmpdir(), "c8ctl-modeler-linux-lifecycle.lock");
-		writeFileSync(lockPath, "not-a-pid");
+		writeFileSync(LIFECYCLE_LOCK, "not-a-pid");
 
 		try {
 			const updated = await sandbox.update({ FAKE_UID: "0" });
 			assert.strictEqual(updated.status, 0, updated.stderr);
 			assert.match(updated.stdout, /Updated Camunda Modeler to 5\.52\.0/);
-			assert.ok(!existsSync(lockPath), "lock released after the run");
+			assert.ok(!existsSync(LIFECYCLE_LOCK), "lock released after the run");
 		} finally {
-			rmSync(lockPath, { force: true });
+			rmSync(LIFECYCLE_LOCK, { force: true });
+			sandbox.cleanup();
+		}
+	});
+
+	test("fails fast while a stale lifecycle lock is being reclaimed", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		// A stale main lock, and a live concurrent reclaimer (this process)
+		// holding the reclamation meta-lock.
+		writeFileSync(LIFECYCLE_LOCK, "not-a-pid");
+		writeFileSync(
+			LIFECYCLE_RECLAIM_LOCK,
+			JSON.stringify({ pid: process.pid, token: "test" }),
+		);
+
+		try {
+			const result = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(result.status, 1);
+			assert.match(
+				result.stdout + result.stderr,
+				/recovering an interrupted run's lock/,
+			);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			rmSync(LIFECYCLE_LOCK, { force: true });
+			rmSync(LIFECYCLE_RECLAIM_LOCK, { force: true });
+			sandbox.cleanup();
+		}
+	});
+
+	test("excludes a concurrent update while an interrupted run held the lock", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		const downloadTmp = join(sandbox.home, "download-tmp");
+		const pidFile = join(sandbox.home, "download.pid");
+		mkdirSync(downloadTmp);
+		// A stale lock from a killed run; the stalled update reclaims it.
+		writeFileSync(LIFECYCLE_LOCK, "not-a-pid");
+		const stalled = sandbox.update({
+			FAKE_UID: "0",
+			TMPDIR: downloadTmp,
+			STALL_RELEASE_INDEX: "1",
+			DOWNLOAD_PID_FILE: pidFile,
+			INDEX_ABORT_FILE: join(sandbox.home, "index-aborted"),
+		});
+
+		try {
+			await pollUntilValue(
+				async () => (existsSync(pidFile) ? pidFile : undefined),
+				15_000,
+				25,
+				"a stalled Modeler release-index request",
+			);
+			// The stalled run holds the reclaimed lock, so a concurrent update
+			// fails fast instead of racing the shared release files.
+			const concurrent = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(concurrent.status, 1);
+			assert.match(
+				concurrent.stdout + concurrent.stderr,
+				/Another c8ctl Modeler operation is in progress/,
+			);
+
+			process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+			const interrupted = await stalled;
+			assert.strictEqual(interrupted.signal, "SIGTERM", interrupted.stderr);
+			assert.ok(
+				!existsSync(LIFECYCLE_LOCK),
+				"interrupted run releases the lock",
+			);
+
+			const retried = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(retried.status, 0, retried.stderr);
+			assert.match(retried.stdout, /Updated Camunda Modeler to 5\.52\.0/);
+		} finally {
+			if (existsSync(pidFile)) {
+				try {
+					process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+				} catch {
+					// Already exited.
+				}
+			}
+			await stalled;
+			rmSync(LIFECYCLE_LOCK, { force: true });
 			sandbox.cleanup();
 		}
 	});

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
 	accessSync,
 	constants,
@@ -20,7 +21,7 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { Logger } from "../../src/core/index.ts";
+import { isRecord, type Logger } from "../../src/core/index.ts";
 import {
 	isNewerModelerVersion,
 	latestStableModelerVersion,
@@ -92,9 +93,16 @@ const CREATE_SHORTCUT_SCRIPT =
 // and link its launcher there.
 const LINUX_INSTALL_ROOT = "/usr/bin";
 const LINUX_EXECUTABLE = "camunda-modeler";
-// Backstop for locks leaked by killed processes. Kept well above realistic
-// runtimes so a live but slow run's lock is never reclaimed.
-const LINUX_LOCK_STALE_AFTER_MS = 60 * 60 * 1000; // 60 minutes
+// The Linux lifecycle lock lives at a fixed system-wide path: every
+// invocation modifies the same /usr/bin launcher and release directories,
+// so a TMPDIR-dependent location would let two runs with different
+// environments lock different files and still race.
+const LINUX_LIFECYCLE_LOCK = "/tmp/c8ctl-modeler-lifecycle.lock";
+const LINUX_LIFECYCLE_RECLAIM_LOCK = `${LINUX_LIFECYCLE_LOCK}.reclaim`;
+// The reclamation critical section is a handful of syscalls, so a live
+// reclaimer never holds its meta-lock anywhere near this long; past it,
+// the meta-lock belongs to a killed reclaimer even if its pid was reused.
+const RECLAIM_LOCK_STALE_AFTER_MS = 10_000;
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -113,10 +121,29 @@ function errorCode(error: unknown): string | undefined {
 // Linux lifecycle lock — concurrent install/update/remove runs share the
 // release directories and the launcher in /usr/bin, so without serialisation
 // a losing run would delete the winning run's files mid-flight.
+//
+// The lock file holds `{pid, token}` JSON and is created atomically with
+// "wx". A lock is reclaimed only when its owner process is dead (or the
+// file is unreadable) — never because it is old, since a continuously
+// progressing download has no total time limit. Reclamation itself runs
+// under a meta-lock so two runs that both found the main lock stale cannot
+// delete each other's freshly acquired lock, and a run only ever unlinks a
+// lock carrying its own token.
 // ---------------------------------------------------------------------------
 
-function linuxLifecycleLockPath(): string {
-	return join(tmpdir(), "c8ctl-modeler-linux-lifecycle.lock");
+type LifecycleLockPayload = { pid: number; token: string };
+
+// Identifies the locks this invocation created, so release and reclamation
+// never touch another run's lock.
+const lifecycleToken = randomUUID();
+
+function readLifecycleLock(path: string): Record<string, unknown> | undefined {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+		return isRecord(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -130,9 +157,27 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
+function isStaleLock(path: string, maxAgeMs?: number): boolean {
+	const pid = readLifecycleLock(path)?.pid;
+	if (typeof pid !== "number" || !Number.isInteger(pid)) return true;
+	if (!isProcessAlive(pid)) return true;
+	if (maxAgeMs !== undefined) {
+		try {
+			return Date.now() - statSync(path).mtimeMs > maxAgeMs;
+		} catch {
+			return true;
+		}
+	}
+	return false;
+}
+
 function tryCreateLifecycleLock(path: string): boolean {
+	const payload: LifecycleLockPayload = {
+		pid: process.pid,
+		token: lifecycleToken,
+	};
 	try {
-		writeFileSync(path, String(process.pid), { flag: "wx" });
+		writeFileSync(path, JSON.stringify(payload), { flag: "wx", mode: 0o644 });
 		return true;
 	} catch (error) {
 		if (errorCode(error) === "EEXIST") return false;
@@ -140,55 +185,88 @@ function tryCreateLifecycleLock(path: string): boolean {
 	}
 }
 
-/**
- * Acquire the Linux lifecycle lock or throw with a user-actionable message.
- * The lock is a file holding the owner's pid, created atomically with "wx".
- * A lock whose owner died, that is unreadable, or that is older than
- * LINUX_LOCK_STALE_AFTER_MS is reclaimed once; a persistent EEXIST after
- * that is a live concurrent run.
- */
-function acquireLinuxLifecycleLock(logger: Logger): void {
-	const path = linuxLifecycleLockPath();
-	if (tryCreateLifecycleLock(path)) return;
-
-	let detail = "unknown owner";
-	let stale = true;
+/** Unlink only the lock this invocation created — never another run's. */
+function releaseOwnLifecycleLock(path: string): void {
+	if (readLifecycleLock(path)?.token !== lifecycleToken) return;
 	try {
-		const pid = Number(readFileSync(path, "utf8"));
-		const age = Date.now() - statSync(path).mtimeMs;
-		stale =
-			!Number.isInteger(pid) ||
-			!isProcessAlive(pid) ||
-			age > LINUX_LOCK_STALE_AFTER_MS;
-		detail = Number.isInteger(pid) ? `pid ${pid}` : "unreadable owner";
-		if (stale && Number.isInteger(pid)) {
-			logger.warn(
-				`Removed a stale Modeler lifecycle lock from pid ${pid} (age ${Math.round(age / 1000)}s).`,
-			);
-		}
+		unlinkSync(path);
 	} catch {
-		// Unreadable lock counts as stale.
+		// Already gone — a signal handler may have raced the normal finally.
 	}
-	if (stale) {
-		try {
-			unlinkSync(path);
-		} catch {
-			// Another run may have reclaimed it first — retry the create below.
-		}
-		if (tryCreateLifecycleLock(path)) return;
-	}
+}
 
-	throw new Error(
-		`Another c8ctl Modeler operation is in progress (${detail}). Wait for it to finish, or remove ${path} if you are sure none is running.`,
+function lifecycleLockBusy(): Error {
+	return new Error(
+		`Another c8ctl Modeler operation is in progress. Wait for it to finish, or remove ${LINUX_LIFECYCLE_LOCK} if you are sure none is running.`,
 	);
 }
 
-function releaseLinuxLifecycleLock(): void {
-	try {
-		unlinkSync(linuxLifecycleLockPath());
-	} catch {
-		// Best-effort — a signal handler may have raced the normal finally.
+/**
+ * Reclaim a dead owner's main lock under the reclamation meta-lock, then
+ * create our own. Returns true when the main lock was acquired this way.
+ */
+function reclaimStaleLifecycleLock(logger: Logger): boolean {
+	if (!tryCreateLifecycleLock(LINUX_LIFECYCLE_RECLAIM_LOCK)) {
+		// A crashed reclaimer's meta-lock expires quickly: the critical
+		// section is a few syscalls, far below the staleness window.
+		if (
+			isStaleLock(LINUX_LIFECYCLE_RECLAIM_LOCK, RECLAIM_LOCK_STALE_AFTER_MS)
+		) {
+			unlinkStaleReclaimLock();
+		}
+		if (!tryCreateLifecycleLock(LINUX_LIFECYCLE_RECLAIM_LOCK)) {
+			throw new Error(
+				"Another c8ctl Modeler operation is recovering an interrupted run's lock; try again in a moment.",
+			);
+		}
 	}
+	try {
+		// Re-verify under the meta-lock: the stale main lock may already be
+		// gone or have been replaced by a live owner.
+		if (
+			!pathExists(LINUX_LIFECYCLE_LOCK) ||
+			!isStaleLock(LINUX_LIFECYCLE_LOCK)
+		) {
+			return false;
+		}
+		logger.warn(
+			`Reclaiming a stale Camunda Modeler lifecycle lock at ${LINUX_LIFECYCLE_LOCK} from a previous run.`,
+		);
+		try {
+			unlinkSync(LINUX_LIFECYCLE_LOCK);
+		} catch (error) {
+			throw new Error(
+				`Could not reclaim the stale Modeler lifecycle lock at ${LINUX_LIFECYCLE_LOCK} (${errorMessage(error)}). Remove it manually if no other c8ctl modeler command is running.`,
+			);
+		}
+		return tryCreateLifecycleLock(LINUX_LIFECYCLE_LOCK);
+	} finally {
+		releaseOwnLifecycleLock(LINUX_LIFECYCLE_RECLAIM_LOCK);
+	}
+}
+
+function unlinkStaleReclaimLock(): void {
+	try {
+		unlinkSync(LINUX_LIFECYCLE_RECLAIM_LOCK);
+	} catch {
+		// Another reclaimer may have beaten us to it — the create decides.
+	}
+}
+
+/**
+ * Acquire the Linux lifecycle lock or throw with a user-actionable message.
+ * A live owner's lock is never reclaimed, no matter its age.
+ */
+function acquireLinuxLifecycleLock(logger: Logger): void {
+	if (tryCreateLifecycleLock(LINUX_LIFECYCLE_LOCK)) return;
+	if (isStaleLock(LINUX_LIFECYCLE_LOCK) && reclaimStaleLifecycleLock(logger)) {
+		return;
+	}
+	throw lifecycleLockBusy();
+}
+
+function releaseLinuxLifecycleLock(): void {
+	releaseOwnLifecycleLock(LINUX_LIFECYCLE_LOCK);
 }
 
 /**
@@ -1587,6 +1665,13 @@ async function updateLinuxModeler(
 	}
 	const installation = linuxModelerForAction("update");
 	if (!installation) return noModelerInstalled();
+	// A dangling launcher identifies a partially removed installation; it
+	// must not pass the up-to-date check below as if it were working.
+	if (!existsSync(join(installation.installDir, LINUX_EXECUTABLE))) {
+		throw new Error(
+			`Camunda Modeler ${installation.version} is only partially installed: ${join(installation.installDir, LINUX_EXECUTABLE)} is missing. Run \`c8ctl modeler remove\` to clean up, then \`c8ctl modeler install\` to install it again.`,
+		);
+	}
 
 	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
 	const interruption = registerDownloadInterrupts("Modeler update");
