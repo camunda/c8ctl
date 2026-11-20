@@ -1283,6 +1283,29 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("fails an otherwise empty removal when the Modeler probe fails", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_FAIL = "probe-modeler";
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(
+				output,
+				/Warning: Could not inspect the Camunda Desktop Modeler installation/,
+			);
+			assert.match(output, /No setup-managed components were found/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("preserves foreign MCP entries while removing setup-owned artifacts", async () => {
 		const stub = stubbedExecution();
 		try {

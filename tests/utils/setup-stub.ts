@@ -43,7 +43,7 @@
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "stop-cluster",
  *                                   "install-skills", "list-skills",
- *                                   "remove-modeler").
+ *                                   "remove-modeler", "probe-modeler").
  *   C8CTL_SETUP_STUB_MODELER=absent — the faked `modeler remove --dry-run`
  *                                   probe reports no managed installation,
  *                                   so removal previews omit Modeler.
@@ -371,6 +371,9 @@ Object.defineProperty(childProcess, "spawn", {
 		// keeps running its real plugin code under this stub.
 		if (argv.includes("modeler") && argv.includes("remove")) {
 			if (argv.includes("--dry-run")) {
+				if (failStep === "probe-modeler") {
+					return fakeChild(1, { stderr: "stubbed modeler probe failure\n" });
+				}
 				const absent = process.env.C8CTL_SETUP_STUB_MODELER === "absent";
 				return fakeChild(0, {
 					stdout: `${JSON.stringify({

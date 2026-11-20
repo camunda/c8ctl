@@ -12,8 +12,10 @@ harnesses.
   GitHub CLI agent ID.
 - `c8ctl skills list [--harness <agent-id>]` — list installed Camunda skills
   and their harnesses and paths.
-- `c8ctl skills remove [--harness <agent-id>]` — preview and remove installed
-  Camunda skills from the detected harnesses or one selected harness.
+- `c8ctl skills remove [name...] [--harness <agent-id>]` — preview and remove
+  installed Camunda skills from the detected harnesses or one selected
+  harness. Naming skills removes only those; an unknown name fails before
+  anything is deleted.
 
 Requires GitHub CLI 2.90 or later; its skill commands are in preview.
 Re-run to update the same skill directories without duplicates when upstream

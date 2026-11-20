@@ -1013,19 +1013,22 @@ async function applySetupRemoval(
 	// The mcp plugin owns MCP teardown. One child per harness keeps a
 	// single unreadable config from blocking the other harnesses; the
 	// child's own output is redundant next to the per-server lines below,
-	// which mirror the previewed inventory.
+	// which mirror the previewed inventory. The child is scoped to the
+	// previewed targets: a managed entry added while the confirmation was
+	// open belongs to a target the user never confirmed, so --docs or
+	// --orchestration is omitted accordingly.
 	for (const { plan, servers } of inventory.mcp) {
+		if (servers.length === 0) continue; // preserved-only: nothing to remove
+		const targets = [
+			servers.includes("camunda-docs") ? "--docs" : undefined,
+			servers.some((server) => server !== "camunda-docs")
+				? "--orchestration"
+				: undefined,
+		].filter((flag) => flag !== undefined);
 		try {
 			await spawnC8ctl(
 				ctx,
-				[
-					"mcp",
-					"uninstall",
-					plan.harness,
-					"--docs",
-					"--orchestration",
-					"--preserve-conflicts",
-				],
+				["mcp", "uninstall", plan.harness, ...targets, "--preserve-conflicts"],
 				{ skipStdoutLine: () => true },
 			);
 			for (const server of servers) {
@@ -1046,14 +1049,21 @@ async function applySetupRemoval(
 
 	// The skills plugin owns skill removal — including its
 	// revalidation-before-delete check. One child per harness, mirroring
-	// the install step's failure granularity.
+	// the install step's failure granularity. The child is constrained to
+	// the confirmed skill names: a Camunda skill installed while the
+	// confirmation was open was never previewed, so it is not the user's
+	// confirmed scope — and a previewed skill that vanished fails the
+	// child instead of silently shrinking the set.
 	for (const harness of new Set(
 		inventory.skills.map((skill) => skill.harness),
 	)) {
+		const names = inventory.skills
+			.filter((skill) => skill.harness === harness)
+			.map((skill) => skill.name);
 		try {
 			await spawnC8ctl(
 				ctx,
-				["skills", "remove", "--harness", harness, "--yes"],
+				["skills", "remove", ...names, "--harness", harness, "--yes"],
 				{
 					skipStdoutLine: (line) =>
 						line === "Skills removal preview:" ||
@@ -1145,7 +1155,8 @@ async function runSetupRemoval(
 		if (
 			inventory.mcpPlanningFailures.length > 0 ||
 			inventory.skillDiscoveryFailures.length > 0 ||
-			inventory.blueprintPlanningFailures.length > 0
+			inventory.blueprintPlanningFailures.length > 0 ||
+			inventory.modelerInspectionFailure
 		) {
 			process.exitCode = 1;
 		}

@@ -6,7 +6,7 @@
  * Usage:
  *   c8ctl skills install [--harness <agent-id>]
  *   c8ctl skills list [--harness <agent-id>]
- *   c8ctl skills remove [--harness <agent-id>]
+ *   c8ctl skills remove [name...] [--harness <agent-id>]
  */
 
 import { renderCommandFailure } from "../../src/core/index.ts";
@@ -43,7 +43,7 @@ export const metadata: PluginMetadata = {
 Requires GitHub CLI 2.90 or later; its skill commands are in preview.
 Re-run to update the same skill directories without duplicates when upstream changes. Local edits to up-to-date skills are preserved; upstream updates may replace edited files.
 To restore one skill's upstream files, use \`gh skill update --force --dir <skills-root> <skill-name>\`; pass the parent skills directory (for example \`~/.claude/skills\`), not the listed skill directory. Find names with \`gh skill list --scope user --agent <agent-id>\`. Extra local files are retained.
-Use \`skills list\` to inspect installed skills and \`skills remove\` to remove them. Removal deletes the full skill directories, including local edits. Use a GitHub CLI agent ID for --harness; see \`gh skill install --help\` for supported IDs. Pass \`--yes\` for non-interactive removal; \`--dry-run\` previews without deleting.`,
+Use \`skills list\` to inspect installed skills and \`skills remove\` to remove them. Removal deletes the full skill directories, including local edits. Name one or more skills to remove only those; unknown names fail before anything is deleted. Use a GitHub CLI agent ID for --harness; see \`gh skill install --help\` for supported IDs. Pass \`--yes\` for non-interactive removal; \`--dry-run\` previews without deleting.`,
 			subcommands: [
 				{
 					name: "install",
@@ -78,6 +78,10 @@ Use \`skills list\` to inspect installed skills and \`skills remove\` to remove 
 				{
 					command: "c8ctl skills remove --dry-run",
 					description: "Preview Camunda skills removal",
+				},
+				{
+					command: "c8ctl skills remove camunda-c8ctl --yes",
+					description: "Remove only the named Camunda skills",
 				},
 				{
 					command: "c8ctl skills remove --harness claude-code --yes",
@@ -196,15 +200,31 @@ async function removeSkills(
 				`"${swallowed}" looks like a flag but was passed as a value. Only --harness selects the removal scope; fix the invocation before deleting skills.`,
 			);
 		}
-		if (extraArgs.length > 0) {
-			throw new Error(
-				`skills remove does not accept positional arguments ("${extraArgs.join(" ")}"). Use --harness <agent-id> to select a harness; removal otherwise covers all detected harnesses.`,
-			);
-		}
+		// Positional arguments name the skills to remove; without names,
+		// removal covers every Camunda skill in the selected harnesses.
+		const requestedNames = [...new Set(extraArgs)];
 		const { harnesses, requestedHarness } = resolveHarnesses(rawHarness);
-		const skills = await inspectSkills(harnesses);
+		const discovered = await inspectSkills(harnesses);
+		if (requestedNames.length > 0) {
+			const installedNames = new Set(discovered.map((skill) => skill.name));
+			const unknown = requestedNames.filter(
+				(name) => !installedNames.has(name),
+			);
+			if (unknown.length > 0) {
+				throw new Error(
+					`Unknown Camunda skill${unknown.length === 1 ? "" : "s"} ${unknown
+						.map((name) => `"${name}"`)
+						.join(
+							", ",
+						)} — not installed for ${harnesses.join(", ")}. Run "c8ctl skills list" for the installed set; nothing was removed.`,
+				);
+			}
+		}
+		const skills =
+			requestedNames.length === 0
+				? discovered
+				: discovered.filter((skill) => requestedNames.includes(skill.name));
 		for (const skill of skills) camundaSkillRemovalPath(skill);
-
 		const items = skills.map(({ name, harness, path }) => ({
 			type: "skill",
 			harness,
@@ -276,6 +296,7 @@ async function removeSkills(
 					"c8ctl",
 					"skills",
 					"remove",
+					...requestedNames,
 					...(requestedHarness ? ["--harness", requestedHarness] : []),
 					"--yes",
 				].join(" ");
