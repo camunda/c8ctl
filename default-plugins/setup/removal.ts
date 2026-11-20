@@ -35,6 +35,15 @@ export interface SetupBlueprintPlanningFailure {
 	readonly message: string;
 }
 
+export interface SetupModelerRemoval {
+	/** The modeler plugin's own dry-run description of the removal. */
+	readonly message: string;
+}
+
+export interface SetupModelerInspectionFailure {
+	readonly message: string;
+}
+
 export interface SetupRemovalInventory {
 	readonly mcp: readonly SetupMcpRemoval[];
 	readonly mcpPlanningFailures: readonly SetupMcpPlanningFailure[];
@@ -42,6 +51,8 @@ export interface SetupRemovalInventory {
 	readonly skillDiscoveryFailures: readonly SetupSkillDiscoveryFailure[];
 	readonly blueprints: readonly SetupBlueprintRemoval[];
 	readonly blueprintPlanningFailures: readonly SetupBlueprintPlanningFailure[];
+	readonly modeler: SetupModelerRemoval | undefined;
+	readonly modelerInspectionFailure: SetupModelerInspectionFailure | undefined;
 }
 
 const SETUP_MCP_HARNESSES = [
@@ -54,12 +65,17 @@ const SETUP_MCP_HARNESSES = [
 /**
  * Inspect setup-managed artifacts without changing them. MCP plans use an
  * explicit harness list so teardown can find entries even if a harness is no
- * longer detected by its executable.
+ * longer detected by its executable. `detectModeler` probes the modeler
+ * plugin's own `modeler remove --dry-run`, so whether a managed Modeler
+ * installation exists — and how its removal is described — stays owned by
+ * that plugin.
  */
 export async function inspectSetupRemovalInventory({
 	cwd = process.cwd(),
+	detectModeler,
 }: {
 	cwd?: string;
+	detectModeler?: () => Promise<SetupModelerRemoval | undefined>;
 } = {}): Promise<SetupRemovalInventory> {
 	const mcpHarnesses =
 		process.platform === "darwin" || process.platform === "win32"
@@ -123,6 +139,18 @@ export async function inspectSetupRemovalInventory({
 		},
 	});
 
+	let modeler: SetupModelerRemoval | undefined;
+	let modelerInspectionFailure: SetupModelerInspectionFailure | undefined;
+	if (detectModeler) {
+		try {
+			modeler = await detectModeler();
+		} catch (error) {
+			modelerInspectionFailure = {
+				message: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
 	return {
 		mcp,
 		mcpPlanningFailures,
@@ -130,5 +158,7 @@ export async function inspectSetupRemovalInventory({
 		skillDiscoveryFailures,
 		blueprints,
 		blueprintPlanningFailures,
+		modeler,
+		modelerInspectionFailure,
 	};
 }

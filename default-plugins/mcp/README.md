@@ -9,8 +9,10 @@ Protocol) connections in AI coding harnesses.
   write MCP server entries into the detected (or named) harnesses' config
   files. The orchestration entry points at `c8ctl mcp-proxy` for the selected
   profile; the docs entry connects to the hosted Camunda docs MCP server.
-- `c8ctl mcp uninstall [harness...] [--docs] [--orchestration]` — remove the
-  c8ctl-managed entries, leaving unrelated servers untouched.
+- `c8ctl mcp uninstall [harness...] [--docs] [--orchestration] [--preserve-conflicts]` —
+  remove the c8ctl-managed entries, leaving unrelated servers untouched. A
+  foreign entry under the same name fails the uninstall unless
+  `--preserve-conflicts` leaves it in place instead.
 
 Supported harnesses: Claude Code, GitHub Copilot, Cursor, VS Code, and Claude
 Desktop (macOS/Windows). Omit harness names to configure all detected
