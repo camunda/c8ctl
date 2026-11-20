@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "c8ctl default plugin to install Camunda MCP connections in AI harnesses",
+  "keywords": ["c8ctl", "c8ctl-plugin", "mcp", "camunda"],
+  "main": "c8ctl-plugin.js"
+}
