@@ -2173,6 +2173,67 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("fails closed on a stale reclamation meta-lock", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		try {
+			// A killed reclaimer left both locks behind; recovery is manual,
+			// never an automatic unlink of a possibly replaced lock.
+			writeFileSync(sandbox.lockPath, "not-a-pid");
+			writeFileSync(sandbox.reclaimLockPath, "not-a-pid");
+
+			const result = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(result.status, 1);
+			assert.match(result.stdout + result.stderr, /remove .+ manually/);
+			assert.ok(existsSync(sandbox.lockPath), "stale lock left untouched");
+			assert.ok(
+				existsSync(sandbox.reclaimLockPath),
+				"stale meta-lock left untouched",
+			);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("emits a dry-run JSON preview when no update would run", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		try {
+			// No installation at all.
+			for (const action of ["update", "remove"] as const) {
+				const result = await sandbox[action](
+					{ FAKE_UID: "0" },
+					"--dry-run",
+					"--json",
+				);
+				assert.strictEqual(result.status, 0, result.stderr);
+				const preview = parseJson(result);
+				assert.strictEqual(preview.dryRun, true);
+				assert.strictEqual(preview.command, `modeler ${action}`);
+				assert.match(String(preview.message), /not installed/);
+			}
+
+			// An already current installation.
+			addLinuxInstall(sandbox, "5.52.0");
+			const current = await sandbox.update(
+				{ FAKE_UID: "0" },
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(current.status, 0, current.stderr);
+			const preview = parseJson(current);
+			assert.strictEqual(preview.dryRun, true);
+			assert.strictEqual(preview.command, "modeler update");
+			assert.match(String(preview.message), /already up to date/);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	test("excludes a concurrent update while an interrupted run held the lock", {
 		skip: !isLinux,
 	}, async () => {

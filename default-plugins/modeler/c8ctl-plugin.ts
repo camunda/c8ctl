@@ -98,12 +98,25 @@ async function modelerHandler(
 			logger,
 			quiet: ctx.quiet,
 		});
-		if (result.kind === "dryRun") {
-			logger.json(result.info);
-		} else if (result.kind === "info") {
-			logger.info(result.message, { essential: true });
+		// A dry run owes automation the JSON preview on stdout even when
+		// nothing would change (Modeler absent or already current).
+		const normalized =
+			result.kind === "info" && ctx.dryRun
+				? {
+						kind: "dryRun" as const,
+						info: {
+							dryRun: true,
+							command: `modeler ${action}`,
+							message: result.message,
+						},
+					}
+				: result;
+		if (normalized.kind === "dryRun") {
+			logger.json(normalized.info);
+		} else if (normalized.kind === "info") {
+			logger.info(normalized.message, { essential: true });
 		} else {
-			logger.success(result.message);
+			logger.success(normalized.message);
 		}
 	} catch (error) {
 		renderCommandFailure(logger, `Failed to ${action} Camunda Modeler`, error, {

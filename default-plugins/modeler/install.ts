@@ -100,10 +100,6 @@ const LINUX_EXECUTABLE = "camunda-modeler";
 // environments lock different files and still race.
 const LINUX_LIFECYCLE_LOCK = "/tmp/c8ctl-modeler-lifecycle.lock";
 const LINUX_LIFECYCLE_RECLAIM_LOCK = `${LINUX_LIFECYCLE_LOCK}.reclaim`;
-// The reclamation critical section is a handful of syscalls, so a live
-// reclaimer never holds its meta-lock anywhere near this long; past it,
-// the meta-lock belongs to a killed reclaimer even if its pid was reused.
-const RECLAIM_LOCK_STALE_AFTER_MS = 10_000;
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -158,18 +154,10 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
-function isStaleLock(path: string, maxAgeMs?: number): boolean {
+function isStaleLock(path: string): boolean {
 	const pid = readLifecycleLock(path)?.pid;
 	if (typeof pid !== "number" || !Number.isInteger(pid)) return true;
-	if (!isProcessAlive(pid)) return true;
-	if (maxAgeMs !== undefined) {
-		try {
-			return Date.now() - statSync(path).mtimeMs > maxAgeMs;
-		} catch {
-			return true;
-		}
-	}
-	return false;
+	return !isProcessAlive(pid);
 }
 
 function tryCreateLifecycleLock(path: string): boolean {
@@ -220,18 +208,14 @@ function lifecycleLockBusy(): Error {
  */
 function reclaimStaleLifecycleLock(logger: Logger): boolean {
 	if (!tryCreateLifecycleLock(LINUX_LIFECYCLE_RECLAIM_LOCK)) {
-		// A crashed reclaimer's meta-lock expires quickly: the critical
-		// section is a few syscalls, far below the staleness window.
-		if (
-			isStaleLock(LINUX_LIFECYCLE_RECLAIM_LOCK, RECLAIM_LOCK_STALE_AFTER_MS)
-		) {
-			unlinkStaleReclaimLock();
-		}
-		if (!tryCreateLifecycleLock(LINUX_LIFECYCLE_RECLAIM_LOCK)) {
-			throw new Error(
-				"Another c8ctl Modeler operation is recovering an interrupted run's lock; try again in a moment.",
-			);
-		}
+		// Fail closed: never reclaim the meta-lock itself. Checking a stale
+		// meta-lock and unlinking it cannot be atomic, so two runs doing so
+		// could delete a freshly acquired replacement and both enter main-lock
+		// reclamation. The critical section is a few syscalls, so a leftover
+		// meta-lock means a killed reclaimer — leave recovery to the user.
+		throw new Error(
+			`Another c8ctl Modeler operation is recovering an interrupted run's lock. If no such operation is running, remove ${LINUX_LIFECYCLE_RECLAIM_LOCK} and ${LINUX_LIFECYCLE_LOCK} manually.`,
+		);
 	}
 	try {
 		// Re-verify under the meta-lock: the stale main lock may already be
@@ -255,14 +239,6 @@ function reclaimStaleLifecycleLock(logger: Logger): boolean {
 		return tryCreateLifecycleLock(LINUX_LIFECYCLE_LOCK);
 	} finally {
 		releaseOwnLifecycleLock(LINUX_LIFECYCLE_RECLAIM_LOCK);
-	}
-}
-
-function unlinkStaleReclaimLock(): void {
-	try {
-		unlinkSync(LINUX_LIFECYCLE_RECLAIM_LOCK);
-	} catch {
-		// Another reclaimer may have beaten us to it — the create decides.
 	}
 }
 
