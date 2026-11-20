@@ -6,17 +6,20 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
+	readlinkSync,
 	realpathSync,
 	renameSync,
 	rmSync,
 	statSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Logger } from "../../src/core/index.ts";
 import {
+	isNewerModelerVersion,
 	latestStableModelerVersion,
 	MODELER_RELEASE_URL,
 	modelerMacArchiveName,
@@ -65,6 +68,20 @@ const WINGET_INSTALL_URL =
 const WINGET_NO_APPLICATIONS_FOUND = 0x8a150014;
 const WINDOWS_EXECUTABLE = "Camunda Modeler.exe";
 const MODELER_FILE_TYPES = ["bpmn", "dmn", "form", "rpa"];
+const UNREGISTER_WINDOWS_SCRIPT =
+	"$ErrorActionPreference='Stop'; $base=[Microsoft.Win32.Registry]::CurrentUser; " +
+	"foreach ($type in @('bpmn','dmn','form','rpa')) { " +
+	"$prog='CamundaModeler.'+$type.ToUpper(); " +
+	"$path='Software\\Classes\\'+$prog+'\\shell\\open\\command'; " +
+	"$key=$base.OpenSubKey($path); " +
+	"if ($key -and $key.GetValue('') -ieq ('\"'+$env:C8CTL_TARGET+'\" \"%1\"')) { " +
+	"$key.Close(); $ext=$base.OpenSubKey('Software\\Classes\\.'+$type,$true); " +
+	"if ($ext) { if ($ext.GetValue('') -ieq $prog) { $ext.DeleteValue('', $false) }; $ext.Close() }; " +
+	"Remove-Item -LiteralPath ('Registry::HKEY_CURRENT_USER\\Software\\Classes\\'+$prog) -Recurse -Force " +
+	"} elseif ($key) { $key.Close() } }; " +
+	"$shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($env:C8CTL_SHORTCUT); " +
+	"if ((Test-Path -LiteralPath $env:C8CTL_SHORTCUT) -and $shortcut.TargetPath -ieq $env:C8CTL_TARGET) { " +
+	"Remove-Item -LiteralPath $env:C8CTL_SHORTCUT -Force }";
 // Both paths arrive through the environment, so they need no quoting.
 const CREATE_SHORTCUT_SCRIPT =
 	"$ErrorActionPreference = 'Stop'; $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:C8CTL_SHORTCUT); $shortcut.TargetPath = $env:C8CTL_TARGET; $shortcut.Save()";
@@ -106,10 +123,12 @@ function runCommand(
 		failureMessage,
 		quiet,
 		stdin = "inherit",
+		env,
 	}: {
 		failureMessage: string;
 		quiet: boolean;
 		stdin?: "inherit" | "ignore";
+		env?: NodeJS.ProcessEnv;
 	},
 ): void {
 	const result = spawnSync(command, args, {
@@ -117,6 +136,7 @@ function runCommand(
 		stdio: quiet
 			? [stdin, "pipe", "pipe"]
 			: [stdin, process.stderr.fd, process.stderr.fd],
+		env,
 	});
 	const diagnostics = quiet
 		? `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
@@ -132,6 +152,28 @@ function runCommand(
 	}
 }
 
+function runCommandCapture(
+	command: string,
+	args: string[],
+	failureMessage: string,
+): string {
+	const result = spawnSync(command, args, {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const diagnostics = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+	const details = diagnostics ? `\n${diagnostics}` : "";
+	if (result.error) {
+		throw new Error(`${failureMessage}: ${result.error.message}${details}`);
+	}
+	if (result.status !== 0) {
+		throw new Error(
+			`${failureMessage} (exit code ${formatExitCode(result.status)}).${details}`,
+		);
+	}
+	return result.stdout ?? "";
+}
+
 function registerWithLaunchServices(appPath: string, logger: Logger): void {
 	const result = spawnSync(LAUNCH_SERVICES_REGISTER, ["-f", appPath], {
 		stdio: "ignore",
@@ -139,6 +181,17 @@ function registerWithLaunchServices(appPath: string, logger: Logger): void {
 	if (result.error || result.status !== 0) {
 		logger.warn(
 			`Could not register ${appPath} with macOS Launch Services. Open Camunda Modeler once so macOS picks up its file associations.`,
+		);
+	}
+}
+
+function unregisterWithLaunchServices(appPath: string, logger: Logger): void {
+	const result = spawnSync(LAUNCH_SERVICES_REGISTER, ["-u", "-f", appPath], {
+		stdio: "ignore",
+	});
+	if (result.error || result.status !== 0) {
+		logger.warn(
+			`Could not unregister ${appPath} from macOS Launch Services. Remove its file associations manually if they remain.`,
 		);
 	}
 }
@@ -384,6 +437,64 @@ async function downloadLatestRelease({
 	return { version, archivePath };
 }
 
+async function downloadReleaseVersion({
+	dir,
+	version,
+	platform,
+	archiveName,
+	logger,
+	quiet,
+	signal,
+}: {
+	dir: string;
+	version: string;
+	platform: string;
+	archiveName: (version: string) => string;
+	logger: Logger;
+	quiet: boolean;
+	signal: AbortSignal;
+}): Promise<{ version: string; archivePath: string }> {
+	const name = archiveName(version);
+	const archivePath = join(dir, name);
+	reportProgress(
+		{ logger, quiet },
+		`Downloading Camunda Modeler ${version} for ${platform}...`,
+	);
+	await downloadArchive({
+		url: new URL(`${version}/${name}`, MODELER_RELEASE_URL).toString(),
+		destination: archivePath,
+		logger,
+		quiet,
+		signal,
+	});
+	return { version, archivePath };
+}
+
+function registerDownloadInterrupts(operation: string): {
+	signal: AbortSignal;
+	cleanup: () => void;
+} {
+	const controller = new AbortController();
+	let interruptedSignal: NodeJS.Signals | undefined;
+	const interrupt = (signal: NodeJS.Signals): void => {
+		interruptedSignal ??= signal;
+		controller.abort(new Error(`${operation} interrupted by ${signal}`));
+	};
+	const onSigint = (): void => interrupt("SIGINT");
+	const onSigterm = (): void => interrupt("SIGTERM");
+	process.on("SIGINT", onSigint);
+	process.on("SIGTERM", onSigterm);
+
+	return {
+		signal: controller.signal,
+		cleanup: () => {
+			process.off("SIGINT", onSigint);
+			process.off("SIGTERM", onSigterm);
+			if (interruptedSignal) process.kill(process.pid, interruptedSignal);
+		},
+	};
+}
+
 async function installFromOfficialDownload({
 	applicationsDir,
 	logger,
@@ -626,13 +737,17 @@ function runAsRoot(
 	args: string[],
 	failureMessage: string,
 	quiet: boolean,
+	includeManualDownload = true,
 ): void {
 	const [command, ...rest] =
 		process.getuid?.() === 0 ? args : ["sudo", ...args];
 	try {
 		runCommand(command, rest, { failureMessage, quiet });
 	} catch (error) {
-		throw manualDownloadError(errorMessage(error));
+		const message = errorMessage(error);
+		throw includeManualDownload
+			? manualDownloadError(message)
+			: new Error(message);
 	}
 }
 
@@ -663,6 +778,44 @@ function registerWithDesktop({
 		});
 	} catch (error) {
 		logger.warn(errorMessage(error));
+	}
+}
+
+function unregisterWithDesktop({
+	installDir,
+	logger,
+	quiet,
+}: {
+	installDir: string;
+	logger: Logger;
+	quiet: boolean;
+}): void {
+	const script = join(installDir, "support", "xdg_unregister.sh");
+	if (!existsSync(script)) {
+		logger.warn(
+			`Could not unregister Camunda Modeler file types because ${script} is missing.`,
+		);
+		return;
+	}
+	const missingTools = [
+		"xdg-mime",
+		"xdg-desktop-menu",
+		"xdg-icon-resource",
+	].filter((tool) => !findOnPath(tool));
+	if (missingTools.length > 0) {
+		logger.warn(
+			`Could not unregister Camunda Modeler file types because these xdg-utils are not installed: ${missingTools.join(", ")}.`,
+		);
+		return;
+	}
+	try {
+		runCommand("/bin/bash", [script], {
+			failureMessage: `Could not unregister Camunda Modeler file types using ${script}`,
+			quiet,
+			stdin: "ignore",
+		});
+	} catch (error) {
+		logger.warn(`${errorMessage(error)} File registrations may remain.`);
 	}
 }
 
@@ -860,4 +1013,711 @@ export async function installDesktopModeler(
 		kind: "success",
 		message: `Installed Camunda Modeler ${version} to ${destination}.`,
 	};
+}
+
+function noModelerInstalled(): ModelerInstallResult {
+	return {
+		kind: "info",
+		message:
+			"Camunda Modeler is not installed; run `c8ctl modeler install` first.",
+	};
+}
+
+function dryRunResult(
+	command: "modeler update" | "modeler remove",
+	message: string,
+): ModelerInstallResult {
+	return {
+		kind: "dryRun",
+		info: { dryRun: true, command, message },
+	};
+}
+
+function homebrewModelerInstalled(): boolean {
+	return isInstalledWith({
+		command: "brew",
+		args: ["list", "--cask", "--versions", "camunda-modeler"],
+		notInstalledStatus: 1,
+		description: "the Homebrew Modeler cask",
+	});
+}
+
+function updateHomebrewModeler(
+	ctx: ModelerInstallContext,
+): ModelerInstallResult {
+	const outdated = runCommandCapture(
+		"brew",
+		["outdated", "--cask", "--quiet", "camunda-modeler"],
+		"Could not check Homebrew for Camunda Modeler updates",
+	).trim();
+	if (!outdated) {
+		return {
+			kind: "info",
+			message: "Camunda Modeler is already up to date with Homebrew.",
+		};
+	}
+	if (ctx.isDryRun) {
+		return dryRunResult(
+			"modeler update",
+			"Dry run: would update Camunda Modeler with `brew upgrade --cask camunda-modeler`.",
+		);
+	}
+
+	reportProgress(ctx, "Updating Camunda Modeler with Homebrew...");
+	runCommand("brew", ["upgrade", "--cask", "camunda-modeler"], {
+		failureMessage: "Homebrew could not update Camunda Modeler",
+		quiet: ctx.quiet,
+	});
+	return {
+		kind: "success",
+		message: "Updated Camunda Modeler with Homebrew.",
+	};
+}
+
+function isHomebrewCaskPath(appPath: string): boolean {
+	return /\/Caskroom\/camunda-modeler\//i.test(realpathSync(appPath));
+}
+
+function verifyMacModelerBundle(
+	appPath: string,
+	action: "update" | "remove",
+	quiet: boolean,
+): void {
+	runCommand(
+		"codesign",
+		[
+			"--verify",
+			"--deep",
+			"--strict",
+			`-R=${MODELER_CODE_REQUIREMENT}`,
+			appPath,
+		],
+		{
+			failureMessage: `Camunda Modeler at ${appPath} is not signed by Camunda; refusing to ${action} it`,
+			quiet,
+		},
+	);
+}
+
+function readMacModelerVersion(appPath: string): string {
+	const plistPath = join(appPath, "Contents", "Info.plist");
+	const plist = readFileSync(plistPath, "utf8");
+	const version =
+		/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/
+			.exec(plist)?.[1]
+			?.trim();
+	if (!version) {
+		throw new Error(
+			`Could not read the installed Camunda Modeler version from ${plistPath}; reinstall it with c8ctl before updating.`,
+		);
+	}
+	return version;
+}
+
+async function updateDirectMacModeler(
+	ctx: ModelerInstallContext,
+	appPath: string,
+): Promise<ModelerInstallResult> {
+	if (isHomebrewCaskPath(appPath)) {
+		throw new Error(
+			"Camunda Modeler appears to be Homebrew-managed, but its cask was not found; refusing to update the app bundle directly.",
+		);
+	}
+	verifyMacModelerBundle(appPath, "update", ctx.quiet);
+	const currentVersion = readMacModelerVersion(appPath);
+	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
+	const interruption = registerDownloadInterrupts("Modeler update");
+	try {
+		reportProgress(
+			ctx,
+			"Checking for the latest stable Camunda Modeler release...",
+		);
+		const latestVersion = latestStableModelerVersion(
+			await fetchReleaseIndex(interruption.signal),
+		);
+		if (!isNewerModelerVersion(latestVersion, currentVersion)) {
+			return {
+				kind: "info",
+				message: `Camunda Modeler is already up to date (installed ${currentVersion}; latest stable ${latestVersion}).`,
+			};
+		}
+		if (ctx.isDryRun) {
+			return dryRunResult(
+				"modeler update",
+				`Dry run: would update Camunda Modeler from ${currentVersion} to ${latestVersion} at ${appPath}.`,
+			);
+		}
+
+		const { archivePath } = await downloadReleaseVersion({
+			dir: tempDir,
+			version: latestVersion,
+			platform: "macOS",
+			archiveName: (version) => modelerMacArchiveName(version, process.arch),
+			logger: ctx.logger,
+			quiet: ctx.quiet,
+			signal: interruption.signal,
+		});
+		const stagingDir = mkdtempSync(
+			join(dirname(appPath), ".c8ctl-modeler-update-"),
+		);
+		const stagedApp = join(stagingDir, APP_BUNDLE_NAME);
+		const backupApp = join(stagingDir, "previous.app");
+		try {
+			reportProgress(ctx, `Updating Camunda Modeler to ${latestVersion}...`);
+			runCommand("ditto", ["-x", "-k", archivePath, stagingDir], {
+				failureMessage: "Could not extract Camunda Modeler",
+				quiet: ctx.quiet,
+			});
+			if (!existsSync(stagedApp)) {
+				throw manualDownloadError(
+					`The Camunda Modeler ${latestVersion} archive did not contain ${APP_BUNDLE_NAME}`,
+				);
+			}
+			verifyMacModelerBundle(stagedApp, "update", ctx.quiet);
+
+			renameSync(appPath, backupApp);
+			try {
+				renameSync(stagedApp, appPath);
+			} catch (error) {
+				try {
+					renameSync(backupApp, appPath);
+				} catch (restoreError) {
+					throw new Error(
+						`Could not install the new Camunda Modeler bundle; the previous bundle remains at ${backupApp}: ${errorMessage(restoreError)}`,
+					);
+				}
+				throw new Error(
+					`Could not replace the Camunda Modeler bundle: ${errorMessage(error)}`,
+				);
+			}
+			try {
+				rmSync(backupApp, { recursive: true, force: true });
+			} catch (error) {
+				ctx.logger.warn(
+					`Could not remove the previous Camunda Modeler bundle at ${backupApp}: ${errorMessage(error)}`,
+				);
+			}
+		} finally {
+			try {
+				rmSync(stagingDir, { recursive: true, force: true });
+			} catch (error) {
+				ctx.logger.warn(
+					`Could not clean up the Modeler update directory ${stagingDir}: ${errorMessage(error)}`,
+				);
+			}
+		}
+
+		registerWithLaunchServices(appPath, ctx.logger);
+		return {
+			kind: "success",
+			message: `Updated Camunda Modeler to ${latestVersion} at ${appPath}.`,
+		};
+	} finally {
+		try {
+			rmSync(tempDir, { recursive: true, force: true });
+		} finally {
+			interruption.cleanup();
+		}
+	}
+}
+
+async function updateMacModeler(
+	ctx: ModelerInstallContext,
+): Promise<ModelerInstallResult> {
+	if (hasPackageManager("brew", "Homebrew") && homebrewModelerInstalled()) {
+		return updateHomebrewModeler(ctx);
+	}
+	const appPath = findInstalledModeler();
+	if (!appPath) return noModelerInstalled();
+	return updateDirectMacModeler(ctx, appPath);
+}
+
+function wingetUpgradeAvailable(): boolean {
+	const result = spawnSync(
+		"winget",
+		["list", "--upgrade-available", ...WINGET_PACKAGE],
+		{
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	);
+	if (result.error) {
+		throw new Error(
+			`Could not check for Camunda Modeler updates with winget: ${result.error.message}`,
+		);
+	}
+	if (result.status === WINGET_NO_APPLICATIONS_FOUND) return false;
+	if (result.status !== 0) {
+		throw new Error(
+			`Could not check for Camunda Modeler updates with winget (exit code ${formatExitCode(result.status)})`,
+		);
+	}
+	return `${result.stdout ?? ""}\n${result.stderr ?? ""}`
+		.split(/\r?\n/)
+		.some((line) => line.includes(WINGET_PACKAGE_ID));
+}
+
+function wingetModelerPaths(): { installDir: string; executable: string } {
+	const localAppData =
+		process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
+	const installDir = join(localAppData, "Programs", "Camunda Modeler");
+	return { installDir, executable: join(installDir, WINDOWS_EXECUTABLE) };
+}
+
+function updateWindowsModeler(
+	ctx: ModelerInstallContext,
+): ModelerInstallResult {
+	const { executable, installDir } = wingetModelerPaths();
+	if (!hasPackageManager("winget", "winget")) {
+		if (existsSync(executable)) {
+			throw new Error(
+				`winget is not available, so c8ctl cannot safely update the Modeler installation at ${installDir}.`,
+			);
+		}
+		return noModelerInstalled();
+	}
+	if (
+		!isInstalledWith({
+			command: "winget",
+			args: ["list", ...WINGET_PACKAGE],
+			notInstalledStatus: WINGET_NO_APPLICATIONS_FOUND,
+			description: "the winget Modeler package",
+		})
+	) {
+		if (existsSync(executable)) {
+			throw new Error(
+				`Camunda Modeler at ${installDir} is not installed with winget; refusing to update it.`,
+			);
+		}
+		return noModelerInstalled();
+	}
+	if (!wingetUpgradeAvailable()) {
+		return {
+			kind: "info",
+			message: "Camunda Modeler is already up to date with winget.",
+		};
+	}
+	if (ctx.isDryRun) {
+		return dryRunResult(
+			"modeler update",
+			"Dry run: would update Camunda Modeler with `winget upgrade --id Camunda.Modeler --exact --source winget`.",
+		);
+	}
+
+	reportProgress(ctx, "Updating Camunda Modeler with winget...");
+	runCommand("winget", ["upgrade", ...WINGET_PACKAGE], {
+		failureMessage: "winget could not update Camunda Modeler",
+		quiet: ctx.quiet,
+	});
+	return { kind: "success", message: "Updated Camunda Modeler with winget." };
+}
+
+function unregisterWindowsModeler(
+	ctx: ModelerInstallContext,
+	executable: string,
+): void {
+	const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
+	const shortcut = join(
+		appData,
+		"Microsoft",
+		"Windows",
+		"Start Menu",
+		"Programs",
+		"Camunda Modeler.lnk",
+	);
+	try {
+		runCommand(
+			"powershell",
+			["-NoProfile", "-NonInteractive", "-Command", UNREGISTER_WINDOWS_SCRIPT],
+			{
+				failureMessage: "Could not unregister Camunda Modeler file types",
+				quiet: ctx.quiet,
+				stdin: "ignore",
+				env: {
+					...process.env,
+					C8CTL_SHORTCUT: shortcut,
+					C8CTL_TARGET: executable,
+				},
+			},
+		);
+	} catch (error) {
+		ctx.logger.warn(
+			`${errorMessage(error)} File associations or the Start Menu shortcut may remain.`,
+		);
+	}
+}
+
+function removeWindowsModeler(
+	ctx: ModelerInstallContext,
+): ModelerInstallResult {
+	const { executable, installDir } = wingetModelerPaths();
+	if (!hasPackageManager("winget", "winget")) {
+		if (existsSync(executable)) {
+			throw new Error(
+				`winget is not available, so c8ctl cannot safely remove the Modeler installation at ${installDir}.`,
+			);
+		}
+		return noModelerInstalled();
+	}
+	if (
+		!isInstalledWith({
+			command: "winget",
+			args: ["list", ...WINGET_PACKAGE],
+			notInstalledStatus: WINGET_NO_APPLICATIONS_FOUND,
+			description: "the winget Modeler package",
+		})
+	) {
+		if (existsSync(executable)) {
+			throw new Error(
+				`Camunda Modeler at ${installDir} is not installed with winget; refusing to remove it.`,
+			);
+		}
+		return noModelerInstalled();
+	}
+	if (ctx.isDryRun) {
+		return dryRunResult(
+			"modeler remove",
+			"Dry run: would remove Camunda Modeler with `winget uninstall --id Camunda.Modeler --exact --source winget`.",
+		);
+	}
+
+	reportProgress(ctx, "Removing Camunda Modeler with winget...");
+	runCommand("winget", ["uninstall", ...WINGET_PACKAGE], {
+		failureMessage: "winget could not remove Camunda Modeler",
+		quiet: ctx.quiet,
+	});
+	unregisterWindowsModeler(ctx, executable);
+	return {
+		kind: "success",
+		message: "Removed Camunda Modeler with winget.",
+	};
+}
+
+interface LinuxModelerInstallation {
+	version: string;
+	target: string;
+	installDir: string;
+	launcher: string;
+}
+
+function findManagedLinuxModeler(): LinuxModelerInstallation | undefined {
+	const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
+	if (!existsSync(launcher)) return undefined;
+	let target: string;
+	try {
+		target = readlinkSync(launcher);
+	} catch {
+		return undefined;
+	}
+	const version =
+		/^camunda-modeler-(\d+\.\d+\.\d+)-linux-x64\/camunda-modeler$/.exec(
+			target,
+		)?.[1];
+	if (!version) return undefined;
+	const installDir = join(
+		LINUX_INSTALL_ROOT,
+		`camunda-modeler-${version}-linux-x64`,
+	);
+	if (!existsSync(join(installDir, LINUX_EXECUTABLE))) return undefined;
+	return { version, target, installDir, launcher };
+}
+
+function linuxModelerForAction(
+	action: "update" | "remove",
+): LinuxModelerInstallation | undefined {
+	const installation = findManagedLinuxModeler();
+	if (installation) return installation;
+	const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
+	const installedPath = findOnPath(LINUX_EXECUTABLE);
+	if (installedPath || existsSync(launcher)) {
+		throw new Error(
+			`Camunda Modeler at ${installedPath ?? launcher} is not installed by c8ctl; refusing to ${action} it.`,
+		);
+	}
+	return undefined;
+}
+
+async function updateLinuxModeler(
+	ctx: ModelerInstallContext,
+): Promise<ModelerInstallResult> {
+	if (process.arch !== "x64") {
+		throw manualDownloadError(
+			`Unsupported Linux architecture "${process.arch}"`,
+		);
+	}
+	const installation = linuxModelerForAction("update");
+	if (!installation) return noModelerInstalled();
+
+	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
+	const interruption = registerDownloadInterrupts("Modeler update");
+	try {
+		reportProgress(
+			ctx,
+			"Checking for the latest stable Camunda Modeler release...",
+		);
+		const latestVersion = latestStableModelerVersion(
+			await fetchReleaseIndex(interruption.signal),
+		);
+		if (!isNewerModelerVersion(latestVersion, installation.version)) {
+			return {
+				kind: "info",
+				message: `Camunda Modeler is already up to date (installed ${installation.version}; latest stable ${latestVersion}).`,
+			};
+		}
+		const newReleaseName = `camunda-modeler-${latestVersion}-linux-x64`;
+		const newInstallDir = join(LINUX_INSTALL_ROOT, newReleaseName);
+		if (ctx.isDryRun) {
+			return dryRunResult(
+				"modeler update",
+				`Dry run: would update Camunda Modeler from ${installation.version} to ${latestVersion} in ${newInstallDir}.`,
+			);
+		}
+		if (existsSync(newInstallDir)) {
+			throw new Error(
+				`A release directory already exists at ${newInstallDir}; refusing to overwrite it.`,
+			);
+		}
+
+		if (process.getuid?.() !== 0) {
+			reportProgress(
+				ctx,
+				`Updating in ${LINUX_INSTALL_ROOT} needs root privileges; sudo may ask for your password.`,
+			);
+		}
+		runAsRoot(["true"], "Could not get root privileges", ctx.quiet);
+		const { archivePath } = await downloadReleaseVersion({
+			dir: tempDir,
+			version: latestVersion,
+			platform: "Linux",
+			archiveName: (version) => `camunda-modeler-${version}-linux-x64.tar.gz`,
+			logger: ctx.logger,
+			quiet: ctx.quiet,
+			signal: interruption.signal,
+		});
+
+		const temporaryLauncher = join(
+			LINUX_INSTALL_ROOT,
+			".c8ctl-camunda-modeler-update",
+		);
+		let launcherUpdated = false;
+		try {
+			reportProgress(
+				ctx,
+				`Installing Camunda Modeler ${latestVersion} to ${newInstallDir}...`,
+			);
+			runAsRoot(
+				[
+					"tar",
+					"--no-same-owner",
+					"-xzf",
+					archivePath,
+					"-C",
+					LINUX_INSTALL_ROOT,
+				],
+				"Could not extract Camunda Modeler",
+				ctx.quiet,
+			);
+			if (!existsSync(join(newInstallDir, LINUX_EXECUTABLE))) {
+				throw manualDownloadError(
+					`The Camunda Modeler ${latestVersion} archive did not contain ${newReleaseName}/${LINUX_EXECUTABLE}`,
+				);
+			}
+			runAsRoot(
+				["chmod", "4755", join(newInstallDir, "chrome-sandbox")],
+				"Could not set up the Camunda Modeler sandbox",
+				ctx.quiet,
+			);
+			runAsRoot(
+				[
+					"ln",
+					"-sfn",
+					join(newReleaseName, LINUX_EXECUTABLE),
+					temporaryLauncher,
+				],
+				`Could not prepare ${LINUX_EXECUTABLE}`,
+				ctx.quiet,
+			);
+			runAsRoot(
+				["mv", "-f", temporaryLauncher, installation.launcher],
+				`Could not switch ${LINUX_EXECUTABLE} to the updated release`,
+				ctx.quiet,
+			);
+			launcherUpdated = true;
+		} catch (error) {
+			if (!launcherUpdated) {
+				try {
+					runAsRoot(
+						["rm", "-f", temporaryLauncher],
+						`Could not remove ${temporaryLauncher}`,
+						ctx.quiet,
+						false,
+					);
+				} catch (cleanupError) {
+					ctx.logger.warn(errorMessage(cleanupError));
+				}
+				if (existsSync(newInstallDir)) {
+					try {
+						runAsRoot(
+							["rm", "-rf", newInstallDir],
+							`Could not remove incomplete release ${newInstallDir}`,
+							ctx.quiet,
+							false,
+						);
+					} catch (cleanupError) {
+						ctx.logger.warn(errorMessage(cleanupError));
+					}
+				}
+			}
+			throw error;
+		}
+
+		unregisterWithDesktop({
+			installDir: installation.installDir,
+			logger: ctx.logger,
+			quiet: ctx.quiet,
+		});
+		registerWithDesktop({
+			installDir: newInstallDir,
+			logger: ctx.logger,
+			quiet: ctx.quiet,
+		});
+		try {
+			runAsRoot(
+				["rm", "-rf", installation.installDir],
+				`Could not remove previous Modeler release ${installation.installDir}`,
+				ctx.quiet,
+				false,
+			);
+		} catch (error) {
+			ctx.logger.warn(
+				`Updated Camunda Modeler, but could not remove the previous release at ${installation.installDir}: ${errorMessage(error)}`,
+			);
+		}
+		return {
+			kind: "success",
+			message: `Updated Camunda Modeler to ${latestVersion} in ${newInstallDir}.`,
+		};
+	} finally {
+		try {
+			rmSync(tempDir, { recursive: true, force: true });
+		} finally {
+			interruption.cleanup();
+		}
+	}
+}
+
+function removeLinuxModeler(ctx: ModelerInstallContext): ModelerInstallResult {
+	const installation = linuxModelerForAction("remove");
+	if (!installation) return noModelerInstalled();
+	if (ctx.isDryRun) {
+		return dryRunResult(
+			"modeler remove",
+			`Dry run: would remove Camunda Modeler ${installation.version} from ${installation.installDir} and unregister its file types.`,
+		);
+	}
+
+	if (process.getuid?.() !== 0) {
+		reportProgress(
+			ctx,
+			`Removing from ${LINUX_INSTALL_ROOT} needs root privileges; sudo may ask for your password.`,
+		);
+	}
+	runAsRoot(["true"], "Could not get root privileges", ctx.quiet, false);
+	unregisterWithDesktop({
+		installDir: installation.installDir,
+		logger: ctx.logger,
+		quiet: ctx.quiet,
+	});
+	runAsRoot(
+		["rm", "-f", installation.launcher],
+		`Could not remove ${installation.launcher}`,
+		ctx.quiet,
+		false,
+	);
+	runAsRoot(
+		["rm", "-rf", installation.installDir],
+		`Could not remove ${installation.installDir}`,
+		ctx.quiet,
+		false,
+	);
+	return {
+		kind: "success",
+		message: `Removed Camunda Modeler ${installation.version} from ${installation.installDir}.`,
+	};
+}
+
+async function removeMacModeler(
+	ctx: ModelerInstallContext,
+): Promise<ModelerInstallResult> {
+	if (hasPackageManager("brew", "Homebrew") && homebrewModelerInstalled()) {
+		if (ctx.isDryRun) {
+			return dryRunResult(
+				"modeler remove",
+				"Dry run: would remove Camunda Modeler with `brew uninstall --cask camunda-modeler`.",
+			);
+		}
+
+		let appPath: string | undefined;
+		try {
+			appPath = resolveHomebrewModelerPath();
+		} catch (error) {
+			ctx.logger.warn(
+				`Could not locate the Homebrew Modeler bundle before uninstalling it: ${errorMessage(error)}`,
+			);
+		}
+		reportProgress(ctx, "Removing Camunda Modeler with Homebrew...");
+		runCommand("brew", ["uninstall", "--cask", "camunda-modeler"], {
+			failureMessage: "Homebrew could not remove Camunda Modeler",
+			quiet: ctx.quiet,
+		});
+		if (appPath) unregisterWithLaunchServices(appPath, ctx.logger);
+		return {
+			kind: "success",
+			message: "Removed Camunda Modeler with Homebrew.",
+		};
+	}
+
+	const appPath = findInstalledModeler();
+	if (!appPath) return noModelerInstalled();
+	if (isHomebrewCaskPath(appPath)) {
+		throw new Error(
+			"Camunda Modeler appears to be Homebrew-managed, but its cask was not found; refusing to remove the app bundle directly.",
+		);
+	}
+	verifyMacModelerBundle(appPath, "remove", ctx.quiet);
+	if (ctx.isDryRun) {
+		return dryRunResult(
+			"modeler remove",
+			`Dry run: would remove the Camunda Modeler app bundle at ${appPath}.`,
+		);
+	}
+	reportProgress(ctx, `Removing Camunda Modeler from ${appPath}...`);
+	unregisterWithLaunchServices(appPath, ctx.logger);
+	rmSync(appPath, { recursive: true });
+	return {
+		kind: "success",
+		message: `Removed Camunda Modeler from ${appPath}.`,
+	};
+}
+
+export async function updateDesktopModeler(
+	ctx: ModelerInstallContext,
+): Promise<ModelerInstallResult> {
+	if (process.platform === "win32") return updateWindowsModeler(ctx);
+	if (process.platform === "linux") return updateLinuxModeler(ctx);
+	if (process.platform === "darwin") return updateMacModeler(ctx);
+	throw new Error(
+		`c8ctl modeler update currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
+	);
+}
+
+export async function removeDesktopModeler(
+	ctx: ModelerInstallContext,
+): Promise<ModelerInstallResult> {
+	if (process.platform === "win32") return removeWindowsModeler(ctx);
+	if (process.platform === "linux") return removeLinuxModeler(ctx);
+	if (process.platform === "darwin") return removeMacModeler(ctx);
+	throw new Error(
+		`c8ctl modeler remove currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
+	);
 }

@@ -1,4 +1,4 @@
-import { parse, rcompare } from "semver";
+import { gt, parse, rcompare } from "semver";
 
 export const MODELER_RELEASE_URL =
 	"https://downloads.camunda.cloud/release/camunda-modeler/";
@@ -22,6 +22,21 @@ export function latestStableModelerVersion(indexHtml: string): string {
 	}
 
 	return latest;
+}
+
+export function isNewerModelerVersion(
+	candidate: string,
+	current: string,
+): boolean {
+	const candidateVersion = parse(candidate);
+	const currentVersion = parse(current);
+	if (!candidateVersion || !currentVersion) {
+		throw new Error(
+			`Invalid Camunda Modeler version "${candidate}" or "${current}"`,
+		);
+	}
+
+	return gt(candidateVersion, currentVersion);
 }
 
 export function modelerMacArchiveName(

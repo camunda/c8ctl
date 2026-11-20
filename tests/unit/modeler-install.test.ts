@@ -19,6 +19,7 @@ import { basename, delimiter, dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
+	isNewerModelerVersion,
 	latestStableModelerVersion,
 	modelerMacArchiveName,
 	renderDownloadProgress,
@@ -72,10 +73,21 @@ const remap = (path) =>
 	String(path) === "/Applications" || String(path).startsWith("/Applications/")
 		? process.env.APPLICATIONS_ROOT + String(path).slice("/Applications".length)
 		: path;
-const { accessSync, existsSync, mkdtempSync, renameSync } = fs;
+const {
+	accessSync,
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+} = fs;
 fs.existsSync = (path) => existsSync(remap(path));
 fs.mkdtempSync = (prefix, options) => mkdtempSync(remap(prefix), options);
+fs.readFileSync = (path, ...args) => readFileSync(remap(path), ...args);
+fs.realpathSync = (path, ...args) => realpathSync(remap(path), ...args);
 fs.renameSync = (from, to) => renameSync(remap(from), remap(to));
+fs.rmSync = (path, options) => rmSync(remap(path), options);
 fs.accessSync = (path, mode) => {
 	if (process.env.APPLICATIONS_READONLY === "1" && String(path) === "/Applications") {
 		throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
@@ -96,13 +108,14 @@ Object.defineProperty(process.stderr, "isTTY", { value: true });
 Object.defineProperty(process.stderr, "columns", { value: ${PROGRESS_COLUMNS} });
 const releaseUrl = "https://downloads.camunda.cloud/release/camunda-modeler/";
 const { fetch } = globalThis;
+const releaseVersion = process.env.MODELER_RELEASE_VERSION || "5.52.0";
 globalThis.fetch = async (input, init) => {
 	const url = String(input);
 	if (url === releaseUrl) {
 ${STALLED_RELEASE_INDEX}
-		return new Response('<a href="5.52.0/">5.52.0/</a><a href="nightly/">nightly/</a>');
+		return new Response('<a href="' + releaseVersion + '/">' + releaseVersion + '/</a><a href="nightly/">nightly/</a>');
 	}
-	if (url.startsWith(releaseUrl + "5.52.0/")) {
+	if (url.startsWith(releaseUrl + releaseVersion + "/")) {
 		if (process.env.STALL_DOWNLOAD === "1") {
 			fs.writeFileSync(process.env.DOWNLOAD_PID_FILE, String(process.pid));
 			return new Response(new ReadableStream({
@@ -140,7 +153,27 @@ childProcess.spawnSync = (command, args, options) => {
 		return { error: Object.assign(new Error("spawnSync winget ENOENT"), { code: "ENOENT" }) };
 	}
 	if (command === "winget" && args[0] === "list") {
+		if (args.includes("--upgrade-available")) {
+			const upgradeAvailable =
+				winget === "installed" && process.env.WINGET_UPGRADE === "available";
+			return {
+				status: upgradeAvailable || winget === "installed" ? 0 : 0x8a150014,
+				stdout: upgradeAvailable
+					? "Camunda Modeler Camunda.Modeler 5.51.0 5.52.0\\n"
+					: "",
+			};
+		}
 		return { status: winget === "installed" ? 0 : 0x8a150014 };
+	}
+	if (command === "winget" && args[0] === "upgrade") {
+		return { status: 0 };
+	}
+	if (command === "winget" && args[0] === "uninstall") {
+		fs.rmSync(
+			join(process.env.LOCALAPPDATA, "Programs", "Camunda Modeler"),
+			{ recursive: true, force: true },
+		);
+		return { status: 0 };
 	}
 	if (command === "winget" && args[0] === "install") {
 		const chatter = process.env.TOOL_CHATTER === "1";
@@ -155,10 +188,16 @@ childProcess.spawnSync = (command, args, options) => {
 		return { status: 0, stdout, stderr };
 	}
 	if (command === "powershell") {
-		fs.writeFileSync(options.env.C8CTL_SHORTCUT, options.env.C8CTL_TARGET);
+		const script = String(args[args.length - 1] ?? "");
+		if (script.includes("Remove-Item")) {
+			fs.rmSync(options.env.C8CTL_SHORTCUT, { force: true });
+		} else if (script.includes("CreateShortcut")) {
+			fs.writeFileSync(options.env.C8CTL_SHORTCUT, options.env.C8CTL_TARGET);
+		}
 	}
 	return { status: 0 };
 };
+Object.defineProperty(process, "platform", { value: "win32" });
 syncBuiltinESMExports();
 `;
 
@@ -181,16 +220,18 @@ const remapFilesystemPath = (path) =>
 	String(path) === "/bin" || String(path).startsWith("/bin/")
 		? process.env.BIN_ROOT + String(path).slice("/bin".length)
 		: remapUsrBin(path);
-const { accessSync, existsSync, statSync } = fs;
+const { accessSync, existsSync, readlinkSync, statSync } = fs;
 fs.accessSync = (path, mode) => accessSync(remapFilesystemPath(path), mode);
 fs.existsSync = (path) => existsSync(remapFilesystemPath(path));
+fs.readlinkSync = (path, ...args) =>
+	readlinkSync(remapFilesystemPath(path), ...args);
 fs.statSync = (path, options) => statSync(remapFilesystemPath(path), options);
 const { spawnSync } = childProcess;
 childProcess.spawnSync = (command, args, options) => {
 	const desktopRegistration =
 		command === "/bin/bash" && String(args[0]).startsWith("/usr/bin/");
 	if (
-		!["sudo", "true", "rm", "tar", "chmod", "ln"].includes(command) &&
+		!["sudo", "true", "rm", "tar", "chmod", "ln", "mv"].includes(command) &&
 		!command.startsWith("/usr/bin/") &&
 		!desktopRegistration
 	) {
@@ -212,13 +253,14 @@ process.getuid = () => Number(process.env.FAKE_UID);
 Object.defineProperty(process, "arch", { value: process.env.FAKE_ARCH });
 if (process.env.UNSET_PATH === "1") delete process.env.PATH;
 const releaseUrl = "https://downloads.camunda.cloud/release/camunda-modeler/";
+const releaseVersion = process.env.MODELER_RELEASE_VERSION || "5.52.0";
 globalThis.fetch = async (input, init) => {
 	const url = String(input);
 	if (url === releaseUrl) {
 ${STALLED_RELEASE_INDEX}
-		return new Response('<a href="5.52.0/">5.52.0/</a>');
+		return new Response('<a href="' + releaseVersion + '/">' + releaseVersion + '/</a>');
 	}
-	return url === releaseUrl + "5.52.0/camunda-modeler-5.52.0-linux-x64.tar.gz"
+	return url === releaseUrl + releaseVersion + "/camunda-modeler-" + releaseVersion + "-linux-x64.tar.gz"
 		? new Response(fs.readFileSync(process.env.ARCHIVE))
 		: new Response("not found", { status: 404 });
 };
@@ -241,6 +283,29 @@ function createSandbox() {
 	// PATH below hides Homebrew, but the CLI subprocess still needs node.
 	symlinkSync(process.execPath, join(binDir, "node"));
 	writeFileSync(preload, PRELOAD);
+
+	const runModeler = (
+		action: string,
+		env: Record<string, string> = {},
+		...args: string[]
+	) =>
+		c8WithOptions(
+			{
+				nodeArgs: ["--import", preload],
+				env: {
+					PATH: [binDir, "/usr/bin", "/bin"].join(delimiter),
+					HOME: home,
+					APPLICATIONS_ROOT: applicationsRoot,
+					TOOL_LOG: toolLog,
+					C8CTL_DATA_DIR: join(home, "data"),
+					C8CTL_OUTPUT_MODE: "text",
+					...env,
+				},
+			},
+			"modeler",
+			action,
+			...args,
+		);
 
 	return {
 		home,
@@ -267,25 +332,12 @@ ${body}
 		resetToolCalls(): void {
 			rmSync(toolLog, { force: true });
 		},
-		install(env: Record<string, string> = {}, ...args: string[]) {
-			return c8WithOptions(
-				{
-					nodeArgs: ["--import", preload],
-					env: {
-						PATH: [binDir, "/usr/bin", "/bin"].join(delimiter),
-						HOME: home,
-						APPLICATIONS_ROOT: applicationsRoot,
-						TOOL_LOG: toolLog,
-						C8CTL_DATA_DIR: join(home, "data"),
-						C8CTL_OUTPUT_MODE: "text",
-						...env,
-					},
-				},
-				"modeler",
-				"install",
-				...args,
-			);
-		},
+		install: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler("install", env, ...args),
+		update: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler("update", env, ...args),
+		remove: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler("remove", env, ...args),
 		cleanup(): void {
 			rmSync(home, { recursive: true, force: true });
 		},
@@ -300,10 +352,18 @@ function fakeReleaseTools(sandbox: ReturnType<typeof createSandbox>): void {
 			'app="$4/Camunda Modeler.app"',
 			'/bin/mkdir -p "$app/Contents"',
 			'if [ "$FAIL_AT" = extract ]; then exit 1; fi',
-			`printf 'CFBundleDocumentTypes bpmn' > "$app/Contents/Info.plist"`,
+			`printf 'CFBundleDocumentTypes bpmn\\n<plist><dict><key>CFBundleShortVersionString</key><string>%s</string></dict></plist>' "\${MODEL_VERSION:-5.52.0}" > "$app/Contents/Info.plist"`,
 		].join("\n"),
 	);
 	sandbox.fakeTool("codesign", 'if [ "$FAIL_AT" = verify ]; then exit 3; fi');
+}
+
+function writeMacApp(appPath: string, version: string): void {
+	mkdirSync(join(appPath, "Contents"), { recursive: true });
+	writeFileSync(
+		join(appPath, "Contents", "Info.plist"),
+		`<plist><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>`,
+	);
 }
 
 /** Points %LOCALAPPDATA% and %APPDATA% into a temp dir with faked Windows tools. */
@@ -317,28 +377,39 @@ function createWindowsSandbox() {
 	mkdirSync(join(startMenu, "Programs"), { recursive: true });
 	writeFileSync(preload, WINDOWS_PRELOAD);
 
+	const runModeler = (
+		action: string,
+		env: Record<string, string> = {},
+		...args: string[]
+	) =>
+		c8WithOptions(
+			{
+				nodeArgs: ["--import", pathToFileURL(preload).href],
+				env: {
+					LOCALAPPDATA: localAppData,
+					APPDATA: appData,
+					TOOL_LOG: toolLog,
+					C8CTL_DATA_DIR: join(home, "data"),
+					C8CTL_OUTPUT_MODE: "text",
+					...env,
+				},
+			},
+			"modeler",
+			action,
+			...args,
+		);
+
 	return {
 		installDir: join(localAppData, "Programs", "Camunda Modeler"),
 		shortcut: join(startMenu, "Programs", "Camunda Modeler.lnk"),
 		toolCalls: (): string[] => readToolLog(toolLog),
 		resetToolCalls: (): void => rmSync(toolLog, { force: true }),
 		install: (env: Record<string, string> = {}, ...args: string[]) =>
-			c8WithOptions(
-				{
-					nodeArgs: ["--import", pathToFileURL(preload).href],
-					env: {
-						LOCALAPPDATA: localAppData,
-						APPDATA: appData,
-						TOOL_LOG: toolLog,
-						C8CTL_DATA_DIR: join(home, "data"),
-						C8CTL_OUTPUT_MODE: "text",
-						...env,
-					},
-				},
-				"modeler",
-				"install",
-				...args,
-			),
+			runModeler("install", env, ...args),
+		update: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler("update", env, ...args),
+		remove: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler("remove", env, ...args),
 		cleanup: (): void => rmSync(home, { recursive: true, force: true }),
 	};
 }
@@ -358,13 +429,14 @@ function createLinuxSandbox() {
 	mkdirSync(usrBin);
 	mkdirSync(join(release, "support"), { recursive: true });
 	symlinkSync(process.execPath, join(binDir, "node"));
-	for (const command of ["chmod", "ln", "rm"]) {
+	for (const command of ["chmod", "ln", "mv", "rm"]) {
 		symlinkSync(`/bin/${command}`, join(binDir, command));
 	}
 	for (const file of [
 		"camunda-modeler",
 		"chrome-sandbox",
 		"support/xdg_register.sh",
+		"support/xdg_unregister.sh",
 	]) {
 		const script =
 			file === "support/xdg_register.sh"
@@ -376,7 +448,12 @@ fi
 if [ "$FAIL_AT" = "register" ]; then exit 1; fi
 exit 0
 `
-				: "#!/bin/sh\n";
+				: file === "support/xdg_unregister.sh"
+					? `#!/bin/bash
+if [ "$FAIL_AT" = "unregister" ]; then exit 1; fi
+exit 0
+`
+					: "#!/bin/sh\n";
 		writeFileSync(join(release, file), script, { mode: 0o755 });
 	}
 	execFileSync("tar", [
@@ -388,13 +465,15 @@ exit 0
 	]);
 	writeFileSync(preload, LINUX_PRELOAD);
 
-	const runInstall = ({
+	const runModeler = ({
 		cwd,
 		env = {},
+		action,
 		args,
 	}: {
 		cwd?: string;
 		env?: Record<string, string | undefined>;
+		action: string;
 		args: string[];
 	}) =>
 		c8WithOptions(
@@ -415,7 +494,7 @@ exit 0
 				...(cwd === undefined ? {} : { cwd }),
 			},
 			"modeler",
-			"install",
+			action,
 			...args,
 		);
 
@@ -429,14 +508,38 @@ exit 0
 		toolCalls: (): string[] => readToolLog(toolLog),
 		resetToolCalls: (): void => rmSync(toolLog, { force: true }),
 		install: (env: Record<string, string> = {}, ...args: string[]) =>
-			runInstall({ env, args }),
+			runModeler({ action: "install", env, args }),
+		update: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler({ action: "update", env, args }),
+		remove: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler({ action: "remove", env, args }),
 		installFrom: (
 			cwd: string,
 			env: Record<string, string | undefined> = {},
 			...args: string[]
-		) => runInstall({ cwd, env, args }),
+		) => runModeler({ action: "install", cwd, env, args }),
 		cleanup: (): void => rmSync(home, { recursive: true, force: true }),
 	};
+}
+
+function addLinuxInstall(
+	sandbox: ReturnType<typeof createLinuxSandbox>,
+	version: string,
+): { installDir: string; launcher: string } {
+	const releaseName = `camunda-modeler-${version}-linux-x64`;
+	const installDir = join(sandbox.usrBin, releaseName);
+	const launcher = join(sandbox.usrBin, "camunda-modeler");
+	mkdirSync(join(installDir, "support"), { recursive: true });
+	for (const file of [
+		"camunda-modeler",
+		"chrome-sandbox",
+		"support/xdg_register.sh",
+		"support/xdg_unregister.sh",
+	]) {
+		writeFileSync(join(installDir, file), "#!/bin/sh\n", { mode: 0o755 });
+	}
+	symlinkSync(join(releaseName, "camunda-modeler"), launcher);
+	return { installDir, launcher };
 }
 
 describe("Modeler installer helpers", () => {
@@ -460,6 +563,16 @@ describe("Modeler installer helpers", () => {
 		assert.throws(
 			() => modelerMacArchiveName("5.52.0", "ia32"),
 			/Unsupported macOS architecture/,
+		);
+	});
+
+	test("compares stable Modeler versions without proposing a downgrade", () => {
+		assert.ok(isNewerModelerVersion("5.53.0", "5.52.0"));
+		assert.ok(!isNewerModelerVersion("5.52.0", "5.52.0"));
+		assert.ok(!isNewerModelerVersion("5.51.0", "5.52.0"));
+		assert.throws(
+			() => isNewerModelerVersion("nightly", "5.52.0"),
+			/Invalid Camunda Modeler version/,
 		);
 	});
 
@@ -529,6 +642,20 @@ describe("CLI behavioural: modeler install", () => {
 		assert.ok(!result.stdout.includes("--force"));
 	});
 
+	test("shows help for the update and remove lifecycle commands", async () => {
+		for (const action of ["update", "remove"]) {
+			const result = await c8WithOptions(
+				{ env: { C8CTL_OUTPUT_MODE: "text" } },
+				"modeler",
+				action,
+				"--help",
+			);
+
+			assert.strictEqual(result.status, 0, `${action}: ${result.stderr}`);
+			assert.ok(result.stdout.includes(`c8ctl modeler ${action}`));
+		}
+	});
+
 	test("prints manual download instructions on unsupported platforms", async () => {
 		const result = await c8WithOptions(
 			{
@@ -552,6 +679,211 @@ describe("CLI behavioural: modeler install", () => {
 				"Download Modeler manually from",
 			),
 		);
+	});
+
+	test("updates Homebrew installations only when an upgrade is available", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		sandbox.fakeTool(
+			"brew",
+			[
+				'case "$*" in',
+				'  "--version") exit 0 ;;',
+				'  "list --cask --versions camunda-modeler") exit 0 ;;',
+				'  "outdated --cask --quiet camunda-modeler")',
+				'    if [ "$BREW_OUTDATED" = "1" ]; then printf "camunda-modeler\\n"; fi ;;',
+				'  "upgrade --cask camunda-modeler") exit 0 ;;',
+				"  *) exit 1 ;;",
+				"esac",
+			].join("\n"),
+		);
+		const checks = [
+			"brew --version",
+			"brew list --cask --versions camunda-modeler",
+			"brew outdated --cask --quiet camunda-modeler",
+		];
+
+		try {
+			const dryRun = await sandbox.update(
+				{ BREW_OUTDATED: "1" },
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			const preview = parseJson(dryRun);
+			assert.strictEqual(preview.command, "modeler update");
+			assert.match(String(preview.message), /brew upgrade --cask/);
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+
+			sandbox.resetToolCalls();
+			const current = await sandbox.update({ BREW_OUTDATED: "0" });
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.match(current.stdout, /already up to date/);
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+
+			sandbox.resetToolCalls();
+			const updated = await sandbox.update({ BREW_OUTDATED: "1" });
+			assert.strictEqual(updated.status, 0, updated.stderr);
+			assert.match(updated.stdout, /Updated Camunda Modeler with Homebrew/);
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				...checks,
+				"brew upgrade --cask camunda-modeler",
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("updates a signed direct macOS installation and leaves newer releases untouched", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+		writeMacApp(appPath, "5.51.0");
+		const release = {
+			MODELER_RELEASE_VERSION: "5.52.0",
+			MODEL_VERSION: "5.52.0",
+		};
+
+		try {
+			const dryRun = await sandbox.update(release, "--dry-run", "--json");
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			const preview = parseJson(dryRun);
+			assert.strictEqual(preview.dryRun, true);
+			assert.strictEqual(preview.command, "modeler update");
+			assert.match(String(preview.message), /5\.51\.0.*5\.52\.0/);
+			assert.ok(!sandbox.toolCalls().some((call) => call.startsWith("ditto ")));
+
+			sandbox.resetToolCalls();
+			const updated = await sandbox.update(release);
+			assert.strictEqual(updated.status, 0, updated.stderr);
+			assert.match(updated.stdout, /Updated Camunda Modeler to 5\.52\.0/);
+			assert.match(
+				readFileSync(join(appPath, "Contents", "Info.plist"), "utf8"),
+				/<string>5\.52\.0<\/string>/,
+			);
+			assert.ok(sandbox.toolCalls().some((call) => call.startsWith("ditto ")));
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.some(
+						(call) =>
+							call === "lsregister -f /Applications/Camunda Modeler.app",
+					),
+			);
+
+			sandbox.resetToolCalls();
+			const current = await sandbox.update({
+				MODELER_RELEASE_VERSION: "5.51.0",
+			});
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.match(current.stdout, /already up to date/);
+			assert.ok(!sandbox.toolCalls().some((call) => call.startsWith("ditto ")));
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("dry-runs and removes a signed direct macOS installation", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+		writeMacApp(appPath, "5.52.0");
+
+		try {
+			const dryRun = await sandbox.remove({}, "--dry-run", "--json");
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			assert.strictEqual(parseJson(dryRun).command, "modeler remove");
+			assert.match(String(parseJson(dryRun).message), /would remove/);
+			assert.ok(existsSync(appPath));
+
+			sandbox.resetToolCalls();
+			const removed = await sandbox.remove();
+			assert.strictEqual(removed.status, 0, removed.stderr);
+			assert.match(removed.stdout, /Removed Camunda Modeler/);
+			assert.ok(!existsSync(appPath));
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.some(
+						(call) =>
+							call === "lsregister -u -f /Applications/Camunda Modeler.app",
+					),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("refuses to update or remove a direct macOS app not signed by Camunda", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+		writeMacApp(appPath, "5.52.0");
+
+		try {
+			for (const result of [
+				await sandbox.update({ FAIL_AT: "verify" }),
+				await sandbox.remove({ FAIL_AT: "verify" }),
+			]) {
+				assert.strictEqual(result.status, 1);
+				assert.match(result.stdout + result.stderr, /not signed by Camunda/);
+				assert.ok(existsSync(appPath));
+			}
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("removes Homebrew installations with brew uninstall", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+		mkdirSync(appPath);
+		sandbox.fakeTool(
+			"brew",
+			[
+				'case "$*" in',
+				'  "--version") exit 0 ;;',
+				'  "list --cask --versions camunda-modeler") exit 0 ;;',
+				'  "list --cask camunda-modeler") printf "%s\\n" "$BREW_APP_PATH"; exit 0 ;;',
+				'  "uninstall --cask camunda-modeler") exit 0 ;;',
+				"  *) exit 1 ;;",
+				"esac",
+			].join("\n"),
+		);
+
+		try {
+			const dryRun = await sandbox.remove({}, "--dry-run", "--json");
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			assert.match(String(parseJson(dryRun).message), /brew uninstall --cask/);
+			assert.ok(
+				!sandbox
+					.toolCalls()
+					.some((call) => call === "brew uninstall --cask camunda-modeler"),
+			);
+
+			sandbox.resetToolCalls();
+			const removed = await sandbox.remove({ BREW_APP_PATH: appPath });
+			assert.strictEqual(removed.status, 0, removed.stderr);
+			assert.match(removed.stdout, /Removed Camunda Modeler with Homebrew/);
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				"brew --version",
+				"brew list --cask --versions camunda-modeler",
+				"brew list --cask camunda-modeler",
+				"brew uninstall --cask camunda-modeler",
+				`lsregister -u -f ${realpathSync(appPath)}`,
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
 	});
 
 	test("skips an existing installation", { skip: !isMac }, async () => {
@@ -990,6 +1322,128 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("updates winget installations only when an upgrade is available", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		const checks = [
+			"winget --version",
+			"winget list --id Camunda.Modeler --exact --source winget",
+			"winget list --upgrade-available --id Camunda.Modeler --exact --source winget",
+		];
+
+		try {
+			const dryRun = await sandbox.update(
+				{ WINGET: "installed", WINGET_UPGRADE: "available" },
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			const preview = parseJson(dryRun);
+			assert.strictEqual(preview.command, "modeler update");
+			assert.match(String(preview.message), /winget upgrade/);
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+
+			sandbox.resetToolCalls();
+			const current = await sandbox.update({ WINGET: "installed" });
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.match(current.stdout, /already up to date/);
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+
+			sandbox.resetToolCalls();
+			const updated = await sandbox.update({
+				WINGET: "installed",
+				WINGET_UPGRADE: "available",
+			});
+			assert.strictEqual(updated.status, 0, updated.stderr);
+			assert.match(updated.stdout, /Updated Camunda Modeler with winget/);
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				...checks,
+				"winget upgrade --id Camunda.Modeler --exact --source winget",
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("dry-runs and removes a winget installation and its registrations", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		const executable = join(sandbox.installDir, MODELER_EXECUTABLE);
+
+		try {
+			const installed = await sandbox.install();
+			assert.strictEqual(installed.status, 0, installed.stderr);
+			assert.ok(existsSync(executable));
+			assert.ok(existsSync(sandbox.shortcut));
+
+			sandbox.resetToolCalls();
+			const dryRun = await sandbox.remove(
+				{ WINGET: "installed" },
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			assert.strictEqual(parseJson(dryRun).command, "modeler remove");
+			assert.match(String(parseJson(dryRun).message), /winget uninstall/);
+			assert.ok(existsSync(executable));
+			assert.ok(existsSync(sandbox.shortcut));
+
+			sandbox.resetToolCalls();
+			const removed = await sandbox.remove({ WINGET: "installed" });
+			assert.strictEqual(removed.status, 0, removed.stderr);
+			assert.match(removed.stdout, /Removed Camunda Modeler with winget/);
+			assert.ok(!existsSync(executable));
+			assert.ok(!existsSync(sandbox.shortcut));
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.some((call) => call.startsWith("winget uninstall ")),
+			);
+			assert.ok(
+				sandbox.toolCalls().some((call) => call.startsWith("powershell ")),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("refuses to manage an unregistered Windows installation", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		try {
+			mkdirSync(sandbox.installDir, { recursive: true });
+			writeFileSync(join(sandbox.installDir, MODELER_EXECUTABLE), "");
+
+			const results = [
+				await sandbox.update({ WINGET: "unregistered" }),
+				await sandbox.remove({ WINGET: "unregistered" }),
+			];
+
+			for (const result of results) {
+				assert.strictEqual(result.status, 1);
+				assert.match(
+					result.stdout + result.stderr,
+					/not installed with winget/,
+				);
+			}
+			assert.ok(existsSync(join(sandbox.installDir, MODELER_EXECUTABLE)));
+			assert.ok(
+				!sandbox
+					.toolCalls()
+					.some(
+						(call) =>
+							call.startsWith("winget upgrade ") ||
+							call.startsWith("winget uninstall "),
+					),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	test("quiet TTY downloads hide progress and tool chatter but keep failure details", {
 		skip: !isMac,
 	}, async () => {
@@ -1375,6 +1829,149 @@ describe("CLI behavioural: modeler install", () => {
 			assert.ok(!readdirSync(sandbox.usrBin).includes("camunda-modeler"));
 			const retry = await sandbox.install({}, "--dry-run");
 			assert.match(retry.stdout, /Dry run: would download/, retry.stderr);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("updates a managed Linux release and refreshes its desktop registrations", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const installed = addLinuxInstall(sandbox, "5.51.0");
+		for (const tool of ["xdg-mime", "xdg-desktop-menu", "xdg-icon-resource"]) {
+			sandbox.fakeTool(tool);
+		}
+
+		try {
+			const dryRun = await sandbox.update(
+				{ FAKE_UID: "0" },
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			const preview = parseJson(dryRun);
+			assert.strictEqual(preview.command, "modeler update");
+			assert.match(String(preview.message), /5\.51\.0.*5\.52\.0/);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+
+			const updated = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(updated.status, 0, updated.stderr);
+			assert.match(updated.stdout, /Updated Camunda Modeler to 5\.52\.0/);
+			assert.strictEqual(
+				readlinkSync(installed.launcher),
+				"camunda-modeler-5.52.0-linux-x64/camunda-modeler",
+			);
+			assert.ok(!existsSync(installed.installDir));
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.includes(
+						"/bin/bash /usr/bin/camunda-modeler-5.51.0-linux-x64/support/xdg_unregister.sh",
+					),
+			);
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.includes(
+						"/bin/bash /usr/bin/camunda-modeler-5.52.0-linux-x64/support/xdg_register.sh",
+					),
+			);
+
+			sandbox.resetToolCalls();
+			const current = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.match(current.stdout, /already up to date/);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("preserves the previous Linux release when switching the launcher fails", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const installed = addLinuxInstall(sandbox, "5.51.0");
+
+		try {
+			const failed = await sandbox.update({
+				FAKE_UID: "0",
+				FAIL_AT: "mv",
+			});
+			assert.strictEqual(failed.status, 1);
+			assert.match(
+				failed.stdout + failed.stderr,
+				/Could not switch camunda-modeler to the updated release/,
+			);
+			assert.strictEqual(
+				readlinkSync(installed.launcher),
+				"camunda-modeler-5.51.0-linux-x64/camunda-modeler",
+			);
+			assert.ok(existsSync(installed.installDir));
+			assert.ok(
+				!existsSync(join(sandbox.usrBin, "camunda-modeler-5.52.0-linux-x64")),
+			);
+			assert.ok(
+				!existsSync(join(sandbox.usrBin, ".c8ctl-camunda-modeler-update")),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("dry-runs and removes a managed Linux release and its file registrations", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const installed = addLinuxInstall(sandbox, "5.52.0");
+		for (const tool of ["xdg-mime", "xdg-desktop-menu", "xdg-icon-resource"]) {
+			sandbox.fakeTool(tool);
+		}
+
+		try {
+			const dryRun = await sandbox.remove(
+				{ FAKE_UID: "0" },
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			assert.strictEqual(parseJson(dryRun).command, "modeler remove");
+			assert.match(String(parseJson(dryRun).message), /would remove/);
+			assert.ok(existsSync(installed.installDir));
+			assert.ok(existsSync(installed.launcher));
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+
+			const removed = await sandbox.remove({ FAKE_UID: "0" });
+			assert.strictEqual(removed.status, 0, removed.stderr);
+			assert.match(removed.stdout, /Removed Camunda Modeler/);
+			assert.ok(!existsSync(installed.installDir));
+			assert.ok(!existsSync(installed.launcher));
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.includes(
+						"/bin/bash /usr/bin/camunda-modeler-5.52.0-linux-x64/support/xdg_unregister.sh",
+					),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("refuses to manage an unmanaged Linux executable", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		sandbox.fakeTool("camunda-modeler");
+		try {
+			const results = [await sandbox.update(), await sandbox.remove()];
+
+			for (const result of results) {
+				assert.strictEqual(result.status, 1);
+				assert.match(result.stdout + result.stderr, /not installed by c8ctl/);
+			}
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
 		} finally {
 			sandbox.cleanup();
 		}
