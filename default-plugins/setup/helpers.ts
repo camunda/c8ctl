@@ -79,21 +79,21 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 	{
 		id: "cluster",
 		label: "Local cluster",
-		why: "Run Camunda 8 on this machine — no Docker, no cloud account",
+		why: "Download and run Camunda 8 Run on this machine",
 		group: "Essentials",
 		defaultSelected: true,
 	},
 	{
 		id: "modeler",
 		label: "Desktop Modeler",
-		why: "Draw BPMN diagrams and forms visually, deploy from the canvas",
+		why: "Install the desktop app to edit BPMN, DMN, and forms visually",
 		group: "Essentials",
 		defaultSelected: true,
 	},
 	{
 		id: "blueprint",
-		label: "Starter blueprint",
-		why: "A working example project, deployed and started for you",
+		label: "Example project",
+		why: "Create an example project, then deploy and start it on your local cluster",
 		group: "Essentials",
 		defaultSelected: true,
 		requires: [{ id: "cluster", reason: "requires the local cluster" }],
@@ -101,24 +101,24 @@ export const SETUP_COMPONENTS: readonly SetupComponent[] = [
 	{
 		id: "skills",
 		label: "AI assistant skills",
-		why: "Teach Claude Code / Copilot / Cursor how to build on Camunda 8",
+		why: "Teach Claude Code, GitHub Copilot CLI, or Cursor to build on Camunda 8",
 		group: "AI-assisted development",
 		defaultSelected: true,
-	},
-	{
-		id: "docs-mcp",
-		label: "Docs MCP server",
-		why: "Always-current Camunda 8 docs in your AI assistant (browser sign-in on first use)",
-		group: "AI-assisted development",
-		defaultSelected: false,
 	},
 	{
 		id: "cluster-mcp",
 		label: "Cluster MCP server",
-		why: "Let your AI assistant inspect and operate your cluster",
+		why: "Connect your AI assistant to your local cluster",
 		group: "AI-assisted development",
 		defaultSelected: true,
 		requires: [{ id: "cluster", reason: "requires the local cluster" }],
+	},
+	{
+		id: "docs-mcp",
+		label: "Docs MCP server",
+		why: "Search current Camunda 8 docs from your AI assistant (browser sign-in on first use)",
+		group: "AI-assisted development",
+		defaultSelected: false,
 	},
 ];
 
@@ -371,6 +371,13 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 
 	const logoPad = "      ";
 	const textPad = "        ";
+	// Width is measured on the same string that is printed, so copy
+	// edits cannot misalign the right border.
+	const textRow = (text: string, style = "") =>
+		pad(
+			`${textPad}${style}${text}${style ? s.reset : ""}`,
+			textPad.length + text.length,
+		);
 	return [
 		top,
 		empty,
@@ -381,21 +388,10 @@ export function renderWelcomeBanner({ color }: { color: boolean }): string {
 			),
 		),
 		empty,
-		pad(
-			`${textPad}${s.bold}Welcome to Camunda 8!${s.reset} Let's get you from zero to a`,
-			textPad.length +
-				"Welcome to Camunda 8! Let's get you from zero to a".length,
-		),
-		pad(
-			`${textPad}running local process — in a couple of minutes.`,
-			textPad.length + "running local process — in a couple of minutes.".length,
-		),
+		textRow("Welcome to Camunda 8", s.bold),
+		textRow("Get a local cluster running with your first process."),
 		empty,
-		pad(
-			`${textPad}${s.dim}Pick what to set up. Nothing runs without your say.${s.reset}`,
-			textPad.length +
-				"Pick what to set up. Nothing runs without your say.".length,
-		),
+		textRow("Choose what to set up. Nothing runs until you confirm.", s.dim),
 		empty,
 		bottom,
 	].join("\n");

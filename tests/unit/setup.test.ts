@@ -378,7 +378,7 @@ describe("c8ctl setup", () => {
 			"setup",
 		);
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
-		assert.match(result.stdout, /Welcome to Camunda 8!/);
+		assert.match(result.stdout, /Welcome to Camunda 8/);
 		// No plan preview: the step report is the only step listing.
 		assert.doesNotMatch(result.stdout, /Here's what c8ctl setup will do/);
 		// Without --yes or an interactive selection nothing is executed.
@@ -1900,7 +1900,7 @@ describe("c8ctl setup", () => {
 			);
 			assert.match(
 				stripVTControlCharacters(result.stderr),
-				/Starter blueprint.*⚠ requires the local cluster/,
+				/Example project.*⚠ requires the local cluster/,
 			);
 			// The cluster MCP server depends on the cluster the same way.
 			assert.match(

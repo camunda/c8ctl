@@ -119,8 +119,8 @@ describe("renderWelcomeBanner()", () => {
 			[lines[0].length],
 			`box rows differ in width: ${[...widths].join(", ")}`,
 		);
-		assert.match(banner, /Welcome to Camunda 8!/);
-		assert.match(banner, /Nothing runs without your say\./);
+		assert.match(banner, /Welcome to Camunda 8/);
+		assert.match(banner, /Nothing runs until you confirm\./);
 	});
 
 	test("colored output styles the logo in Camunda Royal Blue", () => {
