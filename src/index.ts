@@ -527,8 +527,10 @@ async function main() {
 			// A mistyped flag can hide as the value of a string global
 			// (`--fields --harnes=cursor`); repeated or pre-verb occurrences
 			// overwrite each other in the parsed values, so detect them from
-			// the raw tokens instead. Surface them like undeclared flags so a
-			// destructive plugin command can reject rather than widen scope.
+			// the raw tokens instead. The global-options scan must stop at the
+			// verb — post-verb tokens belong to the plugin-aware parse, which
+			// knows the plugin's own flags.
+			const preVerbArgv = argv.slice(0, argv.length - stage1.rest.length - 1);
 			const unrecognizedPluginFlags = [
 				...new Set([
 					...undeclaredFlags({
@@ -541,9 +543,10 @@ async function main() {
 						tokens: pluginParsed.tokens,
 					}),
 					...swallowedOptionLikeValues({
-						args: argv,
+						args: preVerbArgv,
 						options: builtinOptions,
-						tokens: parseFlags({ args: argv, options: builtinOptions }).tokens,
+						tokens: parseFlags({ args: preVerbArgv, options: builtinOptions })
+							.tokens,
 					}),
 				]),
 			];
@@ -591,6 +594,7 @@ async function main() {
 			);
 		} else {
 			const bareGlobalOptions = globalOptions();
+			const preVerbArgv = argv.slice(0, argv.length - stage1.rest.length - 1);
 			const unrecognizedPluginFlags = [
 				...new Set([
 					...undeclaredFlags({
@@ -603,10 +607,12 @@ async function main() {
 						tokens: parsed.tokens,
 					}),
 					...swallowedOptionLikeValues({
-						args: argv,
+						args: preVerbArgv,
 						options: bareGlobalOptions,
-						tokens: parseFlags({ args: argv, options: bareGlobalOptions })
-							.tokens,
+						tokens: parseFlags({
+							args: preVerbArgv,
+							options: bareGlobalOptions,
+						}).tokens,
 					}),
 				]),
 			];

@@ -531,6 +531,43 @@ test("skills remove rejects selectors hidden by repeated or pre-verb string flag
 	}
 });
 
+test("skills remove accepts a declared harness after a valueless global flag", async () => {
+	const fixture = createSkillFixture();
+	const cursorSkillDirectory = join(
+		fixture.home,
+		".cursor",
+		"skills",
+		"camunda-c8ctl",
+	);
+	mkdirSync(cursorSkillDirectory, { recursive: true });
+	writeFileSync(join(cursorSkillDirectory, "SKILL.md"), "# Camunda c8ctl\n");
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_SKILL_PATH: cursorSkillDirectory,
+				},
+			},
+			"skills",
+			"remove",
+			"--fields",
+			"--harness",
+			"cursor",
+			"--fields",
+			"name",
+			"--yes",
+		);
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.ok(!existsSync(cursorSkillDirectory));
+		assert.ok(existsSync(fixture.skillDirectory));
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("skills remove applies --fields to preview and result rows in JSON mode", async () => {
 	const fixture = createSkillFixture();
 	try {
