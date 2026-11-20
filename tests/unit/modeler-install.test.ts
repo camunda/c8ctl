@@ -86,7 +86,15 @@ fs.existsSync = (path) => existsSync(remap(path));
 fs.mkdtempSync = (prefix, options) => mkdtempSync(remap(prefix), options);
 fs.readFileSync = (path, ...args) => readFileSync(remap(path), ...args);
 fs.realpathSync = (path, ...args) => realpathSync(remap(path), ...args);
-fs.renameSync = (from, to) => renameSync(remap(from), remap(to));
+fs.renameSync = (from, to) => {
+	if (
+		process.env.FAIL_APP_RENAME === "1" &&
+		remap(to) === process.env.APPLICATIONS_ROOT + "/Camunda Modeler.app"
+	) {
+		throw new Error("simulated bundle replacement failure");
+	}
+	return renameSync(remap(from), remap(to));
+};
 fs.rmSync = (path, options) => rmSync(remap(path), options);
 fs.accessSync = (path, mode) => {
 	if (process.env.APPLICATIONS_READONLY === "1" && String(path) === "/Applications") {
@@ -220,9 +228,10 @@ const remapFilesystemPath = (path) =>
 	String(path) === "/bin" || String(path).startsWith("/bin/")
 		? process.env.BIN_ROOT + String(path).slice("/bin".length)
 		: remapUsrBin(path);
-const { accessSync, existsSync, readlinkSync, statSync } = fs;
+const { accessSync, existsSync, lstatSync, readlinkSync, statSync } = fs;
 fs.accessSync = (path, mode) => accessSync(remapFilesystemPath(path), mode);
 fs.existsSync = (path) => existsSync(remapFilesystemPath(path));
+fs.lstatSync = (path, options) => lstatSync(remapFilesystemPath(path), options);
 fs.readlinkSync = (path, ...args) =>
 	readlinkSync(remapFilesystemPath(path), ...args);
 fs.statSync = (path, options) => statSync(remapFilesystemPath(path), options);
@@ -781,6 +790,42 @@ describe("CLI behavioural: modeler install", () => {
 			assert.strictEqual(current.status, 0, current.stderr);
 			assert.match(current.stdout, /already up to date/);
 			assert.ok(!sandbox.toolCalls().some((call) => call.startsWith("ditto ")));
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("keeps the staged previous macOS bundle when replacing the app fails", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+		writeMacApp(appPath, "5.51.0");
+
+		try {
+			const failed = await sandbox.update({
+				MODELER_RELEASE_VERSION: "5.52.0",
+				MODEL_VERSION: "5.52.0",
+				FAIL_APP_RENAME: "1",
+			});
+			assert.strictEqual(failed.status, 1);
+			assert.match(failed.stdout + failed.stderr, /previous bundle remains at/);
+			// The staging directory survives cleanup so the previous bundle
+			// stays recoverable.
+			const stagingDirs = readdirSync(sandbox.applicationsRoot).filter(
+				(entry) => entry.startsWith(".c8ctl-modeler-update-"),
+			);
+			assert.strictEqual(stagingDirs.length, 1);
+			const backup = join(
+				sandbox.applicationsRoot,
+				stagingDirs[0],
+				"previous.app",
+			);
+			assert.match(
+				readFileSync(join(backup, "Contents", "Info.plist"), "utf8"),
+				/<string>5\.51\.0<\/string>/,
+			);
 		} finally {
 			sandbox.cleanup();
 		}
@@ -1954,7 +1999,104 @@ describe("CLI behavioural: modeler install", () => {
 						"/bin/bash /usr/bin/camunda-modeler-5.52.0-linux-x64/support/xdg_unregister.sh",
 					),
 			);
+			// The release goes before the launcher, so a failed removal keeps
+			// a detectable installation identity for the retry.
+			const calls = sandbox.toolCalls();
+			const removeDir = calls.indexOf(
+				"rm -rf /usr/bin/camunda-modeler-5.52.0-linux-x64",
+			);
+			const removeLauncher = calls.indexOf("rm -f /usr/bin/camunda-modeler");
+			assert.ok(removeDir !== -1 && removeLauncher !== -1, calls.join("\n"));
+			assert.ok(
+				removeDir < removeLauncher,
+				`release removed before launcher:\n${calls.join("\n")}`,
+			);
 		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("removes a managed dangling launcher left by an interrupted removal", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const launcher = join(sandbox.usrBin, "camunda-modeler");
+		try {
+			// The release directory is already gone; only the launcher remains.
+			symlinkSync("camunda-modeler-5.52.0-linux-x64/camunda-modeler", launcher);
+
+			const removed = await sandbox.remove({ FAKE_UID: "0" });
+			assert.strictEqual(removed.status, 0, removed.stderr);
+			assert.match(removed.stdout, /Removed Camunda Modeler 5\.52\.0/);
+			assert.ok(!readdirSync(sandbox.usrBin).includes("camunda-modeler"));
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("refuses to manage an unmanaged dangling Linux launcher", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const launcher = join(sandbox.usrBin, "camunda-modeler");
+		try {
+			symlinkSync("some-other-modeler/camunda-modeler", launcher);
+
+			for (const result of [
+				await sandbox.update({ FAKE_UID: "0" }),
+				await sandbox.remove({ FAKE_UID: "0" }),
+			]) {
+				assert.strictEqual(result.status, 1);
+				assert.match(result.stdout + result.stderr, /not installed by c8ctl/);
+			}
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("fails fast while another Linux lifecycle operation holds the lock", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		// This test process is alive, so its lock can never go stale.
+		const lockPath = join(tmpdir(), "c8ctl-modeler-linux-lifecycle.lock");
+		writeFileSync(lockPath, String(process.pid));
+
+		try {
+			for (const result of [
+				await sandbox.update({ FAKE_UID: "0" }),
+				await sandbox.remove({ FAKE_UID: "0" }),
+			]) {
+				assert.strictEqual(result.status, 1);
+				assert.match(
+					result.stdout + result.stderr,
+					/Another c8ctl Modeler operation is in progress/,
+				);
+			}
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			rmSync(lockPath, { force: true });
+			sandbox.cleanup();
+		}
+	});
+
+	test("reclaims a stale Linux lifecycle lock and updates", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		// An unparsable owner counts as stale.
+		const lockPath = join(tmpdir(), "c8ctl-modeler-linux-lifecycle.lock");
+		writeFileSync(lockPath, "not-a-pid");
+
+		try {
+			const updated = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(updated.status, 0, updated.stderr);
+			assert.match(updated.stdout, /Updated Camunda Modeler to 5\.52\.0/);
+			assert.ok(!existsSync(lockPath), "lock released after the run");
+		} finally {
+			rmSync(lockPath, { force: true });
 			sandbox.cleanup();
 		}
 	});

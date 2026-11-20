@@ -4,6 +4,7 @@ import {
 	constants,
 	createWriteStream,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -12,6 +13,8 @@ import {
 	renameSync,
 	rmSync,
 	statSync,
+	unlinkSync,
+	writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -89,9 +92,127 @@ const CREATE_SHORTCUT_SCRIPT =
 // and link its launcher there.
 const LINUX_INSTALL_ROOT = "/usr/bin";
 const LINUX_EXECUTABLE = "camunda-modeler";
+// Backstop for locks leaked by killed processes. Kept well above realistic
+// runtimes so a live but slow run's lock is never reclaimed.
+const LINUX_LOCK_STALE_AFTER_MS = 60 * 60 * 1000; // 60 minutes
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+/** Read `error.code` without an `as NodeJS.ErrnoException` cast. */
+function errorCode(error: unknown): string | undefined {
+	if (error instanceof Error && "code" in error) {
+		const { code } = error;
+		if (typeof code === "string") return code;
+	}
+	return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Linux lifecycle lock — concurrent install/update/remove runs share the
+// release directories and the launcher in /usr/bin, so without serialisation
+// a losing run would delete the winning run's files mid-flight.
+// ---------------------------------------------------------------------------
+
+function linuxLifecycleLockPath(): string {
+	return join(tmpdir(), "c8ctl-modeler-linux-lifecycle.lock");
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		// Signal 0 only tests existence. EPERM means the process exists but
+		// belongs to someone else — still alive.
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return errorCode(error) === "EPERM";
+	}
+}
+
+function tryCreateLifecycleLock(path: string): boolean {
+	try {
+		writeFileSync(path, String(process.pid), { flag: "wx" });
+		return true;
+	} catch (error) {
+		if (errorCode(error) === "EEXIST") return false;
+		throw error;
+	}
+}
+
+/**
+ * Acquire the Linux lifecycle lock or throw with a user-actionable message.
+ * The lock is a file holding the owner's pid, created atomically with "wx".
+ * A lock whose owner died, that is unreadable, or that is older than
+ * LINUX_LOCK_STALE_AFTER_MS is reclaimed once; a persistent EEXIST after
+ * that is a live concurrent run.
+ */
+function acquireLinuxLifecycleLock(logger: Logger): void {
+	const path = linuxLifecycleLockPath();
+	if (tryCreateLifecycleLock(path)) return;
+
+	let detail = "unknown owner";
+	let stale = true;
+	try {
+		const pid = Number(readFileSync(path, "utf8"));
+		const age = Date.now() - statSync(path).mtimeMs;
+		stale =
+			!Number.isInteger(pid) ||
+			!isProcessAlive(pid) ||
+			age > LINUX_LOCK_STALE_AFTER_MS;
+		detail = Number.isInteger(pid) ? `pid ${pid}` : "unreadable owner";
+		if (stale && Number.isInteger(pid)) {
+			logger.warn(
+				`Removed a stale Modeler lifecycle lock from pid ${pid} (age ${Math.round(age / 1000)}s).`,
+			);
+		}
+	} catch {
+		// Unreadable lock counts as stale.
+	}
+	if (stale) {
+		try {
+			unlinkSync(path);
+		} catch {
+			// Another run may have reclaimed it first — retry the create below.
+		}
+		if (tryCreateLifecycleLock(path)) return;
+	}
+
+	throw new Error(
+		`Another c8ctl Modeler operation is in progress (${detail}). Wait for it to finish, or remove ${path} if you are sure none is running.`,
+	);
+}
+
+function releaseLinuxLifecycleLock(): void {
+	try {
+		unlinkSync(linuxLifecycleLockPath());
+	} catch {
+		// Best-effort — a signal handler may have raced the normal finally.
+	}
+}
+
+/**
+ * Run `body` while the Linux lifecycle lock is held. Signal handlers
+ * release the lock because the download interrupt handlers re-raise the
+ * signal against the process itself, so this function's `finally` never
+ * runs on the interrupt path. The once-listeners are consumed by the
+ * first signal, so the re-raise still kills the process by default.
+ */
+async function withLinuxLifecycleLock(
+	ctx: ModelerInstallContext,
+	body: () => ModelerInstallResult | Promise<ModelerInstallResult>,
+): Promise<ModelerInstallResult> {
+	acquireLinuxLifecycleLock(ctx.logger);
+	const onSignal = (): void => releaseLinuxLifecycleLock();
+	process.once("SIGINT", onSignal);
+	process.once("SIGTERM", onSignal);
+	try {
+		return await body();
+	} finally {
+		process.off("SIGINT", onSignal);
+		process.off("SIGTERM", onSignal);
+		releaseLinuxLifecycleLock();
+	}
 }
 
 /**
@@ -925,7 +1046,9 @@ export async function installDesktopModeler(
 	ctx: ModelerInstallContext,
 ): Promise<ModelerInstallResult> {
 	if (process.platform === "win32") return installOnWindows(ctx);
-	if (process.platform === "linux") return installOnLinux(ctx);
+	if (process.platform === "linux") {
+		return withLinuxLifecycleLock(ctx, () => installOnLinux(ctx));
+	}
 	if (process.platform !== "darwin") {
 		throw new Error(
 			`c8ctl modeler install currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
@@ -1198,12 +1321,16 @@ async function updateDirectMacModeler(
 				);
 			}
 		} finally {
-			try {
-				rmSync(stagingDir, { recursive: true, force: true });
-			} catch (error) {
-				ctx.logger.warn(
-					`Could not clean up the Modeler update directory ${stagingDir}: ${errorMessage(error)}`,
-				);
+			// A failed restore leaves the previous bundle in the staging
+			// directory as the only recoverable copy — keep it.
+			if (!existsSync(backupApp)) {
+				try {
+					rmSync(stagingDir, { recursive: true, force: true });
+				} catch (error) {
+					ctx.logger.warn(
+						`Could not clean up the Modeler update directory ${stagingDir}: ${errorMessage(error)}`,
+					);
+				}
 			}
 		}
 
@@ -1400,9 +1527,20 @@ interface LinuxModelerInstallation {
 	launcher: string;
 }
 
+/** Like existsSync, but also sees a dangling symlink (existsSync follows links). */
+function pathExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function findManagedLinuxModeler(): LinuxModelerInstallation | undefined {
 	const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
-	if (!existsSync(launcher)) return undefined;
+	// readlinkSync throws for a missing launcher or a non-symlink — both
+	// mean "not a managed installation".
 	let target: string;
 	try {
 		target = readlinkSync(launcher);
@@ -1418,7 +1556,9 @@ function findManagedLinuxModeler(): LinuxModelerInstallation | undefined {
 		LINUX_INSTALL_ROOT,
 		`camunda-modeler-${version}-linux-x64`,
 	);
-	if (!existsSync(join(installDir, LINUX_EXECUTABLE))) return undefined;
+	// A dangling link still identifies a managed install: a partial removal
+	// may have deleted the release before the launcher, and a retry needs
+	// the identity to finish the cleanup.
 	return { version, target, installDir, launcher };
 }
 
@@ -1429,7 +1569,7 @@ function linuxModelerForAction(
 	if (installation) return installation;
 	const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
 	const installedPath = findOnPath(LINUX_EXECUTABLE);
-	if (installedPath || existsSync(launcher)) {
+	if (installedPath || pathExists(launcher)) {
 		throw new Error(
 			`Camunda Modeler at ${installedPath ?? launcher} is not installed by c8ctl; refusing to ${action} it.`,
 		);
@@ -1628,15 +1768,18 @@ function removeLinuxModeler(ctx: ModelerInstallContext): ModelerInstallResult {
 		logger: ctx.logger,
 		quiet: ctx.quiet,
 	});
+	// Remove the release before the launcher: while the launcher still
+	// points at it, a failed removal stays detectable and a retry can
+	// finish the cleanup.
 	runAsRoot(
-		["rm", "-f", installation.launcher],
-		`Could not remove ${installation.launcher}`,
+		["rm", "-rf", installation.installDir],
+		`Could not remove ${installation.installDir}`,
 		ctx.quiet,
 		false,
 	);
 	runAsRoot(
-		["rm", "-rf", installation.installDir],
-		`Could not remove ${installation.installDir}`,
+		["rm", "-f", installation.launcher],
+		`Could not remove ${installation.launcher}`,
 		ctx.quiet,
 		false,
 	);
@@ -1704,7 +1847,9 @@ export async function updateDesktopModeler(
 	ctx: ModelerInstallContext,
 ): Promise<ModelerInstallResult> {
 	if (process.platform === "win32") return updateWindowsModeler(ctx);
-	if (process.platform === "linux") return updateLinuxModeler(ctx);
+	if (process.platform === "linux") {
+		return withLinuxLifecycleLock(ctx, () => updateLinuxModeler(ctx));
+	}
 	if (process.platform === "darwin") return updateMacModeler(ctx);
 	throw new Error(
 		`c8ctl modeler update currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
@@ -1715,7 +1860,9 @@ export async function removeDesktopModeler(
 	ctx: ModelerInstallContext,
 ): Promise<ModelerInstallResult> {
 	if (process.platform === "win32") return removeWindowsModeler(ctx);
-	if (process.platform === "linux") return removeLinuxModeler(ctx);
+	if (process.platform === "linux") {
+		return withLinuxLifecycleLock(ctx, () => removeLinuxModeler(ctx));
+	}
 	if (process.platform === "darwin") return removeMacModeler(ctx);
 	throw new Error(
 		`c8ctl modeler remove currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
