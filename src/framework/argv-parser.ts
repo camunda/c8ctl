@@ -205,7 +205,9 @@ export function swallowedOptionLikeValues({
 		if (token.kind !== "option" || token.inlineValue) continue;
 		if (options[token.name]?.type !== "string") continue;
 		const raw = args[token.index + 1];
-		if (raw?.startsWith("--") && raw !== "--") {
+		// Dash-letter values are mistyped flags (`-harness=cursor`,
+		// `--harnes=cursor`); dash-digit values (`-5`) are legitimate input.
+		if (raw !== undefined && raw !== "--" && /^--?[a-zA-Z]/.test(raw)) {
 			swallowed.push(raw);
 		}
 	}

@@ -288,6 +288,26 @@ async function removeSkills(
 			}
 		}
 
+		// Revalidate identity and source immediately before deletion: another
+		// process may have replaced a listed directory while the confirmation
+		// was open. Refuse changed entries and require a fresh preview.
+		const revalidated = await inspectSkills(harnesses);
+		const listedKeys = new Set(
+			revalidated.map((skill) => `${skill.harness} ${skill.path}`),
+		);
+		const stale = skills.filter(
+			(skill) => !listedKeys.has(`${skill.harness} ${skill.path}`),
+		);
+		if (stale.length > 0) {
+			throw new Error(
+				`The installed-skills inventory changed after the preview: ${stale
+					.map((skill) => `"${skill.name}" (${skill.path})`)
+					.join(
+						", ",
+					)}. Run "c8ctl skills remove" again for a fresh preview before deleting.`,
+			);
+		}
+
 		const removed: CamundaSkillInstallation[] = [];
 		const failures: Array<{
 			skill: CamundaSkillInstallation;

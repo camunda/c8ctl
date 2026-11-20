@@ -502,6 +502,15 @@ test("skills remove rejects selectors hidden by repeated or pre-verb string flag
 			"name",
 			"--yes",
 		],
+		[
+			"skills",
+			"remove",
+			"--fields",
+			"-harness=cursor",
+			"--fields",
+			"name",
+			"--yes",
+		],
 		["--fields", "--harnes=cursor", "skills", "remove", "--yes"],
 	]) {
 		const fixture = createSkillFixture();
@@ -519,7 +528,7 @@ test("skills remove rejects selectors hidden by repeated or pre-verb string flag
 			);
 
 			assert.equal(result.status, 1, `args: ${args.join(" ")}`);
-			assert.match(result.stderr, /--harnes=cursor/);
+			assert.match(result.stderr, /-harnes?s=cursor/);
 			assert.ok(existsSync(fixture.skillDirectory));
 			assert.ok(
 				!existsSync(ghCapture),
@@ -528,6 +537,31 @@ test("skills remove rejects selectors hidden by repeated or pre-verb string flag
 		} finally {
 			fixture.cleanup();
 		}
+	}
+});
+
+test("skills remove refuses to delete when the inventory changed after listing", async () => {
+	const fixture = createSkillFixture();
+	const listState = join(fixture.root, "list-state");
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_SKILL_UNLIST_AFTER_FIRST: listState,
+				},
+			},
+			"skills",
+			"remove",
+			"--yes",
+		);
+
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /inventory changed/);
+		assert.ok(existsSync(fixture.skillDirectory));
+	} finally {
+		fixture.cleanup();
 	}
 });
 
@@ -771,7 +805,7 @@ test("skills remove supports explicit agent IDs with user-scope skills directori
 		assert.match(result.stdout, /Removed Camunda skill "camunda-c8ctl"/);
 		assert.ok(!existsSync(cursorSkillDirectory));
 		assert.ok(existsSync(fixture.skillDirectory));
-		assert.deepEqual(JSON.parse(readFileSync(ghCapture, "utf8")), [
+		const listCall = [
 			"skill",
 			"list",
 			"--agent",
@@ -780,7 +814,16 @@ test("skills remove supports explicit agent IDs with user-scope skills directori
 			"user",
 			"--json",
 			"skillName,sourceURL,path",
-		]);
+		];
+		// Removal re-lists immediately before deleting, so the preview and the
+		// revalidation both appear.
+		assert.deepEqual(
+			readFileSync(ghCapture, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line)),
+			[listCall, listCall],
+		);
 	} finally {
 		fixture.cleanup();
 	}

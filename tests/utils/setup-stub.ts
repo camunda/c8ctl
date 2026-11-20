@@ -256,6 +256,16 @@ function fakeGh(commandArgs: string[]): {
 				stderr: 'unknown command "skill" for "gh"',
 			};
 		}
+		// C8CTL_SETUP_STUB_SKILL_UNLIST_AFTER_FIRST=<state file>: the first
+		// list reports installed skills, later lists report none — simulating
+		// an inventory that changed between preview and deletion.
+		const unlistState = process.env.C8CTL_SETUP_STUB_SKILL_UNLIST_AFTER_FIRST;
+		if (unlistState) {
+			if (fs.existsSync(unlistState)) {
+				return { status: 0, stdout: "[]", stderr: "" };
+			}
+			fs.writeFileSync(unlistState, "listed");
+		}
 		return {
 			status: 0,
 			stdout: JSON.stringify(
