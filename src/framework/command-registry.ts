@@ -9,6 +9,9 @@
 import {
 	AuthorizationKey,
 	BusinessId,
+	ClusterVariableKindEnum,
+	ClusterVariableName,
+	ClusterVariableScopeEnum,
 	ElementInstanceKey,
 	GroupId,
 	IncidentKey,
@@ -204,6 +207,7 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	tenants: "tenant",
 	ws: "wait-state",
 	"wait-states": "wait-state",
+	"cluster-variables": "cluster-variable",
 };
 
 // ─── Environment Variables ───────────────────────────────────────────────────
@@ -599,6 +603,76 @@ const TENANT_SEARCH_FLAGS = {
 	name: { type: "string", description: "Filter by name" },
 } as const satisfies Record<string, FlagDef>;
 
+const CLUSTER_VARIABLE_TENANT_FLAG = {
+	tenantId: {
+		type: "string",
+		description: "Tenant ID (tenant scope; omit for global scope)",
+		validate: TenantId.assumeExists,
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const CLUSTER_VARIABLE_VALUE_FLAGS = {
+	value: {
+		type: "string",
+		required: true,
+		description:
+			"JSON object value (or @file.json / @- to read from file/stdin)",
+	},
+	metadata: {
+		type: "string",
+		description: "JSON object of string/number metadata (or @file.json / @-)",
+	},
+	...CLUSTER_VARIABLE_TENANT_FLAG,
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_CLUSTER_VARIABLE_FLAGS = {
+	...CLUSTER_VARIABLE_VALUE_FLAGS,
+	kind: {
+		type: "string",
+		description: "Variable kind (JSON, SECRET_REFERENCE; default JSON)",
+		enum: ClusterVariableKindEnum,
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const CLUSTER_VARIABLE_SEARCH_FLAGS = {
+	name: {
+		type: "string",
+		description: "Filter by name (supports wildcards)",
+	},
+	value: {
+		type: "string",
+		description: "Filter by value (supports wildcards)",
+	},
+	scope: {
+		type: "string",
+		description: "Filter by scope (GLOBAL, TENANT)",
+		enum: ClusterVariableScopeEnum,
+	},
+	tenantId: {
+		type: "string",
+		description: "Filter by tenant ID",
+		validate: TenantId.assumeExists,
+	},
+	kind: {
+		type: "string",
+		description: "Filter by kind (JSON, SECRET_REFERENCE)",
+		enum: ClusterVariableKindEnum,
+	},
+	isTruncated: {
+		type: "boolean",
+		description: "Only variables whose stored value is truncated",
+	},
+	fullValue: { type: "boolean", description: "Return full values" },
+} as const satisfies Record<string, FlagDef>;
+
+const CLUSTER_VARIABLE_POSITIONALS = [
+	{
+		name: "name",
+		required: true,
+		validate: ClusterVariableName.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
 const AUTH_SEARCH_FLAGS = {
 	ownerId: { type: "string", description: "Filter by owner ID" },
 	ownerType: { type: "string", description: "Filter by owner type" },
@@ -876,6 +950,10 @@ export const COMMAND_REGISTRY = {
 			{ command: "c8ctl list pi", description: "List process instances" },
 			{ command: "c8ctl list pd", description: "List process definitions" },
 			{ command: "c8ctl list users", description: "List users" },
+			{
+				command: "c8ctl list cluster-variables",
+				description: "List cluster variables",
+			},
 		],
 		resources: [
 			"pi",
@@ -891,6 +969,7 @@ export const COMMAND_REGISTRY = {
 			"tenants",
 			"auth",
 			"mapping-rules",
+			"cluster-variables",
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
@@ -985,6 +1064,10 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl search ws --elementType=SERVICE_TASK",
 				description: "Search wait states on service tasks",
 			},
+			{
+				command: "c8ctl search cluster-variables --name='DB_*'",
+				description: "Search cluster variables by name",
+			},
 		],
 		resources: [
 			"pi",
@@ -1000,6 +1083,7 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rules",
 			"ws",
+			"cluster-variables",
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
@@ -1024,6 +1108,7 @@ export const COMMAND_REGISTRY = {
 			authorization: AUTH_SEARCH_FLAGS,
 			"mapping-rule": MR_SEARCH_FLAGS,
 			"wait-state": WAIT_STATE_SEARCH_FLAGS,
+			"cluster-variable": CLUSTER_VARIABLE_SEARCH_FLAGS,
 		},
 	},
 
@@ -1065,6 +1150,10 @@ export const COMMAND_REGISTRY = {
 				description: "Get start form for process definition only",
 			},
 			{ command: "c8ctl get user john", description: "Get user by username" },
+			{
+				command: "c8ctl get cluster-variable MY_VAR --tenantId acme",
+				description: "Get a tenant-scoped cluster variable",
+			},
 		],
 		resources: [
 			"pi",
@@ -1078,6 +1167,7 @@ export const COMMAND_REGISTRY = {
 			"tenant",
 			"auth",
 			"mapping-rule",
+			"cluster-variable",
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
@@ -1090,6 +1180,7 @@ export const COMMAND_REGISTRY = {
 			"process-definition": GET_PD_FLAGS,
 			form: GET_FORM_FLAGS,
 			"process-instance": GET_PI_FLAGS,
+			"cluster-variable": CLUSTER_VARIABLE_TENANT_FLAG,
 		},
 		resourcePositionals: {
 			"process-definition": GET_PD_POSITIONALS,
@@ -1102,6 +1193,7 @@ export const COMMAND_REGISTRY = {
 			authorization: GET_AUTHORIZATION_POSITIONALS,
 			"mapping-rule": GET_MAPPING_RULE_POSITIONALS,
 			form: GET_FORM_POSITIONALS,
+			"cluster-variable": CLUSTER_VARIABLE_POSITIONALS,
 		},
 	},
 
@@ -1128,6 +1220,10 @@ export const COMMAND_REGISTRY = {
 					"c8ctl create user --username=john --name='John Doe' --email=john@example.com --password=secret",
 				description: "Create a user",
 			},
+			{
+				command: `c8ctl create cluster-variable MY_VAR --value '{"url":"https://example.org"}'`,
+				description: "Create a global cluster variable",
+			},
 		],
 		resources: [
 			"pi",
@@ -1137,6 +1233,7 @@ export const COMMAND_REGISTRY = {
 			"tenant",
 			"auth",
 			"mapping-rule",
+			"cluster-variable",
 		],
 		flags: {},
 		// Resource-scoped flags prevent options for one resource from being
@@ -1148,6 +1245,7 @@ export const COMMAND_REGISTRY = {
 			group: CREATE_GROUP_FLAGS,
 			tenant: CREATE_TENANT_FLAGS,
 			"mapping-rule": CREATE_MAPPING_RULE_FLAGS,
+			"cluster-variable": CREATE_CLUSTER_VARIABLE_FLAGS,
 			authorization: {
 				ownerId: {
 					type: "string",
@@ -1177,6 +1275,9 @@ export const COMMAND_REGISTRY = {
 				},
 			},
 		},
+		resourcePositionals: {
+			"cluster-variable": CLUSTER_VARIABLE_POSITIONALS,
+		},
 	},
 
 	delete: {
@@ -1190,8 +1291,19 @@ export const COMMAND_REGISTRY = {
 		helpExamples: [
 			{ command: "c8ctl delete user john", description: "Delete user" },
 		],
-		resources: ["user", "role", "group", "tenant", "auth", "mapping-rule"],
+		resources: [
+			"user",
+			"role",
+			"group",
+			"tenant",
+			"auth",
+			"mapping-rule",
+			"cluster-variable",
+		],
 		flags: {},
+		resourceFlags: {
+			"cluster-variable": CLUSTER_VARIABLE_TENANT_FLAG,
+		},
 		resourcePositionals: {
 			user: GET_USER_POSITIONALS,
 			role: GET_ROLE_POSITIONALS,
@@ -1199,6 +1311,7 @@ export const COMMAND_REGISTRY = {
 			tenant: GET_TENANT_POSITIONALS,
 			authorization: GET_AUTHORIZATION_POSITIONALS,
 			"mapping-rule": GET_MAPPING_RULE_POSITIONALS,
+			"cluster-variable": CLUSTER_VARIABLE_POSITIONALS,
 		},
 	},
 
@@ -1466,27 +1579,31 @@ export const COMMAND_REGISTRY = {
 	},
 
 	update: {
-		description: "Update a job",
+		description: "Update a job or cluster variable",
 		helpDescription:
-			"Update the retries or timeout of a job. At least one of --retries or --timeout must be provided.",
+			"Update a job (retries/timeout) or a cluster variable (value/metadata). For a job, at least one of --retries or --timeout must be provided.",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show update command with all flags",
 		mutating: true,
 		requiresResource: true,
-		resources: ["job"],
-		flags: {
-			retries: {
-				type: "string",
-				description: "New number of retries for the job",
+		resources: ["job", "cluster-variable"],
+		flags: {},
+		resourceFlags: {
+			job: {
+				retries: {
+					type: "string",
+					description: "New number of retries for the job",
+				},
+				timeout: {
+					type: "string",
+					description: "New job timeout in milliseconds",
+				},
+				operationReference: {
+					type: "string",
+					description: "Optional operation reference (long integer)",
+				},
 			},
-			timeout: {
-				type: "string",
-				description: "New job timeout in milliseconds",
-			},
-			operationReference: {
-				type: "string",
-				description: "Optional operation reference (long integer)",
-			},
+			"cluster-variable": CLUSTER_VARIABLE_VALUE_FLAGS,
 		},
 		resourcePositionals: {
 			job: [
@@ -1496,6 +1613,7 @@ export const COMMAND_REGISTRY = {
 					validate: JobKey.assumeExists,
 				},
 			] as const satisfies readonly PositionalDef[],
+			"cluster-variable": CLUSTER_VARIABLE_POSITIONALS,
 		},
 		helpExamples: [
 			{
@@ -1505,6 +1623,10 @@ export const COMMAND_REGISTRY = {
 			{
 				command: "c8ctl update job 12345 --timeout 60000",
 				description: "Set the job timeout to 60 seconds",
+			},
+			{
+				command: `c8ctl update cluster-variable MY_VAR --value '{"url":"https://example.org"}'`,
+				description: "Update a global cluster variable",
 			},
 		],
 	},
