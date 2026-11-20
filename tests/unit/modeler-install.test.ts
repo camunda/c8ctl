@@ -34,9 +34,6 @@ const PROGRESS_COLUMNS = 60;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
 const isLinux = process.platform === "linux";
-// Mirrors LINUX_LIFECYCLE_LOCK in default-plugins/modeler/install.ts.
-const LIFECYCLE_LOCK = "/tmp/c8ctl-modeler-lifecycle.lock";
-const LIFECYCLE_RECLAIM_LOCK = `${LIFECYCLE_LOCK}.reclaim`;
 
 const STALLED_RELEASE_INDEX = `
 		if (process.env.STALL_RELEASE_INDEX === "1") {
@@ -227,17 +224,56 @@ const remapUsrBin = (path) =>
 	String(path) === "/usr/bin" || String(path).startsWith("/usr/bin/")
 		? process.env.USR_BIN_ROOT + String(path).slice("/usr/bin".length)
 		: path;
+// The lifecycle locks are system-wide in production; sandbox them so the
+// fixtures never touch a real lock held by a live Modeler operation.
+const LOCK_PREFIX = "/tmp/c8ctl-modeler-lifecycle.lock";
 const remapFilesystemPath = (path) =>
-	String(path) === "/bin" || String(path).startsWith("/bin/")
-		? process.env.BIN_ROOT + String(path).slice("/bin".length)
-		: remapUsrBin(path);
-const { accessSync, existsSync, lstatSync, readlinkSync, statSync } = fs;
+	String(path).startsWith(LOCK_PREFIX)
+		? process.env.LIFECYCLE_LOCK_ROOT + String(path).slice(LOCK_PREFIX.length)
+		: String(path) === "/bin" || String(path).startsWith("/bin/")
+			? process.env.BIN_ROOT + String(path).slice("/bin".length)
+			: remapUsrBin(path);
+const {
+	accessSync,
+	existsSync,
+	linkSync,
+	lstatSync,
+	readFileSync,
+	readlinkSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} = fs;
 fs.accessSync = (path, mode) => accessSync(remapFilesystemPath(path), mode);
 fs.existsSync = (path) => existsSync(remapFilesystemPath(path));
 fs.lstatSync = (path, options) => lstatSync(remapFilesystemPath(path), options);
+fs.readFileSync = (path, ...args) =>
+	readFileSync(remapFilesystemPath(path), ...args);
 fs.readlinkSync = (path, ...args) =>
 	readlinkSync(remapFilesystemPath(path), ...args);
 fs.statSync = (path, options) => statSync(remapFilesystemPath(path), options);
+fs.unlinkSync = (path) => unlinkSync(remapFilesystemPath(path));
+fs.writeFileSync = (path, ...args) =>
+	writeFileSync(remapFilesystemPath(path), ...args);
+fs.linkSync = (target, path) => {
+	const mappedPath = remapFilesystemPath(path);
+	// Test hook: pause an acquisition after the owner record is staged but
+	// before it is published, so a concurrent run's behaviour is observable.
+	if (
+		process.env.PAUSE_BEFORE_LOCK_LINK &&
+		mappedPath === process.env.LIFECYCLE_LOCK_ROOT
+	) {
+		writeFileSync(
+			process.env.PAUSE_BEFORE_LOCK_LINK + "/ready",
+			String(process.pid),
+		);
+		const signals = new Int32Array(new SharedArrayBuffer(4));
+		while (!existsSync(process.env.PAUSE_BEFORE_LOCK_LINK + "/go")) {
+			Atomics.wait(signals, 0, 0, 25);
+		}
+	}
+	return linkSync(remapFilesystemPath(target), mappedPath);
+};
 const { spawnSync } = childProcess;
 childProcess.spawnSync = (command, args, options) => {
 	const desktopRegistration =
@@ -432,6 +468,7 @@ function createLinuxSandbox() {
 	const binDir = join(home, "bin");
 	const binRoot = join(home, "bin-root");
 	const usrBin = join(home, "usr-bin");
+	const lockRoot = join(home, "lifecycle.lock");
 	const release = join(home, "release", "camunda-modeler-5.52.0-linux-x64");
 	const archive = join(home, "release.tar.gz");
 	const toolLog = join(home, "tools.log");
@@ -495,6 +532,7 @@ exit 0
 					PATH: [binDir, "/usr/bin", "/bin"].join(delimiter),
 					BIN_ROOT: binRoot,
 					USR_BIN_ROOT: usrBin,
+					LIFECYCLE_LOCK_ROOT: lockRoot,
 					TOOL_LOG: toolLog,
 					ARCHIVE: archive,
 					FAKE_UID: "1000",
@@ -515,6 +553,8 @@ exit 0
 		binDir,
 		binRoot,
 		usrBin,
+		lockPath: lockRoot,
+		reclaimLockPath: `${lockRoot}.reclaim`,
 		fakeTool: (name: string): void =>
 			writeFileSync(join(binDir, name), "#!/bin/sh\n", { mode: 0o755 }),
 		toolCalls: (): string[] => readToolLog(toolLog),
@@ -2068,7 +2108,7 @@ describe("CLI behavioural: modeler install", () => {
 		addLinuxInstall(sandbox, "5.51.0");
 		// This test process is alive, so its lock is never reclaimed.
 		writeFileSync(
-			LIFECYCLE_LOCK,
+			sandbox.lockPath,
 			JSON.stringify({ pid: process.pid, token: "test" }),
 		);
 
@@ -2085,7 +2125,6 @@ describe("CLI behavioural: modeler install", () => {
 			}
 			assert.deepStrictEqual(sandbox.toolCalls(), []);
 		} finally {
-			rmSync(LIFECYCLE_LOCK, { force: true });
 			sandbox.cleanup();
 		}
 	});
@@ -2096,15 +2135,14 @@ describe("CLI behavioural: modeler install", () => {
 		const sandbox = createLinuxSandbox();
 		addLinuxInstall(sandbox, "5.51.0");
 		// An unparsable owner counts as stale.
-		writeFileSync(LIFECYCLE_LOCK, "not-a-pid");
+		writeFileSync(sandbox.lockPath, "not-a-pid");
 
 		try {
 			const updated = await sandbox.update({ FAKE_UID: "0" });
 			assert.strictEqual(updated.status, 0, updated.stderr);
 			assert.match(updated.stdout, /Updated Camunda Modeler to 5\.52\.0/);
-			assert.ok(!existsSync(LIFECYCLE_LOCK), "lock released after the run");
+			assert.ok(!existsSync(sandbox.lockPath), "lock released after the run");
 		} finally {
-			rmSync(LIFECYCLE_LOCK, { force: true });
 			sandbox.cleanup();
 		}
 	});
@@ -2116,9 +2154,9 @@ describe("CLI behavioural: modeler install", () => {
 		addLinuxInstall(sandbox, "5.51.0");
 		// A stale main lock, and a live concurrent reclaimer (this process)
 		// holding the reclamation meta-lock.
-		writeFileSync(LIFECYCLE_LOCK, "not-a-pid");
+		writeFileSync(sandbox.lockPath, "not-a-pid");
 		writeFileSync(
-			LIFECYCLE_RECLAIM_LOCK,
+			sandbox.reclaimLockPath,
 			JSON.stringify({ pid: process.pid, token: "test" }),
 		);
 
@@ -2131,8 +2169,6 @@ describe("CLI behavioural: modeler install", () => {
 			);
 			assert.deepStrictEqual(sandbox.toolCalls(), []);
 		} finally {
-			rmSync(LIFECYCLE_LOCK, { force: true });
-			rmSync(LIFECYCLE_RECLAIM_LOCK, { force: true });
 			sandbox.cleanup();
 		}
 	});
@@ -2146,7 +2182,7 @@ describe("CLI behavioural: modeler install", () => {
 		const pidFile = join(sandbox.home, "download.pid");
 		mkdirSync(downloadTmp);
 		// A stale lock from a killed run; the stalled update reclaims it.
-		writeFileSync(LIFECYCLE_LOCK, "not-a-pid");
+		writeFileSync(sandbox.lockPath, "not-a-pid");
 		const stalled = sandbox.update({
 			FAKE_UID: "0",
 			TMPDIR: downloadTmp,
@@ -2175,7 +2211,7 @@ describe("CLI behavioural: modeler install", () => {
 			const interrupted = await stalled;
 			assert.strictEqual(interrupted.signal, "SIGTERM", interrupted.stderr);
 			assert.ok(
-				!existsSync(LIFECYCLE_LOCK),
+				!existsSync(sandbox.lockPath),
 				"interrupted run releases the lock",
 			);
 
@@ -2191,7 +2227,51 @@ describe("CLI behavioural: modeler install", () => {
 				}
 			}
 			await stalled;
-			rmSync(LIFECYCLE_LOCK, { force: true });
+			sandbox.cleanup();
+		}
+	});
+
+	test("serialises an update paused before publishing its lock", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		const pauseDir = join(sandbox.home, "pause");
+		mkdirSync(pauseDir);
+		// A stale lock sends the paused run down the reclamation path.
+		writeFileSync(sandbox.lockPath, "not-a-pid");
+		const paused = sandbox.update({
+			FAKE_UID: "0",
+			PAUSE_BEFORE_LOCK_LINK: pauseDir,
+		});
+
+		try {
+			// The paused run has staged its owner record but not published it,
+			// so the lock path is absent — never an empty file a concurrent
+			// run could misread as stale.
+			await pollUntilValue(
+				async () => (existsSync(join(pauseDir, "ready")) ? true : undefined),
+				15_000,
+				25,
+				"the paused lock acquisition",
+			);
+			const concurrent = await sandbox.update({ FAKE_UID: "0" });
+			assert.strictEqual(concurrent.status, 0, concurrent.stderr);
+			assert.match(concurrent.stdout, /Updated Camunda Modeler to 5\.52\.0/);
+
+			writeFileSync(join(pauseDir, "go"), "");
+			const after = await paused;
+			assert.strictEqual(after.status, 0, after.stderr);
+			assert.match(after.stdout, /already up to date/);
+			assert.ok(!existsSync(sandbox.lockPath), "lock released after both runs");
+		} finally {
+			// Release the paused run even when an assertion failed.
+			try {
+				writeFileSync(join(pauseDir, "go"), "", { flag: "wx" });
+			} catch {
+				// Already released.
+			}
+			await paused;
 			sandbox.cleanup();
 		}
 	});

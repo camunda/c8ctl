@@ -5,6 +5,7 @@ import {
 	constants,
 	createWriteStream,
 	existsSync,
+	linkSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
@@ -176,12 +177,24 @@ function tryCreateLifecycleLock(path: string): boolean {
 		pid: process.pid,
 		token: lifecycleToken,
 	};
+	// Publish a fully written owner record atomically: a "wx" create on the
+	// lock itself would expose an empty file that another run could reclaim
+	// as stale while its owner is alive. The staging file is unique to this
+	// invocation, and the hard link fails with EEXIST if the lock exists.
+	const staging = `${path}.${process.pid}.${lifecycleToken}`;
+	writeFileSync(staging, JSON.stringify(payload), { flag: "wx", mode: 0o644 });
 	try {
-		writeFileSync(path, JSON.stringify(payload), { flag: "wx", mode: 0o644 });
+		linkSync(staging, path);
 		return true;
 	} catch (error) {
 		if (errorCode(error) === "EEXIST") return false;
 		throw error;
+	} finally {
+		try {
+			unlinkSync(staging);
+		} catch {
+			// Best effort — the staging file is unique and inert.
+		}
 	}
 }
 
