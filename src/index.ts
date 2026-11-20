@@ -522,15 +522,17 @@ async function main() {
 				args: filteredArgv,
 				options: mergedOptions,
 			});
+			const unrecognizedPluginFlags = undeclaredFlags({
+				tokens: pluginParsed.tokens,
+				options: mergedOptions,
+			});
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
-				names: undeclaredFlags({
-					tokens: pluginParsed.tokens,
-					options: mergedOptions,
-				}),
+				names: unrecognizedPluginFlags,
 				declared: Object.keys(analysis.usable),
 			});
+			pluginCtx.unrecognizedFlags = unrecognizedPluginFlags;
 			const extractedFlags: Record<string, unknown> = {};
 			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
 				if (blockedFlags.has(flagName)) continue;
@@ -567,15 +569,17 @@ async function main() {
 				pluginCtx,
 			);
 		} else {
+			const unrecognizedPluginFlags = undeclaredFlags({
+				tokens: parsed.tokens,
+				options: globalOptions(),
+			});
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
-				names: undeclaredFlags({
-					tokens: parsed.tokens,
-					options: globalOptions(),
-				}),
+				names: unrecognizedPluginFlags,
 				declared: [],
 			});
+			pluginCtx.unrecognizedFlags = unrecognizedPluginFlags;
 			await executePluginCommand(
 				verb,
 				resource ? [resource, ...args] : args,

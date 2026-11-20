@@ -135,7 +135,13 @@ async function listSkills(rawHarness: unknown, ctx: PluginCtx): Promise<void> {
 		const skills = await inspectSkills(harnesses);
 		const rows = skillRows(skills);
 		if (ctx.outputMode === "json") {
-			logger.json({ command: "skills list", harnesses, skills: rows });
+			if (ctx.fields && ctx.fields.length > 0) {
+				// Emit the rows so logger.json filters each row's keys; the
+				// envelope would swallow requested fields like `name,path`.
+				logger.json(rows);
+			} else {
+				logger.json({ command: "skills list", harnesses, skills: rows });
+			}
 		} else if (rows.length === 0) {
 			const labels = harnesses
 				.map((harness) => HARNESS_LABELS[harness] ?? harness)
@@ -161,6 +167,11 @@ async function removeSkills(
 ): Promise<void> {
 	const { logger } = ctx;
 	try {
+		if (ctx.unrecognizedFlags && ctx.unrecognizedFlags.length > 0) {
+			throw new Error(
+				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'skills remove'. Only --harness selects the removal scope; fix or remove the flag before deleting skills.`,
+			);
+		}
 		if (extraArgs.length > 0) {
 			throw new Error(
 				`skills remove does not accept positional arguments ("${extraArgs.join(" ")}"). Use --harness <agent-id> to select a harness; removal otherwise covers all detected harnesses.`,

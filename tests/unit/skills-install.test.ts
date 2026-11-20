@@ -545,6 +545,57 @@ test("skills remove rejects extra positionals before discovery", async () => {
 	}
 });
 
+test("skills remove rejects a mistyped harness flag before discovery", async () => {
+	const fixture = createSkillFixture();
+	const ghCapture = join(fixture.root, "gh-calls.jsonl");
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_GH_CAPTURE: ghCapture,
+				},
+			},
+			"skills",
+			"remove",
+			"--harnes=cursor",
+			"--yes",
+		);
+
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /Unknown flag --harnes/);
+		assert.ok(existsSync(fixture.skillDirectory));
+		assert.ok(
+			!existsSync(ghCapture),
+			"GitHub CLI discovery must not run before flag validation",
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills list applies --fields to skill rows in JSON mode", async () => {
+	const fixture = createSkillFixture();
+	try {
+		const result = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"list",
+			"--json",
+			"--fields",
+			"name,path",
+		);
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(JSON.parse(result.stdout), [
+			{ name: "camunda-c8ctl", path: fixture.skillDirectory },
+		]);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("skills remove supports explicit agent IDs with user-scope skills directories", async () => {
 	const fixture = createSkillFixture();
 	const cursorSkillDirectory = join(
