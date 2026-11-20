@@ -26,7 +26,7 @@ import {
 	installedCamunda8RunVersions,
 	isCamunda8RunInstalled,
 	LOCAL_CLUSTER_HEALTH_URL,
-} from "../../src/utils/index.ts";
+} from "../../default-plugins/setup/detectors.ts";
 
 // @ts-expect-error — JS plugin has no declaration file
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");

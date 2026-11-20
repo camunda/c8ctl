@@ -127,9 +127,9 @@ export async function c8WithOptions(
 	};
 	const { stdin } = opts;
 	return stdin === undefined
-		? asyncSpawn("node", argv, options)
+		? asyncSpawn(process.execPath, argv, options)
 		: asyncSpawnWithStdin(
-				"node",
+				process.execPath,
 				argv,
 				(stream) => {
 					stream.write(stdin);

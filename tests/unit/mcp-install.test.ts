@@ -12,7 +12,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
@@ -21,6 +21,7 @@ import {
 } from "../../src/utils/command-local/mcp-install-helpers.ts";
 import { c8, c8WithOptions, parseJson } from "../utils/cli.ts";
 import { isRecord } from "../utils/guards.ts";
+import { asyncSpawn } from "../utils/spawn.ts";
 
 const DOCS_URL = "https://camunda-docs.mcp.kapa.ai";
 const HARNESSES = [
@@ -266,6 +267,102 @@ test("repeat installation preserves client-added tool restrictions and uninstall
 	assert.deepEqual(serversAt(s.paths["github-copilot"], "github-copilot"), {});
 });
 
+test("a drifted c8ctl-managed entry is updated on re-install; a foreign entry still conflicts", async (t) => {
+	const s = sandbox(t);
+	const oldNode = join(s.home, "old", basename(process.execPath));
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	const installed = await s.run("mcp", "install", "claude-code");
+	assert.equal(installed.status, 0, installed.stderr);
+	const current = serversAt(s.paths["claude-code"], "claude-code").camunda;
+	assert.ok(isRecord(current));
+
+	// Drift the entry the way a moved install does — another Node and
+	// script path — while keeping the c8ctl orchestration shape. A
+	// client-added tools allowlist and an extra env var ride along.
+	const drifted: unknown = JSON.parse(
+		readFileSync(s.paths["claude-code"], "utf8"),
+	);
+	assert.ok(isRecord(drifted) && isRecord(drifted.mcpServers));
+	const camunda = drifted.mcpServers.camunda;
+	assert.ok(isRecord(camunda) && Array.isArray(camunda.args));
+	assert.ok(isRecord(camunda.env));
+	camunda.command = oldNode;
+	camunda.args[0] = "/usr/local/lib/node_modules/@camunda8/cli/dist/index.js";
+	delete camunda.type;
+	camunda.tools = ["search_process_definitions"];
+	camunda.env.EXTRA = "keep-me";
+	s.write("claude-code", JSON.stringify(drifted));
+
+	const updated = await s.run("mcp", "install", "claude-code");
+	assert.equal(updated.status, 0, updated.stderr);
+	const items = parseJson(updated);
+	assert.ok(Array.isArray(items));
+	assert.deepEqual(
+		items.map((item: unknown) => {
+			assert.ok(isRecord(item));
+			return item.status;
+		}),
+		["updated"],
+	);
+	const after = serversAt(s.paths["claude-code"], "claude-code").camunda;
+	assert.ok(isRecord(after) && isRecord(after.env));
+	// Managed fields are rewritten to the current connection…
+	assert.equal(after.command, process.execPath);
+	assert.deepEqual(after.args, current.args);
+	assert.equal(after.type, "stdio");
+	assert.equal(after.env.C8CTL_DATA_DIR, s.env.C8CTL_DATA_DIR);
+	// …while client settings survive the update.
+	assert.deepEqual(after.tools, ["search_process_definitions"]);
+	assert.equal(after.env.EXTRA, "keep-me");
+
+	// A foreign entry under the same name is never clobbered.
+	const foreign = JSON.stringify({
+		mcpServers: { camunda: { command: "other-tool", args: ["serve"] } },
+	});
+	s.write("claude-code", foreign);
+	const conflict = await s.run("mcp", "install", "claude-code");
+	assert.equal(conflict.status, 1, conflict.stderr);
+	assert.match(conflict.stderr, /conflicts/);
+	assert.equal(readFileSync(s.paths["claude-code"], "utf8"), foreign);
+});
+
+test("updating a drifted entry preserves JSONC comments", async (t) => {
+	const s = sandbox(t);
+	const oldNode = join(s.home, "old", basename(process.execPath));
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	s.write(
+		"vscode",
+		`{
+	// keep this note
+	"servers": {
+		"camunda": {
+			"type": "stdio",
+			"command": ${JSON.stringify(oldNode)},
+			// restrict the exposed tools
+			"tools": ["search_process_definitions"],
+			"args": ["/old/c8ctl/dist/index.js", "mcp-proxy", "--profile", "work"],
+			"env": { "C8CTL_DATA_DIR": "/old/data" }
+		}
+	}
+}`,
+	);
+	const result = await s.run("mcp", "install", "vscode");
+	assert.equal(result.status, 0, result.stderr);
+	const content = readFileSync(s.paths.vscode, "utf8");
+	assert.match(content, /keep this note/);
+	assert.match(content, /restrict the exposed tools/);
+	assert.match(content, /"tools": \[\s*"search_process_definitions"\]/);
+	assert.doesNotMatch(content, /\/old\/c8ctl/);
+	assert.ok(!content.includes(JSON.stringify(oldNode)));
+	assert.ok(
+		content.includes(
+			`"C8CTL_DATA_DIR": ${JSON.stringify(s.env.C8CTL_DATA_DIR)}`,
+		),
+	);
+});
+
 test("docs dry-run needs no connection and does not expose unrelated config secrets", async (t) => {
 	const s = sandbox(t);
 	s.write(
@@ -484,5 +581,68 @@ test("MCP help and shell completions expose target selection and uninstall", asy
 		assert.equal(completion.status, 0, completion.stderr);
 		assert.match(completion.stdout, /orchestration/);
 		assert.match(completion.stdout, /docs/);
+	}
+});
+
+const SRC_CLI = resolve(import.meta.dirname, "../../src/index.ts");
+const DIST_CLI = resolve(import.meta.dirname, "../../dist/index.js");
+
+// The installed orchestration entry spawns `<node> <cli-entry> mcp-proxy`:
+// if the entry path the installer writes does not match the layout the CLI
+// actually runs from (source checkout vs. bundled dist), every harness
+// config c8ctl writes is dead on arrival. Pin the entry for both layouts.
+test("orchestration entry points at the source CLI entry when running from src", async (t) => {
+	const s = sandbox(t);
+	const result = await s.run("mcp", "install", "cursor");
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(serversAt(s.paths.cursor, "cursor").camunda, {
+		type: "stdio",
+		command: process.execPath,
+		args: [realpathSync(SRC_CLI), "mcp-proxy", "--profile", "local"],
+		env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
+	});
+});
+
+test("orchestration entry points at the built CLI entry when running from dist", async (t) => {
+	if (!existsSync(DIST_CLI)) {
+		t.skip("requires `npm run build` — dist/index.js is absent");
+		return;
+	}
+	const s = sandbox(t);
+	const env: NodeJS.ProcessEnv = { ...process.env };
+	for (const [key, value] of Object.entries(s.env)) {
+		if (value === undefined) delete env[key];
+		else env[key] = value;
+	}
+	// dist is compiled JavaScript — no type-stripping flags needed.
+	const result = await asyncSpawn(
+		process.execPath,
+		[DIST_CLI, "mcp", "install", "cursor"],
+		{ env },
+	);
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(serversAt(s.paths.cursor, "cursor").camunda, {
+		type: "stdio",
+		command: process.execPath,
+		args: [realpathSync(DIST_CLI), "mcp-proxy", "--profile", "local"],
+		env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
+	});
+});
+
+// Plugin flag dispatch does not enforce the flag's `rejectEmpty` metadata, so
+// the handler validates it: an empty or valueless --alias must fail the
+// command before any harness config is planned or written.
+test("empty or valueless --alias is rejected before any config write", async (t) => {
+	const original = '{"mcpServers":{"other":{"url":"https://other.invalid"}}}';
+	for (const action of ["install", "uninstall"]) {
+		for (const aliasArgs of [["--alias="], ["--alias", ""], ["--alias"]]) {
+			const s = sandbox(t);
+			s.write("cursor", original);
+			const result = await s.run("mcp", action, "cursor", ...aliasArgs);
+			const label = `mcp ${action} ${aliasArgs.join(" ")}`;
+			assert.equal(result.status, 1, `${label}: ${result.stderr}`);
+			assert.match(result.stderr, /--alias/);
+			assert.equal(readFileSync(s.paths.cursor, "utf8"), original, label);
+		}
 	}
 });

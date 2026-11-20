@@ -12,14 +12,13 @@
 import { execFile as execFileCb, spawn } from "node:child_process";
 
 // Strict allowlist of binaries this test utility is permitted to invoke.
-// Callers pass a bare command name; the allowlist prevents an unexpected
-// absolute path or uncontrolled value from being spawned. This also satisfies
-// CodeQL's "Shell command built from environment values" query by sanitising
-// the taint flow into `command`.
+// The exact current Node executable is allowed so tests can run with a
+// fixture-controlled PATH. This also satisfies CodeQL's "Shell command built
+// from environment values" query by sanitising the taint flow into `command`.
 const ALLOWED_COMMANDS = new Set(["node", "sh", "bash", "zsh", "fish"]);
 
 function assertAllowedCommand(command: string): void {
-	if (!ALLOWED_COMMANDS.has(command)) {
+	if (!ALLOWED_COMMANDS.has(command) && command !== process.execPath) {
 		throw new Error(
 			`Unsafe command: ${JSON.stringify(command)} is not in the allowlist`,
 		);

@@ -22,24 +22,37 @@ c8 watch --profile=local
 
 :::
 
-## Install Camunda AI skills
+## Manage Camunda AI skills
 
-Install the official Camunda skills from [`camunda/skills`](https://github.com/camunda/skills) into detected AI coding harnesses:
+Install and manage the official Camunda skills from [`camunda/skills`](https://github.com/camunda/skills) in AI coding harnesses:
 
 ```bash
 c8ctl skills install
 c8ctl skills install --harness claude-code
 c8ctl skills install --harness github-copilot
 c8ctl skills install --harness cursor
+c8ctl skills list
+c8ctl skills remove --dry-run
+c8ctl skills remove --harness claude-code --yes
 ```
 
-Without `--harness`, c8ctl detects Claude Code (`claude` or `~/.claude`) and GitHub Copilot CLI (`copilot` or `~/.copilot`) and installs into each detected harness. Explicit harness values are GitHub CLI agent IDs; use `gh skill install --help` for the supported list. c8ctl passes the selected ID and user scope to GitHub CLI, which resolves the host-specific skill directory for the current OS.
+Without `--harness`, c8ctl detects Claude Code (`claude` or `~/.claude`) and GitHub Copilot CLI (`copilot` or `~/.copilot`) for install, list, and remove. Explicit harness values are GitHub CLI agent IDs; use `gh skill install --help` for the supported list. c8ctl passes the selected ID and user scope to GitHub CLI, which resolves the host-specific skill directory for the current OS. `c8ctl skills list` shows Camunda skills installed in the selected or detected harnesses.
 
-GitHub CLI 2.90 or later is required; its skill commands are currently in preview. GitHub CLI resolves the latest tagged version of `camunda/skills`, or the default branch's current commit when the repository has no release tags. Re-running the command updates the same skill directories without duplicates. It overwrites local edits to the Camunda skill files.
+GitHub CLI 2.90 or later is required; its skill commands are currently in preview. GitHub CLI resolves the latest tagged version of `camunda/skills`, or the default branch's current commit when the repository has no release tags. Re-running checks for upstream updates and updates the same skill directories without duplicates. If a skill is already up to date, c8ctl leaves it in place, so local edits are preserved. An upstream update may replace edited files.
+
+`c8ctl skills remove` previews the Camunda skill directories before deleting them. In an interactive terminal, confirm the prompt; in non-interactive or JSON mode, pass `--yes` to remove them. `--dry-run` prints a JSON preview without deleting. Removal deletes the full listed directories, including local edits, and leaves other skills untouched.
+
+To deliberately restore one skill to upstream content, first find its name and installed path with `gh skill list --scope user --agent <agent-id>`, then run:
+
+```bash
+gh skill update --force --dir <skills-root> <skill-name>
+```
+
+`<skills-root>` is the parent directory containing installed skill directories (for example, `~/.claude/skills`), not the individual skill directory reported by `gh skill list`. The `--force` option replaces edited skill files even when upstream has not changed; it does not remove extra local files.
 
 The harness adapter contract is a GitHub CLI agent ID: c8ctl passes it to `gh skill install --agent` and uses user scope, while GitHub CLI resolves the OS-specific skill directory and records source metadata. Auto-detection currently covers Claude Code and GitHub Copilot CLI. To add automatic detection for another harness, add its executable and user config directory to the detector table in `skills-install-helpers.ts`; other agent IDs supported by GitHub CLI can already be selected explicitly with `--harness`.
 
-To review installed skill paths or remove skills manually, use `gh skill list --scope user --agent <agent-id>` and remove only the Camunda skill directories from its output.
+To review installed skill paths, use `c8ctl skills list` or `gh skill list --scope user --agent <agent-id>`. To remove skills manually, remove only the Camunda skill directories from that output.
 
 ## Deploy
 
@@ -388,7 +401,7 @@ Restart or reload your harness after installation. Complete the docs server's Go
 
 ### Safe updates and removal
 
-Existing unrelated entries and settings are preserved, including VS Code JSONC comments and client-added tool restrictions. Matching installations and removal of already-absent entries are no-ops. A conflicting entry or malformed configuration produces an error instead of being overwritten. Uninstall removes only the selected recognized Camunda entry and does not require the profile to still exist.
+Existing unrelated entries and settings are preserved, including VS Code JSONC comments and client-added tool restrictions. Matching installations and removal of already-absent entries are no-ops. A cluster entry c8ctl installed earlier is updated in place when its connection drifted (for example after moving the install or switching Node versions), keeping any restrictions you added. A foreign entry under the same name or a malformed configuration produces an error instead of being overwritten. Uninstall removes only the selected recognized Camunda entry and does not require the profile to still exist.
 
 `--dry-run` previews the selected entries without writing configuration or displaying unrelated configuration values. Writes use a private temporary file and atomic replacement per configuration file; a multi-harness operation is not a transaction across all files. If a write fails, earlier successful files are reported and remain updated.
 

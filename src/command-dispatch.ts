@@ -73,13 +73,11 @@ import {
 	listJobsCommand,
 	updateJobCommand,
 } from "./commands/jobs.ts";
-import { installMcpCommand, uninstallMcpCommand } from "./commands/mcp.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
 	correlateMessageCommand,
 	publishMessageCommand,
 } from "./commands/messages.ts";
-import { modelerInstallCommand } from "./commands/modeler.ts";
 import { feedbackCommand, openAppCommand } from "./commands/open.ts";
 import {
 	doctorPluginCommand,
@@ -128,7 +126,6 @@ import {
 	useTenantCommand,
 	whichOutputCommand,
 } from "./commands/session.ts";
-import { installSkillsCommand } from "./commands/skills.ts";
 import { getTopologyCommand } from "./commands/topology.ts";
 import {
 	completeUserTaskCommand,
@@ -165,9 +162,6 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["downgrade:plugin", downgradePluginCommand],
 	["doctor:plugin", doctorPluginCommand],
 	["init:plugin", initPluginCommand],
-
-	// ── Agent skills ────────────────────────────────────────────────────
-	["skills:install", installSkillsCommand],
 
 	// ── Process instances ──────────────────────────────────────────────
 	["list:process-instance", listProcessInstancesCommand],
@@ -280,9 +274,6 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	// on ctx.resource (bash / zsh / fish / install).
 	["completion:", completionCommand],
 
-	// ── Local applications ─────────────────────────────────────────────
-	["modeler:install", modelerInstallCommand],
-
 	// ── Variables ───────────────────────────────────────────────────────
 	["set:variable", setVariableCommand],
 
@@ -297,6 +288,4 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["open:optimize", openAppCommand],
 	["feedback:", feedbackCommand],
 	["mcp-proxy:", mcpProxyCommand],
-	["mcp:install", installMcpCommand],
-	["mcp:uninstall", uninstallMcpCommand],
 ]);

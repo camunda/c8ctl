@@ -17,6 +17,7 @@ import {
 	confirm,
 	createPromptSession,
 	isInteractive,
+	multiSelect,
 	PromptCancelledError,
 	type PromptIO,
 	PromptNotInteractiveError,
@@ -25,6 +26,7 @@ import {
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const ENTER = "\r";
+const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const ESCAPE = "\x1b";
 
@@ -70,6 +72,80 @@ function type(io: { input: PassThrough }, ...keys: string[]): void {
 	setImmediate(() => {
 		for (const key of keys) io.input.write(key);
 	});
+}
+
+/**
+ * Replay prompt output onto a virtual screen, emulating line wrap at
+ * `cols`. Lets tests assert what the terminal actually shows after the
+ * last repaint — in particular that no stale fragments survive when a
+ * render is shorter than the one before it.
+ */
+function renderScreen(
+	text: string,
+	{ cols = 80, rows = 100 }: { cols?: number; rows?: number } = {},
+): string[] {
+	const screen: string[] = Array.from({ length: rows }, () => "");
+	let line = 0;
+	let col = 0;
+	// Delayed autowrap: a character written into the last column leaves
+	// the cursor on that cell; the wrap happens when the next printable
+	// character arrives. erase-to-EOL there erases the last character.
+	let pendingWrap = false;
+	// ANSI introducer as a string: biome's noControlCharactersInRegex
+	// keeps control characters out of regex literals.
+	const CSI = "\x1b\\[";
+	// Cursor-up, clear-line, clear-to-EOL, cursor-to-col-1, visibility,
+	// styles.
+	const tokens = text.split(
+		new RegExp(`(${CSI}(?:\\d+A|2K|0K|1G|\\?25[hl]|[0-9;]*m))`),
+	);
+	for (const token of tokens) {
+		const up = new RegExp(`^${CSI}(\\d+)A$`).exec(token);
+		if (up) {
+			line = Math.max(0, line - Number(up[1]));
+			pendingWrap = false;
+			continue;
+		}
+		if (token === "\x1b[2K") {
+			screen[line] = "";
+			pendingWrap = false;
+			continue;
+		}
+		if (token === "\x1b[0K") {
+			screen[line] = screen[line].slice(0, pendingWrap ? col - 1 : col);
+			continue;
+		}
+		if (token === "\x1b[1G") {
+			col = 0;
+			pendingWrap = false;
+			continue;
+		}
+		// SGR styles and cursor-visibility escapes neither print nor
+		// move the cursor — a pending wrap survives them.
+		if (token === "" || token.startsWith("\x1b[")) continue;
+		for (const ch of token) {
+			if (ch === "\n") {
+				line = Math.min(rows - 1, line + 1);
+				col = 0;
+				pendingWrap = false;
+				continue;
+			}
+			if (pendingWrap) {
+				line = Math.min(rows - 1, line + 1);
+				col = 0;
+				pendingWrap = false;
+			}
+			// Terminals overwrite at the cursor column, they don't append.
+			const existing = screen[line];
+			screen[line] =
+				col < existing.length
+					? existing.slice(0, col) + ch + existing.slice(col + 1)
+					: existing + " ".repeat(col - existing.length) + ch;
+			col += 1;
+			if (col === cols) pendingWrap = true;
+		}
+	}
+	return screen;
 }
 
 const ENV_KEYS = ["C8CTL_INTERACTIVE", "C8CTL_NON_INTERACTIVE", "CI"] as const;
@@ -292,6 +368,528 @@ describe("confirm()", () => {
 	});
 });
 
+describe("multiSelect()", () => {
+	const CHECKED_OPTIONS = [
+		{ label: "Alpha", value: "a", checked: true },
+		{ label: "Bravo", value: "b" },
+		{ label: "Charlie", value: "c", checked: true },
+	];
+
+	test("Enter keeps the pre-checked options", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "c"]);
+	});
+
+	test("Space toggles the highlighted option off", async () => {
+		const io = fakeTTY();
+		type(io, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["c"]);
+	});
+
+	test("Space on an unchecked option adds it", async () => {
+		const io = fakeTTY();
+		type(io, DOWN, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b", "c"]);
+	});
+
+	test("values come back in option order, not toggle order", async () => {
+		const io = fakeTTY();
+		// Toggle Charlie off first, then Bravo on.
+		type(io, UP, " ", DOWN, DOWN, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b"]);
+	});
+
+	test("'a' checks every option, a second 'a' clears all", async () => {
+		const io = fakeTTY();
+		type(io, "a", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b", "c"]);
+
+		const io2 = fakeTTY();
+		type(io2, "a", "a", ENTER);
+		const result2 = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io: io2,
+		});
+		assert.ok(result2.interactive && !result2.cancelled);
+		assert.deepStrictEqual(result2.values, []);
+	});
+
+	test("an empty selection is allowed", async () => {
+		const io = fakeTTY();
+		// Alpha and Charlie start checked; toggle both off.
+		type(io, " ", DOWN, DOWN, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, []);
+	});
+
+	test("arrow keys wrap around at the ends", async () => {
+		const io = fakeTTY();
+		// Up from the first option lands on the last (Charlie, checked).
+		type(io, UP, " ", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a"]);
+	});
+
+	test("a number key toggles the matching option", async () => {
+		const io = fakeTTY();
+		type(io, "2", ENTER);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.ok(result.interactive && !result.cancelled);
+		assert.deepStrictEqual(result.values, ["a", "b", "c"]);
+	});
+
+	test("renders checked and unchecked markers per option", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /\[x\] Alpha/);
+		assert.match(plain, /\[ \] Bravo/);
+		assert.match(plain, /\[x\] Charlie/);
+	});
+
+	test("uses inverse video for checked markers on either terminal theme", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		assert.ok(io.text().includes("\x1b[7m[x]\x1b[0m"));
+		assert.ok(io.text().includes("[ ] Bravo"));
+	});
+
+	test("renders the key hint below the message", async () => {
+		const io = fakeTTY();
+		type(io, ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /space/);
+		assert.match(plain, /enter/);
+	});
+
+	test("the summary line lists the chosen labels", async () => {
+		const io = fakeTTY();
+		type(io, DOWN, " ", ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /Alpha, Bravo, Charlie/);
+	});
+
+	test("the summary line reports an empty selection", async () => {
+		const io = fakeTTY();
+		type(io, "a", "a", ENTER);
+		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+		const plain = stripVTControlCharacters(io.text());
+		assert.match(plain, /none selected/i);
+	});
+
+	test("Escape cancels", async () => {
+		const io = fakeTTY();
+		type(io, ESCAPE);
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io,
+		});
+		assert.deepStrictEqual(result, { interactive: true, cancelled: true });
+	});
+
+	for (const [name, keys] of [
+		["Enter", [ENTER]],
+		["Escape", [ESCAPE]],
+	] as const) {
+		test(`restores raw mode and the cursor after ${name}`, async () => {
+			const io = fakeTTY();
+			type(io, ...keys);
+			await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+			assertTerminalRestored(io);
+			assert.ok(io.text().includes(SHOW_CURSOR), "cursor left hidden");
+		});
+	}
+
+	test("non-TTY returns the pre-checked values with a hint", async () => {
+		const result = await multiSelect({
+			message: "Pick",
+			options: CHECKED_OPTIONS,
+			io: fakePipe(),
+		});
+		assert.ok(!result.interactive);
+		assert.deepStrictEqual(result.values, ["a", "c"]);
+		assert.match(result.hint, /non-interactive/);
+	});
+
+	test("requires at least one option", async () => {
+		await assert.rejects(
+			multiSelect({ message: "Pick", options: [], io: fakeTTY() }),
+			/at least one option/,
+		);
+	});
+
+	describe("option dependencies (requires)", () => {
+		const DEPENDENT_OPTIONS = [
+			{ label: "Cluster", value: "cluster", checked: true },
+			{
+				label: "Blueprint",
+				value: "blueprint",
+				checked: true,
+				requires: [{ value: "cluster", reason: "needs the local cluster" }],
+			},
+		];
+
+		test("select all checks options enabled by selecting their requirements", async () => {
+			const io = fakeTTY();
+			type(io, "a", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Cluster", value: "cluster" },
+					{
+						label: "Blueprint",
+						value: "blueprint",
+						requires: [{ value: "cluster", reason: "needs the local cluster" }],
+					},
+				],
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "blueprint"]);
+		});
+
+		test("unchecking the requirement forces the dependent off and shows why", async () => {
+			const io = fakeTTY();
+			// Space on the highlighted "Cluster" row unchecks it.
+			type(io, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, []);
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/Blueprint.*⚠ needs the local cluster/,
+			);
+		});
+
+		test("a blocked row is dimmed and its reason rendered in warning yellow", async () => {
+			const io = fakeTTY();
+			// Space on the highlighted "Cluster" row unchecks it.
+			type(io, " ", ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			const text = io.text();
+			// The whole blocked row is dimmed…
+			assert.ok(text.includes("\x1b[2mBlueprint\x1b[0m"));
+			// …and the reason stands out in yellow with a warning marker.
+			assert.ok(text.includes("\x1b[33m⚠ needs the local cluster\x1b[0m"));
+		});
+
+		test("the status line under the list explains the focused blocked row", async () => {
+			const io = fakeTTY();
+			// Cluster off, then move onto the blocked Blueprint row.
+			type(io, " ", DOWN, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/⚠ Blueprint needs the local cluster — enable it to unlock this option/,
+			);
+		});
+
+		test("the status line is blank when the focused row is not blocked", async () => {
+			const io = fakeTTY();
+			type(io, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.doesNotMatch(
+				stripVTControlCharacters(io.text()),
+				/enable it to unlock this option/,
+			);
+		});
+
+		test("an unblocked wrapped row leaves no stale reason on its continuation line", async () => {
+			const io = fakeTTY();
+			// The grouped blueprint row wraps to two physical lines in both
+			// states (112 chars blocked, 83 unblocked), so the render never
+			// shrinks and the leftover-tail erasure must happen where the
+			// row is rewritten.
+			type(io, " ", " ");
+			const done = multiSelect({
+				message: "Pick",
+				options: [
+					{
+						label: "Local cluster",
+						value: "cluster",
+						checked: true,
+						group: "Essentials",
+					},
+					{
+						label: "Starter blueprint",
+						value: "blueprint",
+						checked: true,
+						description:
+							"A working example project, deployed and started for you",
+						group: "Essentials",
+						requires: [
+							{ value: "cluster", reason: "requires the local cluster" },
+						],
+					},
+				],
+				io,
+			});
+			// Snapshot the screen after the third render (initial + both
+			// toggles), before confirming.
+			for (let i = 0; i < 1000; i++) {
+				if (io.text().split("Starter blueprint").length - 1 >= 3) break;
+				await new Promise((resolveSpin) => setImmediate(resolveSpin));
+			}
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.ok(
+				visible.every((l) => !l.includes("requires the local cluster")),
+				`stale reason survived the repaint: ${JSON.stringify(visible)}`,
+			);
+			setImmediate(() => io.input.write(ENTER));
+			const result = await done;
+			assert.ok(result.interactive && !result.cancelled);
+			// The blueprint stays off: re-enabling the requirement does
+			// not bring back a hidden checkmark.
+			assert.deepStrictEqual(result.values, ["cluster"]);
+		});
+
+		test("an exact-width row keeps its final character (delayed autowrap)", async () => {
+			const io = fakeTTY();
+			// 8 (pointer + checkbox) + 72 = exactly 80 columns. Under
+			// delayed autowrap the cursor sits on the final character, and
+			// a trailing erase-to-EOL would delete it. The first render
+			// happens synchronously, so the screen can be checked before
+			// any keypress.
+			const exactLabel = "A".repeat(72);
+			const done = multiSelect({
+				message: "Pick",
+				options: [{ label: exactLabel, value: "a", checked: true }],
+				io,
+			});
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.ok(
+				visible.some((l) => l.includes(exactLabel)),
+				`exact-width row lost its final character: ${JSON.stringify(visible)}`,
+			);
+			setImmediate(() => io.input.write(ENTER));
+			const result = await done;
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a"]);
+		});
+
+		test("a repaint that shrinks the menu erases stale wrapped lines", async () => {
+			const io = fakeTTY();
+			// Cluster off blocks the blueprint; moving onto its row shows
+			// the status line, which wraps past 80 columns; moving off
+			// collapses it to a blank line. The wrapped remainder of the
+			// old status line must not survive below the menu.
+			type(io, " ", DOWN, UP, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Local cluster", value: "cluster", checked: true },
+					{
+						label: "Starter blueprint",
+						value: "blueprint",
+						requires: [
+							{ value: "cluster", reason: "requires the local cluster" },
+						],
+					},
+				],
+				io,
+			});
+			const visible = renderScreen(io.text()).filter((l) => l !== "");
+			assert.deepStrictEqual(visible, [
+				"? Pick",
+				"  ↑/↓ move · space toggle · a all · enter confirm · esc cancel",
+				"  (none selected)",
+			]);
+		});
+
+		test("a blocked option cannot be toggled until its requirement is back", async () => {
+			const io = fakeTTY();
+			// Cluster off; Blueprint toggle attempt (blocked); Cluster on;
+			// Blueprint toggle (works now).
+			type(io, " ", DOWN, " ", UP, " ", DOWN, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Cluster", value: "cluster", checked: true },
+					{
+						label: "Blueprint",
+						value: "blueprint",
+						requires: [{ value: "cluster", reason: "needs the local cluster" }],
+					},
+				],
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "blueprint"]);
+		});
+
+		test("a re-enabled row stays unchecked — disabling clears the checkmark", async () => {
+			const io = fakeTTY();
+			// Cluster off (Blueprint force-unchecked), Cluster back on, Enter.
+			type(io, " ", " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: DEPENDENT_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster"]);
+		});
+
+		test("non-interactive drops options whose requirement is not pre-checked", async () => {
+			const result = await multiSelect({
+				message: "Pick",
+				options: [
+					{ label: "Cluster", value: "cluster" },
+					{
+						label: "Blueprint",
+						value: "blueprint",
+						checked: true,
+						requires: [{ value: "cluster", reason: "needs the local cluster" }],
+					},
+				],
+				io: fakePipe(),
+			});
+			assert.ok(!result.interactive);
+			assert.deepStrictEqual(result.values, []);
+			assert.match(result.hint, /Blueprint.*needs the local cluster/);
+		});
+	});
+
+	describe("groups", () => {
+		const GROUPED_OPTIONS = [
+			{
+				label: "Cluster",
+				value: "cluster",
+				checked: true,
+				group: "Essentials",
+			},
+			{
+				label: "Modeler",
+				value: "modeler",
+				checked: true,
+				group: "Essentials",
+			},
+			{ label: "Skills", value: "skills", group: "AI-assisted development" },
+		];
+
+		test("renders a header above each group and indents its options", async () => {
+			const io = fakeTTY();
+			type(io, ENTER);
+			await multiSelect({ message: "Pick", options: GROUPED_OPTIONS, io });
+			const plain = stripVTControlCharacters(io.text());
+			assert.match(plain, /^ {2}Essentials$/m);
+			assert.match(plain, /^ {2}AI-assisted development$/m);
+			// Grouped options sit two spaces deeper than their header.
+			assert.match(plain, / {4}❯ \[x\] Cluster/);
+			assert.match(plain, / {6}\[x\] Modeler/);
+			assert.match(plain, / {6}\[ \] Skills/);
+		});
+
+		test("headers are not focusable: the cursor moves option to option", async () => {
+			const io = fakeTTY();
+			// Cluster → Modeler → Skills; the header rows are skipped.
+			// Space on Skills checks it.
+			type(io, DOWN, DOWN, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "modeler", "skills"]);
+		});
+
+		test("a number key still toggles the matching option", async () => {
+			const io = fakeTTY();
+			type(io, "3", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["cluster", "modeler", "skills"]);
+		});
+
+		test("non-interactive hint lists groups with indented options", async () => {
+			const result = await multiSelect({
+				message: "Pick",
+				options: GROUPED_OPTIONS,
+				io: fakePipe(),
+			});
+			assert.ok(!result.interactive);
+			assert.match(result.hint, / {2}Essentials\n/);
+			assert.match(result.hint, / {4}\[x\] Cluster/);
+			assert.match(
+				result.hint,
+				/ {2}AI-assisted development\n {4}\[ \] Skills/,
+			);
+		});
+	});
+});
+
 describe("createPromptSession()", () => {
 	describe("with yes: true", () => {
 		test("confirm returns the default without reading input", async () => {
@@ -431,7 +1029,7 @@ describe("Ctrl+C", () => {
 		[
 			`import { writeSync } from "node:fs";`,
 			`import { PassThrough, Writable } from "node:stream";`,
-			`import { confirm, select } from ${JSON.stringify(FRAMEWORK)};`,
+			`import { confirm, multiSelect, select } from ${JSON.stringify(FRAMEWORK)};`,
 			`const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: (m) => { writeSync(1, "raw:" + m + ";"); return true; } });`,
 			`const output = Object.assign(new Writable({ write(chunk, _enc, cb) { if (String(chunk).includes("\\x1b[?25h")) writeSync(1, "cursor:shown;"); cb(); } }), { isTTY: true, columns: 80 });`,
 			`const io = { input, output };`,
@@ -481,5 +1079,15 @@ describe("Ctrl+C", () => {
 		const result = await run(`confirm({ message: "OK?", io })`);
 		assert.strictEqual(result.signal, "SIGINT", result.stderr);
 		assert.match(result.stdout, /^raw:true;.*raw:false;$/);
+	});
+
+	test("multiSelect restores the terminal and re-raises SIGINT", {
+		skip,
+	}, async () => {
+		const result = await run(
+			`multiSelect({ message: "Pick", options: [{ label: "A", value: "a" }], io })`,
+		);
+		assert.strictEqual(result.signal, "SIGINT", result.stderr);
+		assert.strictEqual(result.stdout, "raw:true;raw:false;cursor:shown;");
 	});
 });

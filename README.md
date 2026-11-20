@@ -121,7 +121,6 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `suspend` - Suspend resource
 - `resume` - Resume resource
 - `migrate` - Migrate process instances to another process definition
-- `modeler` - Install Camunda Desktop Modeler
 - `modify` - Modify process instances: activate, terminate or move elements
 - `await` - Create and await completion (alias for create --awaitCompletion)
 - `complete` - Complete resource
@@ -140,7 +139,6 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `open` - Open Camunda web application in browser
 - `add` - Add a profile
 - `remove` (alias: `rm`) - Remove a profile
-- `skills` - Install Camunda AI coding skills
 - `load` - Load a c8ctl plugin
 - `unload` (alias: `rm`) - Unload a c8ctl plugin
 - `upgrade` - Upgrade a plugin
@@ -151,13 +149,12 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `use` - Set active profile or tenant
 - `output` - Show or set output format
 - `completion` - Generate shell completion script
-- `mcp` - Install or uninstall Camunda MCP connections in AI harnesses
 - `mcp-proxy` - Start a STDIO to remote HTTP MCP proxy server
 - `feedback` - Open the feedback page to report issues or request features
 - `help` (alias: `menu`) - Show help
 - `which` - Show active profile or output mode
 
-**Resources**: authorization (auth), cluster-variable, form, group, incident (inc), install, job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, uninstall, user, user-task (ut), variable (var, vars), wait-state (ws)
+**Resources**: authorization (auth), cluster-variable, form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
 <!-- verb-resource-list:end -->
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.

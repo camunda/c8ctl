@@ -33,6 +33,10 @@ for (const name of tsPlugins) {
 		format: "esm",
 		platform: "node",
 		target: "node22",
+		// Prefer each dependency's ESM build: a bundled UMD/CJS entry (e.g.
+		// jsonc-parser's) keeps runtime require() calls that fail inside an
+		// ESM bundle.
+		mainFields: ["module", "main"],
 		logLevel: "warning",
 	});
 	console.log(`build:plugins — bundled default-plugins/${name}`);
