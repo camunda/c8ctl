@@ -1219,7 +1219,9 @@ function dryRunResult(
 ): ModelerInstallResult {
 	return {
 		kind: "dryRun",
-		info: { dryRun: true, command, message },
+		// `wouldChange` lets automation (c8ctl setup --remove) tell a real
+		// preview apart from a normalized "nothing to do" info result.
+		info: { dryRun: true, command, message, wouldChange: true },
 	};
 }
 

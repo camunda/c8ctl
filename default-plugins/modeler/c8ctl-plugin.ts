@@ -108,6 +108,7 @@ async function modelerHandler(
 							dryRun: true,
 							command: `modeler ${action}`,
 							message: result.message,
+							wouldChange: false,
 						},
 					}
 				: result;

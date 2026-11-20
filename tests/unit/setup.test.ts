@@ -456,7 +456,12 @@ describe("c8ctl setup", () => {
 		assert.match(result.stdout, /--no-modeler/);
 		assert.match(result.stdout, /--remove/);
 		assert.match(result.stdout, /--stop-cluster/);
-		assert.match(result.stdout, /Desktop Modeler is not removed/);
+		// Removal delegates to the owning commands; Modeler is now included.
+		assert.match(
+			result.stdout,
+			/mcp uninstall, skills remove, and modeler remove/,
+		);
+		assert.doesNotMatch(result.stdout, /Desktop Modeler is not removed/);
 		// The documented exit-code contract.
 		assert.match(result.stdout, /Exit code 0/);
 		assert.match(result.stdout, /Exit code 1: arguments failed validation/);
@@ -962,6 +967,10 @@ describe("c8ctl setup", () => {
 			assert.match(preview.stdout, /camunda-docs/);
 			assert.match(preview.stdout, /camunda-c8ctl/);
 			assert.match(preview.stdout, /rocket-launch\.bpmn/);
+			assert.match(
+				preview.stdout,
+				/Remove the Camunda Modeler app bundle at \/Applications\/Camunda Modeler\.app/,
+			);
 			assert.match(preview.stdout, /local edits/i);
 			assert.match(preview.stdout, /Nothing was removed/);
 			assert.ok(existsSync(editedBlueprint));
@@ -979,6 +988,8 @@ describe("c8ctl setup", () => {
 			);
 			assert.strictEqual(removed.status, 0, removed.stderr + removed.stdout);
 			assert.match(removed.stdout, /Setup removal finished/);
+			assert.match(removed.stdout, /Removed Camunda Modeler from/);
+			assert.match(removed.stdout, /Removed Camunda skill "camunda-c8ctl"/);
 			assert.ok(!existsSync(editedBlueprint));
 			assert.ok(!existsSync(join(blueprintDir, ".c8ctl-blueprint.json")));
 			assert.ok(existsSync(join(blueprintDir, "notes.txt")));
@@ -1190,6 +1201,9 @@ describe("c8ctl setup", () => {
 		try {
 			const malformedMarkerPath = join(stub.cwd, ".c8ctl-blueprint.json");
 			writeFileSync(malformedMarkerPath, "{");
+			// Without a managed Modeler installation there is nothing to
+			// remove at all — the empty-preview path stays reachable.
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
 
 			const removal = await c8WithOptions(
 				stub.options,
@@ -1201,7 +1215,92 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(removal.status, 1, output);
 			assert.match(output, /Warning: Could not inspect setup blueprint marker/);
 			assert.match(output, /No setup-managed components were found/);
+			assert.doesNotMatch(output, /Camunda Modeler/);
 			assert.strictEqual(readFileSync(malformedMarkerPath, "utf-8"), "{");
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("omits Modeler from the preview when no managed installation exists", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 0, output);
+			assert.doesNotMatch(output, /Modeler/);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("continues the remaining removals when the modeler removal child fails", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+			stub.options.env.C8CTL_SETUP_STUB_FAIL = "remove-modeler";
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Could not remove Camunda Desktop Modeler/);
+			// The other removals still ran.
+			assert.match(output, /Removed Camunda skill "camunda-c8ctl"/);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("fails an otherwise empty removal when the Modeler probe fails", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_FAIL = "probe-modeler";
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(
+				output,
+				/Warning: Could not inspect the Camunda Desktop Modeler installation/,
+			);
+			assert.match(output, /No setup-managed components were found/);
 		} finally {
 			stub.cleanup();
 		}

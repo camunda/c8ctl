@@ -661,18 +661,14 @@ test("skills remove leaves installations untouched when discovery fails", async 
 	}
 });
 
-test("skills remove rejects extra positionals before discovery", async () => {
+test("skills remove rejects unknown skill names, deleting nothing", async () => {
 	const fixture = createSkillFixture();
 	try {
-		for (const positional of ["cursor", "camunda-c8ctl"]) {
+		// "cursor" is a harness id, not an installed skill — a likely slip
+		// for `--harness cursor`; "bogus" names nothing at all.
+		for (const positional of ["cursor", "bogus"]) {
 			const result = await c8WithOptions(
-				{
-					...fixture.options,
-					env: {
-						...fixture.options.env,
-						C8CTL_SETUP_STUB_FAIL: "list-skills",
-					},
-				},
+				fixture.options,
 				"skills",
 				"remove",
 				positional,
@@ -682,10 +678,52 @@ test("skills remove rejects extra positionals before discovery", async () => {
 			assert.equal(result.status, 1);
 			assert.match(
 				result.stderr,
-				/skills remove does not accept positional arguments.*--harness/,
+				new RegExp(`Unknown Camunda skill "${positional}"`),
 			);
+			assert.match(result.stderr, /nothing was removed/);
 			assert.ok(existsSync(fixture.skillDirectory));
 		}
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills remove constrains deletion to the named skills", async () => {
+	const fixture = createSkillFixture();
+	const otherSkillDirectory = join(fixture.skillRoot, "camunda-bpmn");
+	mkdirSync(otherSkillDirectory);
+	writeFileSync(join(otherSkillDirectory, "SKILL.md"), "# Camunda BPMN\n");
+	writeFileSync(
+		join(fixture.skillRoot, ".c8ctl-installed"),
+		"camunda-c8ctl\ncamunda-bpmn\n",
+	);
+	try {
+		const preview = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"camunda-bpmn",
+			"--dry-run",
+		);
+		assert.equal(preview.status, 0, preview.stderr);
+		const payload = JSON.parse(preview.stdout);
+		assert.deepEqual(
+			payload.items.map((item: { name: string }) => item.name),
+			["camunda-bpmn"],
+		);
+
+		const removed = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"camunda-bpmn",
+			"--yes",
+		);
+		assert.equal(removed.status, 0, removed.stderr);
+		assert.match(removed.stdout, /Removed Camunda skill "camunda-bpmn"/);
+		assert.doesNotMatch(removed.stdout, /camunda-c8ctl/);
+		assert.ok(!existsSync(otherSkillDirectory));
+		assert.ok(existsSync(fixture.skillDirectory));
 	} finally {
 		fixture.cleanup();
 	}
