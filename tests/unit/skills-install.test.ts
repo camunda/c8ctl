@@ -6,6 +6,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -514,6 +515,36 @@ test("skills remove leaves installations untouched when discovery fails", async 
 	}
 });
 
+test("skills remove rejects extra positionals before discovery", async () => {
+	const fixture = createSkillFixture();
+	try {
+		for (const positional of ["cursor", "camunda-c8ctl"]) {
+			const result = await c8WithOptions(
+				{
+					...fixture.options,
+					env: {
+						...fixture.options.env,
+						C8CTL_SETUP_STUB_FAIL: "list-skills",
+					},
+				},
+				"skills",
+				"remove",
+				positional,
+				"--yes",
+			);
+
+			assert.equal(result.status, 1);
+			assert.match(
+				result.stderr,
+				/skills remove does not accept positional arguments.*--harness/,
+			);
+			assert.ok(existsSync(fixture.skillDirectory));
+		}
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("skills remove supports explicit agent IDs with user-scope skills directories", async () => {
 	const fixture = createSkillFixture();
 	const cursorSkillDirectory = join(
@@ -561,23 +592,66 @@ test("skills remove supports explicit agent IDs with user-scope skills directori
 	}
 });
 
-test("skills remove rejects installed paths outside the selected harness user scope", async () => {
+test("skills remove rejects paths outside trusted harness user-scope roots", async () => {
 	const fixture = createSkillFixture();
-	const outsideSkillDirectory = join(
-		fixture.root,
-		"outside",
+	const unrelatedSkillDirectory = join(
+		fixture.home,
+		"project",
 		"skills",
 		"camunda-c8ctl",
 	);
-	mkdirSync(outsideSkillDirectory, { recursive: true });
-	writeFileSync(join(outsideSkillDirectory, "SKILL.md"), "# Camunda c8ctl\n");
+	mkdirSync(unrelatedSkillDirectory, { recursive: true });
+	writeFileSync(join(unrelatedSkillDirectory, "SKILL.md"), "# Camunda c8ctl\n");
+	try {
+		for (const harness of ["claude-code", "unmapped-agent"]) {
+			const result = await c8WithOptions(
+				{
+					...fixture.options,
+					env: {
+						...fixture.options.env,
+						C8CTL_SETUP_STUB_SKILL_PATH: unrelatedSkillDirectory,
+					},
+				},
+				"skills",
+				"remove",
+				"--harness",
+				harness,
+				"--yes",
+			);
+
+			assert.equal(result.status, 1);
+			assert.match(result.stderr, /Cannot safely remove Camunda skill/);
+			assert.ok(existsSync(unrelatedSkillDirectory));
+		}
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills remove rejects a mapped user-scope root that resolves outside home", async () => {
+	const fixture = createSkillFixture();
+	const cursorDirectory = join(fixture.home, ".cursor");
+	const cursorSkillsRoot = join(cursorDirectory, "skills");
+	const outsideSkillsRoot = join(fixture.root, "outside-skills");
+	const cursorSkillDirectory = join(cursorSkillsRoot, "camunda-c8ctl");
+	mkdirSync(join(outsideSkillsRoot, "camunda-c8ctl"), { recursive: true });
+	writeFileSync(
+		join(outsideSkillsRoot, "camunda-c8ctl", "SKILL.md"),
+		"# Camunda c8ctl\n",
+	);
+	mkdirSync(cursorDirectory);
+	symlinkSync(
+		outsideSkillsRoot,
+		cursorSkillsRoot,
+		process.platform === "win32" ? "junction" : "dir",
+	);
 	try {
 		const result = await c8WithOptions(
 			{
 				...fixture.options,
 				env: {
 					...fixture.options.env,
-					C8CTL_SETUP_STUB_SKILL_PATH: outsideSkillDirectory,
+					C8CTL_SETUP_STUB_SKILL_PATH: cursorSkillDirectory,
 				},
 			},
 			"skills",
@@ -589,7 +663,7 @@ test("skills remove rejects installed paths outside the selected harness user sc
 
 		assert.equal(result.status, 1);
 		assert.match(result.stderr, /Cannot safely remove Camunda skill/);
-		assert.ok(existsSync(outsideSkillDirectory));
+		assert.ok(existsSync(join(outsideSkillsRoot, "camunda-c8ctl")));
 	} finally {
 		fixture.cleanup();
 	}

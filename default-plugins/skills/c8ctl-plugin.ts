@@ -156,10 +156,16 @@ async function listSkills(rawHarness: unknown, ctx: PluginCtx): Promise<void> {
 
 async function removeSkills(
 	rawHarness: unknown,
+	extraArgs: string[],
 	ctx: PluginCtx,
 ): Promise<void> {
 	const { logger } = ctx;
 	try {
+		if (extraArgs.length > 0) {
+			throw new Error(
+				`skills remove does not accept positional arguments ("${extraArgs.join(" ")}"). Use --harness <agent-id> to select a harness; removal otherwise covers all detected harnesses.`,
+			);
+		}
 		const { harnesses, requestedHarness } = resolveHarnesses(rawHarness);
 		const skills = await inspectSkills(harnesses);
 		for (const skill of skills) camundaSkillRemovalPath(skill);
@@ -305,7 +311,7 @@ async function skillsHandler(
 		return;
 	}
 	if (args[0] === "remove") {
-		await removeSkills(flags?.harness, ctx);
+		await removeSkills(flags?.harness, args.slice(1), ctx);
 		return;
 	}
 
