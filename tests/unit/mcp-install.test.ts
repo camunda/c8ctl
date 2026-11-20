@@ -628,3 +628,21 @@ test("orchestration entry points at the built CLI entry when running from dist",
 		env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
 	});
 });
+
+// Plugin flag dispatch does not enforce the flag's `rejectEmpty` metadata, so
+// the handler validates it: an empty or valueless --alias must fail the
+// command before any harness config is planned or written.
+test("empty or valueless --alias is rejected before any config write", async (t) => {
+	const original = '{"mcpServers":{"other":{"url":"https://other.invalid"}}}';
+	for (const action of ["install", "uninstall"]) {
+		for (const aliasArgs of [["--alias="], ["--alias", ""], ["--alias"]]) {
+			const s = sandbox(t);
+			s.write("cursor", original);
+			const result = await s.run("mcp", action, "cursor", ...aliasArgs);
+			const label = `mcp ${action} ${aliasArgs.join(" ")}`;
+			assert.equal(result.status, 1, `${label}: ${result.stderr}`);
+			assert.match(result.stderr, /--alias/);
+			assert.equal(readFileSync(s.paths.cursor, "utf8"), original, label);
+		}
+	}
+});
