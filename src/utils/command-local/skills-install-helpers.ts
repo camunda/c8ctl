@@ -390,10 +390,20 @@ function skillRemovalLocation(
 		home: userHome,
 		platform,
 	});
-	const root = roots.find(
+	const configuredRoot = roots.find(
 		(candidate) =>
 			candidate !== directory && isWithinPath(candidate, directory),
 	);
+	const reportedRoot = dirname(directory);
+	// GitHub CLI supports agent IDs with host-specific roots unknown to c8ctl.
+	// Accept its reported root for those agents only when it stays under the
+	// user's home and is a skills directory.
+	const userSkillsRoot =
+		basename(reportedRoot) === "skills" &&
+		isWithinPath(resolve(userHome), reportedRoot)
+			? reportedRoot
+			: undefined;
+	const root = configuredRoot ?? userSkillsRoot;
 	if (!root) {
 		throw new Error(
 			`Cannot safely remove Camunda skill "${skill.name}" from ${skill.path}: the path is outside the ${skill.harness} user skills directory.`,
