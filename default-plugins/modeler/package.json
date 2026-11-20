@@ -2,7 +2,7 @@
   "name": "c8ctl-plugin-modeler",
   "version": "0.1.0",
   "type": "module",
-  "description": "c8ctl default plugin to install Camunda Desktop Modeler",
+  "description": "c8ctl default plugin to manage Camunda Desktop Modeler",
   "keywords": ["c8ctl", "c8ctl-plugin", "modeler", "camunda"],
   "main": "c8ctl-plugin.js"
 }

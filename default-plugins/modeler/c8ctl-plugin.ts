@@ -1,10 +1,12 @@
 /**
  * c8ctl-plugin-modeler
  *
- * Install Camunda Desktop Modeler on macOS, Windows, or Linux.
+ * Manage Camunda Desktop Modeler on macOS, Windows, or Linux.
  *
  * Usage:
  *   c8ctl modeler install
+ *   c8ctl modeler update
+ *   c8ctl modeler remove
  */
 
 import { renderCommandFailure } from "../../src/core/index.ts";
@@ -13,26 +15,48 @@ import type {
 	PluginCtx,
 	PluginMetadata,
 } from "../../src/framework/plugins/plugin-loader.ts";
-import { installDesktopModeler } from "./install.ts";
+import {
+	installDesktopModeler,
+	removeDesktopModeler,
+	updateDesktopModeler,
+} from "./install.ts";
 
 export const metadata: PluginMetadata = {
 	name: "modeler",
-	description: "Install Camunda Desktop Modeler",
+	description: "Manage Camunda Desktop Modeler",
 	commands: {
 		modeler: {
-			description: "Install Camunda Desktop Modeler",
+			description: "Manage Camunda Desktop Modeler",
 			helpDescription:
-				"Install the latest stable Camunda Desktop Modeler on macOS, Windows, or Linux, skipping the installation when Modeler is already installed. On macOS, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable). On Windows, installs it with winget into %LOCALAPPDATA%\\Programs\\Camunda Modeler, then registers its file types and adds it to the Start Menu. On Linux (x64), installs the release into /usr/bin as root, using sudo, as the Camunda documentation describes, then registers its file types with the bundled support/xdg_register.sh.",
+				"Manage Camunda Desktop Modeler on macOS, Windows, or Linux. Install the latest stable release, update it using the same installation method, or remove it. On macOS, uses Homebrew when available and otherwise downloads the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable). On Windows, uses winget and registers file types and a Start Menu shortcut. On Linux (x64), installs into /usr/bin as root and registers file types with Modeler's bundled support scripts.",
 			subcommands: [
 				{
 					name: "install",
 					description: "Install the latest stable Camunda Desktop Modeler",
+				},
+				{
+					name: "update",
+					description:
+						"Update Camunda Desktop Modeler to the latest stable release",
+				},
+				{
+					name: "remove",
+					description:
+						"Remove a c8ctl-managed Camunda Desktop Modeler installation",
 				},
 			],
 			examples: [
 				{
 					command: "c8ctl modeler install",
 					description: "Install the latest stable Camunda Desktop Modeler",
+				},
+				{
+					command: "c8ctl modeler update",
+					description: "Update Camunda Desktop Modeler",
+				},
+				{
+					command: "c8ctl modeler remove --dry-run",
+					description: "Preview removal of Camunda Desktop Modeler",
 				},
 			],
 		},
@@ -46,38 +70,56 @@ async function modelerHandler(
 ): Promise<void> {
 	if (!ctx) throw new Error("modeler requires the plugin host context");
 	const { logger } = ctx;
+	const action = args[0];
 
-	if (args[0] !== "install") {
-		if (args[0] === undefined) {
-			logger.info(
-				"\nUsage: c8ctl modeler install\n\nAvailable resources:\n  install",
-				{
-					essential: true,
-				},
-			);
-		} else {
-			logger.error(`Unknown command: modeler ${args.join(" ")}`);
-			logger.info('Run "c8 help" for usage information', { essential: true });
-		}
+	if (action === undefined) {
+		logger.info(
+			"\nUsage: c8ctl modeler <install|update|remove>\n\nAvailable commands:\n  install\n  update\n  remove",
+			{ essential: true },
+		);
+		process.exitCode = 1;
+		return;
+	}
+	if (action !== "install" && action !== "update" && action !== "remove") {
+		logger.error(`Unknown command: modeler ${args.join(" ")}`);
+		logger.info('Run "c8 help" for usage information', { essential: true });
 		process.exitCode = 1;
 		return;
 	}
 
 	try {
-		const result = await installDesktopModeler({
+		const operation = {
+			install: installDesktopModeler,
+			update: updateDesktopModeler,
+			remove: removeDesktopModeler,
+		}[action];
+		const result = await operation({
 			isDryRun: ctx.dryRun,
 			logger,
 			quiet: ctx.quiet,
 		});
-		if (result.kind === "dryRun") {
-			logger.json(result.info);
-		} else if (result.kind === "info") {
-			logger.info(result.message, { essential: true });
+		// A dry run owes automation the JSON preview on stdout even when
+		// nothing would change (Modeler absent or already current).
+		const normalized =
+			result.kind === "info" && ctx.dryRun
+				? {
+						kind: "dryRun" as const,
+						info: {
+							dryRun: true,
+							command: `modeler ${action}`,
+							message: result.message,
+						},
+					}
+				: result;
+		if (normalized.kind === "dryRun") {
+			logger.json(normalized.info);
+		} else if (normalized.kind === "info") {
+			logger.info(normalized.message, { essential: true });
 		} else {
-			logger.success(result.message);
+			logger.success(normalized.message);
 		}
 	} catch (error) {
-		renderCommandFailure(logger, "Failed to modeler install", error, {
+		renderCommandFailure(logger, `Failed to ${action} Camunda Modeler`, error, {
 			verbose: ctx.verbose,
 		});
 		process.exitCode = 1;
