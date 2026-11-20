@@ -172,6 +172,17 @@ async function removeSkills(
 				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'skills remove'. Only --harness selects the removal scope; fix or remove the flag before deleting skills.`,
 			);
 		}
+		// A mistyped flag can also be swallowed as the value of a string
+		// global (`skills remove --fields --harnes=cursor`); option-like
+		// values are never legitimate here and must not widen removal.
+		const swallowed = [...(ctx.fields ?? []), ctx.profile].find(
+			(value) => typeof value === "string" && value.startsWith("-"),
+		);
+		if (swallowed) {
+			throw new Error(
+				`"${swallowed}" looks like a flag but was passed as a value. Only --harness selects the removal scope; fix the invocation before deleting skills.`,
+			);
+		}
 		if (extraArgs.length > 0) {
 			throw new Error(
 				`skills remove does not accept positional arguments ("${extraArgs.join(" ")}"). Use --harness <agent-id> to select a harness; removal otherwise covers all detected harnesses.`,

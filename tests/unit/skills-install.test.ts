@@ -575,6 +575,37 @@ test("skills remove rejects a mistyped harness flag before discovery", async () 
 	}
 });
 
+test("skills remove rejects an option-like value swallowed by a string flag", async () => {
+	const fixture = createSkillFixture();
+	const ghCapture = join(fixture.root, "gh-calls.jsonl");
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_GH_CAPTURE: ghCapture,
+				},
+			},
+			"skills",
+			"remove",
+			"--fields",
+			"--harnes=cursor",
+			"--yes",
+		);
+
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /--harnes=cursor/);
+		assert.ok(existsSync(fixture.skillDirectory));
+		assert.ok(
+			!existsSync(ghCapture),
+			"GitHub CLI discovery must not run before flag validation",
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("skills list applies --fields to skill rows in JSON mode", async () => {
 	const fixture = createSkillFixture();
 	try {
