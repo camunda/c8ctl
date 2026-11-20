@@ -52,6 +52,7 @@ import {
 	splitGlobals,
 	stripBlockedFlagTokens,
 	stripGlobalFlags,
+	swallowedOptionLikeValues,
 	typedReservedFlags,
 	undeclaredFlags,
 	validateFlags,
@@ -208,7 +209,8 @@ async function main() {
 	// Stage 1: parse GLOBAL_FLAGS from the front of argv and stop at
 	// the verb. Everything after the verb stays raw for stage 2, which parses
 	// it against that command's own flag table.
-	const stage1 = splitGlobals(process.argv.slice(2));
+	const argv = process.argv.slice(2);
+	const stage1 = splitGlobals(argv);
 
 	// Global flags given before the verb take effect now so plugin loading
 	// (which logs) sees the right output mode; flags after the verb are
@@ -522,10 +524,29 @@ async function main() {
 				args: filteredArgv,
 				options: mergedOptions,
 			});
-			const unrecognizedPluginFlags = undeclaredFlags({
-				tokens: pluginParsed.tokens,
-				options: mergedOptions,
-			});
+			// A mistyped flag can hide as the value of a string global
+			// (`--fields --harnes=cursor`); repeated or pre-verb occurrences
+			// overwrite each other in the parsed values, so detect them from
+			// the raw tokens instead. Surface them like undeclared flags so a
+			// destructive plugin command can reject rather than widen scope.
+			const unrecognizedPluginFlags = [
+				...new Set([
+					...undeclaredFlags({
+						tokens: pluginParsed.tokens,
+						options: mergedOptions,
+					}),
+					...swallowedOptionLikeValues({
+						args: filteredArgv,
+						options: mergedOptions,
+						tokens: pluginParsed.tokens,
+					}),
+					...swallowedOptionLikeValues({
+						args: argv,
+						options: builtinOptions,
+						tokens: parseFlags({ args: argv, options: builtinOptions }).tokens,
+					}),
+				]),
+			];
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
@@ -569,10 +590,26 @@ async function main() {
 				pluginCtx,
 			);
 		} else {
-			const unrecognizedPluginFlags = undeclaredFlags({
-				tokens: parsed.tokens,
-				options: globalOptions(),
-			});
+			const bareGlobalOptions = globalOptions();
+			const unrecognizedPluginFlags = [
+				...new Set([
+					...undeclaredFlags({
+						tokens: parsed.tokens,
+						options: bareGlobalOptions,
+					}),
+					...swallowedOptionLikeValues({
+						args: stage1.rest,
+						options: bareGlobalOptions,
+						tokens: parsed.tokens,
+					}),
+					...swallowedOptionLikeValues({
+						args: argv,
+						options: bareGlobalOptions,
+						tokens: parseFlags({ args: argv, options: bareGlobalOptions })
+							.tokens,
+					}),
+				]),
+			];
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,

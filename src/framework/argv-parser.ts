@@ -183,6 +183,36 @@ function protectFlagLikeValues({
 }
 
 /**
+ * Find option-like tokens (`--…`) that a string flag swallowed as its
+ * value. Known flags in that position are rewritten by
+ * `protectFlagLikeValues`, so a surviving `--…` value is an undeclared
+ * flag the user mistyped — for example `--fields --harnes=cursor`, where
+ * the typo vanishes from the parsed values. Every occurrence is reported,
+ * including repeated and pre-verb ones, so a later `--fields name` cannot
+ * hide an earlier swallowed selector.
+ */
+export function swallowedOptionLikeValues({
+	args,
+	options,
+	tokens,
+}: {
+	args: readonly string[];
+	options: ParseOptions;
+	tokens: readonly ArgToken[];
+}): string[] {
+	const swallowed: string[] = [];
+	for (const token of tokens) {
+		if (token.kind !== "option" || token.inlineValue) continue;
+		if (options[token.name]?.type !== "string") continue;
+		const raw = args[token.index + 1];
+		if (raw?.startsWith("--") && raw !== "--") {
+			swallowed.push(raw);
+		}
+	}
+	return swallowed;
+}
+
+/**
  * The one place `parseArgs` is called for command-line parsing. Lenient
  * (`strict: false`): unknown flags never throw — they are reported later as
  * warnings by the unknown-flag detector.
