@@ -1029,7 +1029,9 @@ async function applySetupRemoval(
 			await spawnC8ctl(
 				ctx,
 				["mcp", "uninstall", plan.harness, ...targets, "--preserve-conflicts"],
-				{ skipStdoutLine: () => true },
+				// stderr stays visible: a failing child's diagnostics are
+				// otherwise suppressed with the rest of the quiet output.
+				{ skipStdoutLine: () => true, stderrPassthrough: true },
 			);
 			for (const server of servers) {
 				logger.info(
@@ -1070,6 +1072,7 @@ async function applySetupRemoval(
 						line.startsWith("  Remove Camunda skill") ||
 						line === "Skills removal finished.",
 					promoteStdoutLine: (line) => line.startsWith("Removed Camunda skill"),
+					stderrPassthrough: true,
 				},
 			);
 		} catch (error) {
@@ -1085,6 +1088,9 @@ async function applySetupRemoval(
 		try {
 			await spawnC8ctl(ctx, ["modeler", "remove"], {
 				promoteStdoutLine: (line) => line.includes("Modeler"),
+				// Registration-cleanup warnings and failure diagnostics ride
+				// stderr — keep them visible in quiet removal runs.
+				stderrPassthrough: true,
 			});
 		} catch (error) {
 			failures += 1;
