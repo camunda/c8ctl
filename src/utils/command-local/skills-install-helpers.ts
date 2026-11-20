@@ -37,6 +37,63 @@ const HARNESS_ALIASES: Readonly<Record<string, string>> = {
 	copilot: "github-copilot",
 };
 
+/**
+ * Trusted user-scope skills directory for each GitHub CLI agent ID, relative
+ * to the user's home. Mirrors the `UserDir` table in GitHub CLI's skills
+ * registry. Removal is authorized only against these roots — never against
+ * a path GitHub CLI merely reports.
+ */
+const HARNESS_USER_SKILL_DIRS: Readonly<Record<string, string>> = {
+	"github-copilot": ".copilot/skills",
+	"claude-code": ".claude/skills",
+	cursor: ".cursor/skills",
+	codex: ".agents/skills",
+	"gemini-cli": ".gemini/skills",
+	antigravity: ".gemini/antigravity/skills",
+	"antigravity-cli": ".gemini/antigravity-cli/skills",
+	"antigravity2.0": ".gemini/config/skills",
+	adal: ".adal/skills",
+	amp: ".config/agents/skills",
+	augment: ".augment/skills",
+	bob: ".bob/skills",
+	cline: ".agents/skills",
+	codebuddy: ".codebuddy/skills",
+	"command-code": ".commandcode/skills",
+	continue: ".continue/skills",
+	cortex: ".snowflake/cortex/skills",
+	crush: ".config/crush/skills",
+	deepagents: ".deepagents/agent/skills",
+	devin: ".devin/skills",
+	droid: ".factory/skills",
+	firebender: ".firebender/skills",
+	goose: ".config/goose/skills",
+	grok: ".grok/skills",
+	"iflow-cli": ".iflow/skills",
+	junie: ".junie/skills",
+	kilo: ".kilocode/skills",
+	"kimi-cli": ".config/agents/skills",
+	"kiro-cli": ".kiro/skills",
+	kode: ".kode/skills",
+	mcpjam: ".mcpjam/skills",
+	"mistral-vibe": ".vibe/skills",
+	mux: ".mux/skills",
+	neovate: ".neovate/skills",
+	openclaw: ".openclaw/skills",
+	opencode: ".config/opencode/skills",
+	openhands: ".openhands/skills",
+	pi: ".pi/agent/skills",
+	pochi: ".pochi/skills",
+	qoder: ".qoder/skills",
+	"qwen-code": ".qwen/skills",
+	replit: ".config/agents/skills",
+	roo: ".roo/skills",
+	trae: ".trae/skills",
+	"trae-cn": ".trae-cn/skills",
+	universal: ".agents/skills",
+	warp: ".agents/skills",
+	zencoder: ".zencoder/skills",
+};
+
 export const CAMUNDA_SKILLS_REPOSITORY = "camunda/skills";
 
 const CAMUNDA_SKILLS_URL = `https://github.com/${CAMUNDA_SKILLS_REPOSITORY}`;
@@ -326,9 +383,24 @@ function harnessSkillDirectories({
 	home: string;
 	platform: string;
 }): string[] {
-	return harnessConfigDirectories({ harness, env, home, platform }).map(
-		(directory) => resolve(joinForPlatform(platform, directory, "skills")),
-	);
+	const directories: string[] = [];
+	// User-configured overrides take precedence and are trusted as explicit
+	// user configuration, matching GitHub CLI's resolution order.
+	if (harness === "claude-code" && env.CLAUDE_CONFIG_DIR) {
+		directories.push(
+			joinForPlatform(platform, env.CLAUDE_CONFIG_DIR, "skills"),
+		);
+	}
+	if (harness === "pi" && env.PI_CODING_AGENT_DIR) {
+		directories.push(
+			joinForPlatform(platform, env.PI_CODING_AGENT_DIR, "skills"),
+		);
+	}
+	const userDir = HARNESS_USER_SKILL_DIRS[harness];
+	if (userDir) {
+		directories.push(joinForPlatform(platform, home, userDir));
+	}
+	return directories.map((directory) => resolve(directory));
 }
 
 interface SkillRemovalOptions {
@@ -398,6 +470,46 @@ function skillRemovalLocation(
 		throw new Error(
 			`Cannot safely remove Camunda skill "${skill.name}" from ${skill.path}: the path is outside the ${skill.harness} user skills directory.`,
 		);
+	}
+
+	// A trusted root (or an ancestor) may itself be a symlink escaping the
+	// user's home. Resolve it before authorizing recursive deletion, and
+	// require the skill directory to resolve inside the resolved root. An
+	// env-configured root is trusted wherever it points.
+	if (statSync(root, { throwIfNoEntry: false })?.isDirectory()) {
+		const rootRealPath = realpathSync(root);
+		const envRoots = [
+			...(skill.harness === "claude-code" && env.CLAUDE_CONFIG_DIR
+				? [env.CLAUDE_CONFIG_DIR]
+				: []),
+			...(skill.harness === "pi" && env.PI_CODING_AGENT_DIR
+				? [env.PI_CODING_AGENT_DIR]
+				: []),
+		];
+		const isEnvRoot = envRoots.some(
+			(envRoot) => resolve(envRoot) === resolve(dirname(root)),
+		);
+		if (
+			!isEnvRoot &&
+			(!statSync(userHome, { throwIfNoEntry: false })?.isDirectory() ||
+				!isWithinPath(realpathSync(resolve(userHome)), rootRealPath))
+		) {
+			throw new Error(
+				`Cannot safely remove Camunda skill "${skill.name}": the ${skill.harness} user skills directory resolves outside the home directory.`,
+			);
+		}
+		const directoryInfo = lstatSync(directory, { throwIfNoEntry: false });
+		if (directoryInfo && !directoryInfo.isSymbolicLink()) {
+			const directoryRealPath = realpathSync(directory);
+			if (
+				!isWithinPath(rootRealPath, directoryRealPath) ||
+				directoryRealPath === rootRealPath
+			) {
+				throw new Error(
+					`Cannot safely remove Camunda skill "${skill.name}": its directory resolves outside the ${skill.harness} user skills directory.`,
+				);
+			}
+		}
 	}
 	return { directory, root };
 }

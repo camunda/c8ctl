@@ -52,6 +52,7 @@ import {
 	splitGlobals,
 	stripBlockedFlagTokens,
 	stripGlobalFlags,
+	swallowedOptionLikeValues,
 	typedReservedFlags,
 	undeclaredFlags,
 	validateFlags,
@@ -208,7 +209,8 @@ async function main() {
 	// Stage 1: parse GLOBAL_FLAGS from the front of argv and stop at
 	// the verb. Everything after the verb stays raw for stage 2, which parses
 	// it against that command's own flag table.
-	const stage1 = splitGlobals(process.argv.slice(2));
+	const argv = process.argv.slice(2);
+	const stage1 = splitGlobals(argv);
 
 	// Global flags given before the verb take effect now so plugin loading
 	// (which logs) sees the right output mode; flags after the verb are
@@ -522,15 +524,41 @@ async function main() {
 				args: filteredArgv,
 				options: mergedOptions,
 			});
+			// A mistyped flag can hide as the value of a string global
+			// (`--fields --harnes=cursor`); repeated or pre-verb occurrences
+			// overwrite each other in the parsed values, so detect them from
+			// the raw tokens instead. The global-options scan must stop at the
+			// verb — post-verb tokens belong to the plugin-aware parse, which
+			// knows the plugin's own flags. These stay out of
+			// unrecognizedFlags: the handler still receives them as values,
+			// and for most plugins dash-prefixed values are legitimate.
+			const preVerbArgv = argv.slice(0, argv.length - stage1.rest.length - 1);
+			pluginCtx.suspiciousFlagValues = [
+				...new Set([
+					...swallowedOptionLikeValues({
+						args: filteredArgv,
+						options: mergedOptions,
+						tokens: pluginParsed.tokens,
+					}),
+					...swallowedOptionLikeValues({
+						args: preVerbArgv,
+						options: builtinOptions,
+						tokens: parseFlags({ args: preVerbArgv, options: builtinOptions })
+							.tokens,
+					}),
+				]),
+			];
+			const unrecognizedPluginFlags = undeclaredFlags({
+				tokens: pluginParsed.tokens,
+				options: mergedOptions,
+			});
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
-				names: undeclaredFlags({
-					tokens: pluginParsed.tokens,
-					options: mergedOptions,
-				}),
+				names: unrecognizedPluginFlags,
 				declared: Object.keys(analysis.usable),
 			});
+			pluginCtx.unrecognizedFlags = unrecognizedPluginFlags;
 			const extractedFlags: Record<string, unknown> = {};
 			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
 				if (blockedFlags.has(flagName)) continue;
@@ -567,15 +595,36 @@ async function main() {
 				pluginCtx,
 			);
 		} else {
+			const bareGlobalOptions = globalOptions();
+			const preVerbArgv = argv.slice(0, argv.length - stage1.rest.length - 1);
+			pluginCtx.suspiciousFlagValues = [
+				...new Set([
+					...swallowedOptionLikeValues({
+						args: stage1.rest,
+						options: bareGlobalOptions,
+						tokens: parsed.tokens,
+					}),
+					...swallowedOptionLikeValues({
+						args: preVerbArgv,
+						options: bareGlobalOptions,
+						tokens: parseFlags({
+							args: preVerbArgv,
+							options: bareGlobalOptions,
+						}).tokens,
+					}),
+				]),
+			];
+			const unrecognizedPluginFlags = undeclaredFlags({
+				tokens: parsed.tokens,
+				options: bareGlobalOptions,
+			});
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
-				names: undeclaredFlags({
-					tokens: parsed.tokens,
-					options: globalOptions(),
-				}),
+				names: unrecognizedPluginFlags,
 				declared: [],
 			});
+			pluginCtx.unrecognizedFlags = unrecognizedPluginFlags;
 			await executePluginCommand(
 				verb,
 				resource ? [resource, ...args] : args,

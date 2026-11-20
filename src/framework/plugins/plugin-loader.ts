@@ -68,6 +68,21 @@ export interface PluginCtx {
 	yes: boolean;
 	/** Parsed `--fields a,b,c` list, or undefined when not set. */
 	fields?: string[];
+	/**
+	 * Undeclared flags the user typed on this verb (for example a mistyped
+	 * `--harnes`). The host warns and drops them before the handler runs, so
+	 * a destructive command MUST reject when this is non-empty rather than
+	 * proceed with a broader scope than the user intended.
+	 */
+	unrecognizedFlags?: string[];
+	/**
+	 * Option-like values a string flag swallowed (for example
+	 * `--fields -harness=cursor`). The handler still receives them as values,
+	 * and for most plugins they are legitimate input — the host does not
+	 * warn. Destructive commands SHOULD reject them, because they can also
+	 * be a mistyped selector hidden from `unrecognizedFlags`.
+	 */
+	suspiciousFlagValues?: string[];
 	/** Host logger — use `logger.json(...)` for structured output. */
 	logger: Logger;
 	/** Interactive prompts — arrow-key menu, checkbox list and yes/no confirmation. */

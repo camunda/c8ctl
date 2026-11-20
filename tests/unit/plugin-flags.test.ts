@@ -382,6 +382,13 @@ describe("Plugin Flags CLI subprocess — string flag without a value", () => {
 		assert.deepStrictEqual(args, []);
 	});
 
+	test("`--source -draft` keeps `-draft` as the value without a warning", async () => {
+		const result = await c8plugin("test-flags", "--source", "-draft");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(JSON.parse(result.stdout).flags.source, "-draft");
+		assert.ok(!result.stderr.includes("Unknown flag"), result.stderr);
+	});
+
 	test("a string flag followed by a global flag is not given the global as its value", async () => {
 		const result = await c8plugin("test-flags", "--source", "--json");
 		assert.strictEqual(result.status, 0, result.stderr);
