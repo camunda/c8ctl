@@ -188,11 +188,9 @@ async function removeSkills(
 			);
 		}
 		// A mistyped flag can also be swallowed as the value of a string
-		// global (`skills remove --fields --harnes=cursor`); option-like
-		// values are never legitimate here and must not widen removal.
-		const swallowed = [...(ctx.fields ?? []), ctx.profile].find(
-			(value) => typeof value === "string" && value.startsWith("-"),
-		);
+		// global (`skills remove --fields --harnes=cursor`); the host exposes
+		// every occurrence, and option-like values are never legitimate here.
+		const swallowed = ctx.suspiciousFlagValues?.[0];
 		if (swallowed) {
 			throw new Error(
 				`"${swallowed}" looks like a flag but was passed as a value. Only --harness selects the removal scope; fix the invocation before deleting skills.`,

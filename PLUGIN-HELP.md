@@ -154,7 +154,7 @@ A flag handler is called as `handler(args, flags, ctx)`. Read global flags from 
 | `--yes` | `ctx.yes` |
 | `--fields` | `ctx.fields` |
 
-`ctx` also carries `ctx.logger`, `ctx.prompt` and a lazily created `ctx.client`. A bare-function handler receives `ctx` as its third argument too, after a `flags` argument that is `undefined`. Undeclared flags the user typed (for example a mistyped `--harnes`) are warned about and dropped by the host; their names are exposed as `ctx.unrecognizedFlags` so destructive commands can reject them instead of running with a broader scope than intended.
+`ctx` also carries `ctx.logger`, `ctx.prompt` and a lazily created `ctx.client`. A bare-function handler receives `ctx` as its third argument too, after a `flags` argument that is `undefined`. Undeclared flags the user typed (for example a mistyped `--harnes`) are warned about and dropped by the host; their names are exposed as `ctx.unrecognizedFlags` so destructive commands can reject them instead of running with a broader scope than intended. Option-like values a string flag swallowed (for example `--fields -harness=cursor`) remain ordinary values — the host exposes them as `ctx.suspiciousFlagValues` without warning, so destructive commands can reject them while other plugins keep receiving them.
 
 #### How flag values are parsed
 

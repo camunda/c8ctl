@@ -529,14 +529,12 @@ async function main() {
 			// overwrite each other in the parsed values, so detect them from
 			// the raw tokens instead. The global-options scan must stop at the
 			// verb — post-verb tokens belong to the plugin-aware parse, which
-			// knows the plugin's own flags.
+			// knows the plugin's own flags. These stay out of
+			// unrecognizedFlags: the handler still receives them as values,
+			// and for most plugins dash-prefixed values are legitimate.
 			const preVerbArgv = argv.slice(0, argv.length - stage1.rest.length - 1);
-			const unrecognizedPluginFlags = [
+			pluginCtx.suspiciousFlagValues = [
 				...new Set([
-					...undeclaredFlags({
-						tokens: pluginParsed.tokens,
-						options: mergedOptions,
-					}),
 					...swallowedOptionLikeValues({
 						args: filteredArgv,
 						options: mergedOptions,
@@ -550,6 +548,10 @@ async function main() {
 					}),
 				]),
 			];
+			const unrecognizedPluginFlags = undeclaredFlags({
+				tokens: pluginParsed.tokens,
+				options: mergedOptions,
+			});
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
@@ -595,12 +597,8 @@ async function main() {
 		} else {
 			const bareGlobalOptions = globalOptions();
 			const preVerbArgv = argv.slice(0, argv.length - stage1.rest.length - 1);
-			const unrecognizedPluginFlags = [
+			pluginCtx.suspiciousFlagValues = [
 				...new Set([
-					...undeclaredFlags({
-						tokens: parsed.tokens,
-						options: bareGlobalOptions,
-					}),
 					...swallowedOptionLikeValues({
 						args: stage1.rest,
 						options: bareGlobalOptions,
@@ -616,6 +614,10 @@ async function main() {
 					}),
 				]),
 			];
+			const unrecognizedPluginFlags = undeclaredFlags({
+				tokens: parsed.tokens,
+				options: bareGlobalOptions,
+			});
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,

@@ -75,6 +75,14 @@ export interface PluginCtx {
 	 * proceed with a broader scope than the user intended.
 	 */
 	unrecognizedFlags?: string[];
+	/**
+	 * Option-like values a string flag swallowed (for example
+	 * `--fields -harness=cursor`). The handler still receives them as values,
+	 * and for most plugins they are legitimate input — the host does not
+	 * warn. Destructive commands SHOULD reject them, because they can also
+	 * be a mistyped selector hidden from `unrecognizedFlags`.
+	 */
+	suspiciousFlagValues?: string[];
 	/** Host logger — use `logger.json(...)` for structured output. */
 	logger: Logger;
 	/** Interactive prompts — arrow-key menu, checkbox list and yes/no confirmation. */
