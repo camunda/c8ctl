@@ -128,6 +128,23 @@ function skillRows(skills: CamundaSkillInstallation[]) {
 	return skills.map(({ name, harness, path }) => ({ name, harness, path }));
 }
 
+/**
+ * Emit JSON for a rows payload. With `--fields`, emit the rows directly
+ * so logger.json filters each row's keys; the envelope would swallow
+ * requested fields such as `name,path`.
+ */
+function emitRowsJson(
+	ctx: PluginCtx,
+	envelope: Record<string, unknown>,
+	rows: Array<Record<string, string>>,
+): void {
+	if (ctx.fields && ctx.fields.length > 0) {
+		ctx.logger.json(rows);
+	} else {
+		ctx.logger.json(envelope);
+	}
+}
+
 async function listSkills(rawHarness: unknown, ctx: PluginCtx): Promise<void> {
 	const { logger } = ctx;
 	try {
@@ -135,13 +152,11 @@ async function listSkills(rawHarness: unknown, ctx: PluginCtx): Promise<void> {
 		const skills = await inspectSkills(harnesses);
 		const rows = skillRows(skills);
 		if (ctx.outputMode === "json") {
-			if (ctx.fields && ctx.fields.length > 0) {
-				// Emit the rows so logger.json filters each row's keys; the
-				// envelope would swallow requested fields like `name,path`.
-				logger.json(rows);
-			} else {
-				logger.json({ command: "skills list", harnesses, skills: rows });
-			}
+			emitRowsJson(
+				ctx,
+				{ command: "skills list", harnesses, skills: rows },
+				rows,
+			);
 		} else if (rows.length === 0) {
 			const labels = harnesses
 				.map((harness) => HARNESS_LABELS[harness] ?? harness)
@@ -206,13 +221,17 @@ async function removeSkills(
 		};
 
 		if (ctx.dryRun) {
-			logger.json({ dryRun: true, ...preview });
+			emitRowsJson(ctx, { dryRun: true, ...preview }, items);
 			return;
 		}
 
 		if (skills.length === 0) {
 			if (ctx.outputMode === "json") {
-				logger.json({ command: "skills remove", harnesses, removed: [] });
+				emitRowsJson(
+					ctx,
+					{ command: "skills remove", harnesses, removed: [] },
+					[],
+				);
 			} else {
 				const labels = harnesses
 					.map((harness) => HARNESS_LABELS[harness] ?? harness)
@@ -235,7 +254,7 @@ async function removeSkills(
 				].join("\n"),
 			);
 		} else if (!ctx.yes) {
-			logger.json(preview);
+			emitRowsJson(ctx, preview, items);
 			return;
 		}
 
@@ -284,10 +303,11 @@ async function removeSkills(
 		}
 
 		if (ctx.outputMode === "json") {
-			logger.json({
-				command: "skills remove",
-				removed: skillRows(removed),
-			});
+			emitRowsJson(
+				ctx,
+				{ command: "skills remove", removed: skillRows(removed) },
+				skillRows(removed),
+			);
 		} else {
 			for (const skill of removed) {
 				logger.info(

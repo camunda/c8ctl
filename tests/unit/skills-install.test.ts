@@ -491,6 +491,41 @@ test("skills remove previews first, requires confirmation, and removes only Camu
 	}
 });
 
+test("skills remove applies --fields to preview and result rows in JSON mode", async () => {
+	const fixture = createSkillFixture();
+	try {
+		const preview = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"--dry-run",
+			"--json",
+			"--fields",
+			"name,path",
+		);
+		assert.equal(preview.status, 0, preview.stderr);
+		assert.deepEqual(JSON.parse(preview.stdout), [
+			{ name: "camunda-c8ctl", path: fixture.skillDirectory },
+		]);
+		assert.ok(existsSync(fixture.skillDirectory));
+
+		const removed = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"--yes",
+			"--json",
+			"--fields",
+			"name",
+		);
+		assert.equal(removed.status, 0, removed.stderr);
+		assert.deepEqual(JSON.parse(removed.stdout), [{ name: "camunda-c8ctl" }]);
+		assert.ok(!existsSync(fixture.skillDirectory));
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("skills remove leaves installations untouched when discovery fails", async () => {
 	const fixture = createSkillFixture();
 	try {
