@@ -12,7 +12,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
@@ -21,6 +21,7 @@ import {
 } from "../../src/utils/command-local/mcp-install-helpers.ts";
 import { c8, c8WithOptions, parseJson } from "../utils/cli.ts";
 import { isRecord } from "../utils/guards.ts";
+import { asyncSpawn } from "../utils/spawn.ts";
 
 const DOCS_URL = "https://camunda-docs.mcp.kapa.ai";
 const HARNESSES = [
@@ -580,5 +581,68 @@ test("MCP help and shell completions expose target selection and uninstall", asy
 		assert.equal(completion.status, 0, completion.stderr);
 		assert.match(completion.stdout, /orchestration/);
 		assert.match(completion.stdout, /docs/);
+	}
+});
+
+const SRC_CLI = resolve(import.meta.dirname, "../../src/index.ts");
+const DIST_CLI = resolve(import.meta.dirname, "../../dist/index.js");
+
+// The installed orchestration entry spawns `<node> <cli-entry> mcp-proxy`:
+// if the entry path the installer writes does not match the layout the CLI
+// actually runs from (source checkout vs. bundled dist), every harness
+// config c8ctl writes is dead on arrival. Pin the entry for both layouts.
+test("orchestration entry points at the source CLI entry when running from src", async (t) => {
+	const s = sandbox(t);
+	const result = await s.run("mcp", "install", "cursor");
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(serversAt(s.paths.cursor, "cursor").camunda, {
+		type: "stdio",
+		command: process.execPath,
+		args: [realpathSync(SRC_CLI), "mcp-proxy", "--profile", "local"],
+		env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
+	});
+});
+
+test("orchestration entry points at the built CLI entry when running from dist", async (t) => {
+	if (!existsSync(DIST_CLI)) {
+		t.skip("requires `npm run build` — dist/index.js is absent");
+		return;
+	}
+	const s = sandbox(t);
+	const env: NodeJS.ProcessEnv = { ...process.env };
+	for (const [key, value] of Object.entries(s.env)) {
+		if (value === undefined) delete env[key];
+		else env[key] = value;
+	}
+	// dist is compiled JavaScript — no type-stripping flags needed.
+	const result = await asyncSpawn(
+		process.execPath,
+		[DIST_CLI, "mcp", "install", "cursor"],
+		{ env },
+	);
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(serversAt(s.paths.cursor, "cursor").camunda, {
+		type: "stdio",
+		command: process.execPath,
+		args: [realpathSync(DIST_CLI), "mcp-proxy", "--profile", "local"],
+		env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
+	});
+});
+
+// Plugin flag dispatch does not enforce the flag's `rejectEmpty` metadata, so
+// the handler validates it: an empty or valueless --alias must fail the
+// command before any harness config is planned or written.
+test("empty or valueless --alias is rejected before any config write", async (t) => {
+	const original = '{"mcpServers":{"other":{"url":"https://other.invalid"}}}';
+	for (const action of ["install", "uninstall"]) {
+		for (const aliasArgs of [["--alias="], ["--alias", ""], ["--alias"]]) {
+			const s = sandbox(t);
+			s.write("cursor", original);
+			const result = await s.run("mcp", action, "cursor", ...aliasArgs);
+			const label = `mcp ${action} ${aliasArgs.join(" ")}`;
+			assert.equal(result.status, 1, `${label}: ${result.stderr}`);
+			assert.match(result.stderr, /--alias/);
+			assert.equal(readFileSync(s.paths.cursor, "utf8"), original, label);
+		}
 	}
 });

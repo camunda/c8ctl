@@ -65,7 +65,6 @@ import {
 	listJobsCommand,
 	updateJobCommand,
 } from "./commands/jobs.ts";
-import { installMcpCommand, uninstallMcpCommand } from "./commands/mcp.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
 	correlateMessageCommand,
@@ -275,6 +274,4 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["open:optimize", openAppCommand],
 	["feedback:", feedbackCommand],
 	["mcp-proxy:", mcpProxyCommand],
-	["mcp:install", installMcpCommand],
-	["mcp:uninstall", uninstallMcpCommand],
 ]);
