@@ -28,7 +28,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import ts from "typescript";
+import ts from "typescript-compiler-api";
 
 export interface ProcessExitCall {
 	/** 1-based line number of the call. */

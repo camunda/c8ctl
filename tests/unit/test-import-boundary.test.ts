@@ -52,7 +52,7 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, test } from "node:test";
-import ts from "typescript";
+import ts from "typescript-compiler-api";
 import { listTestFiles } from "../utils/test-files.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
