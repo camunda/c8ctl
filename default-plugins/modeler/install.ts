@@ -510,9 +510,17 @@ async function warnIfUpdateAvailable(
 async function newerReleaseThan(
 	installedVersion: string,
 ): Promise<string | undefined> {
-	const latestVersion = latestStableModelerVersion(
-		await fetchReleaseIndex(AbortSignal.timeout(10_000)),
-	);
+	const interrupts = registerDownloadInterrupts("Modeler update check");
+	let latestVersion: string;
+	try {
+		latestVersion = latestStableModelerVersion(
+			await fetchReleaseIndex(
+				AbortSignal.any([interrupts.signal, AbortSignal.timeout(10_000)]),
+			),
+		);
+	} finally {
+		interrupts.cleanup();
+	}
 	return isNewerModelerVersion(latestVersion, installedVersion)
 		? `Camunda Modeler ${installedVersion} is installed, but ${latestVersion} is available.`
 		: undefined;

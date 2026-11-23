@@ -213,7 +213,8 @@ syncBuiltinESMExports();
  * Loaded into the CLI subprocess on Linux: maps /usr/bin and /bin filesystem
  * lookups into temp roots, runs root commands without sudo and records them in
  * TOOL_LOG (FAIL_AT=<tool> makes that tool fail), fakes the user id and
- * architecture, and serves ARCHIVE as the 5.52.0 release.
+ * architecture, and serves ARCHIVE as the 5.52.0 release
+ * (FAIL_RELEASE_INDEX=1 makes the release index unavailable).
  */
 const LINUX_PRELOAD = `
 import childProcess from "node:child_process";
@@ -306,6 +307,9 @@ globalThis.fetch = async (input, init) => {
 	const url = String(input);
 	if (url === releaseUrl) {
 ${STALLED_RELEASE_INDEX}
+		if (process.env.FAIL_RELEASE_INDEX === "1") {
+			return new Response("unavailable", { status: 503 });
+		}
 		return new Response('<a href="' + releaseVersion + '/">' + releaseVersion + '/</a>');
 	}
 	return url === releaseUrl + releaseVersion + "/camunda-modeler-" + releaseVersion + "-linux-x64.tar.gz"
@@ -1835,6 +1839,59 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	for (const quiet of [false, true]) {
+		test(`warns when a skipped managed Linux installation is outdated${quiet ? " with --quiet" : ""}`, {
+			skip: !isLinux,
+		}, async () => {
+			const sandbox = createLinuxSandbox();
+			addLinuxInstall(sandbox, "5.51.0");
+			try {
+				const result = await sandbox.install({}, ...(quiet ? ["--quiet"] : []));
+
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(
+					result.stderr,
+					/Camunda Modeler 5\.51\.0 is installed, but 5\.52\.0 is available\. Run `c8ctl modeler update` to update it\./,
+				);
+				assert.deepStrictEqual(sandbox.toolCalls(), []);
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
+
+	test("does not warn when a skipped managed Linux installation is current", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.52.0");
+		try {
+			const result = await sandbox.install();
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /already installed at .*; skipping/);
+			assert.doesNotMatch(result.stderr, /is available/);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("skips a managed Linux installation when the update check fails", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		try {
+			const result = await sandbox.install({ FAIL_RELEASE_INDEX: "1" });
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /already installed at .*; skipping/);
+			assert.doesNotMatch(result.stderr, /is available/);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	test("finds Modeler in a sandboxed /bin PATH entry on Linux", {
 		skip: isWindows,
 	}, async () => {
@@ -2578,6 +2635,16 @@ describe("CLI behavioural: modeler install", () => {
 	for (const scenario of [
 		{ name: "macOS", skip: !isMac, create: createSandbox },
 		{ name: "Linux", skip: !isLinux, create: createLinuxSandbox },
+		{
+			// The update check of a skipped install fetches the index too.
+			name: "Skipped managed Linux",
+			skip: !isLinux,
+			create: () => {
+				const sandbox = createLinuxSandbox();
+				addLinuxInstall(sandbox, "5.51.0");
+				return sandbox;
+			},
+		},
 	]) {
 		for (const signal of ["SIGINT", "SIGTERM"] as const) {
 			test(`${scenario.name} release-index downloads abort on ${signal}`, {
