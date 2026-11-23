@@ -2,14 +2,14 @@
 id: cluster-inspection
 title: "Cluster inspection and process management"
 sidebar_label: "Cluster inspection"
-description: "Use c8ctl to list, search, and manage process instances, user tasks, incidents, jobs, messages, and forms in a Camunda 8 cluster."
+description: "Use the Camunda 8 CLI (c8ctl) to list, search, and manage process instances, user tasks, incidents, jobs, messages, and forms in a Camunda 8 cluster."
 ---
 
 <!-- This page is maintained in the c8ctl repository (https://github.com/camunda/c8ctl, in docs/) and
      is synced to camunda-docs automatically. Do not edit it in camunda-docs — changes will be
      overwritten. Edit the source in the c8ctl repo instead. -->
 
-`c8ctl` follows a `<verb> <resource>` command structure. Most resources have short aliases to reduce typing:
+The Camunda 8 CLI (`c8ctl`) follows a `<verb> <resource>` command structure. Most resources have short aliases to reduce typing:
 
 | Resource                | Alias         |
 | :---------------------- | :------------ |
@@ -534,7 +534,7 @@ c8 complete job 2251799813685252 --variables=@vars.json
 Get-Content vars.json | c8 complete job 2251799813685252 --variables=@-
 ```
 
-When inline JSON arrives with all of its quotes stripped (`{a:b}` instead of `{"a":"b"}`), c8ctl restores them and prints a warning showing the payload it recovered. Restoration is best-effort: it cannot tell `{"a":1}` from `{"a":"1"}`, and it fails outright when a stripped string contained a `:` or `,` of its own. Use `@file.json` or `@-` for anything non-trivial.
+When inline JSON arrives with all of its quotes stripped (`{a:b}` instead of `{"a":"b"}`), the CLI restores them and prints a warning showing the payload it recovered. Restoration is best-effort: it cannot tell `{"a":1}` from `{"a":"1"}`, and it fails outright when a stripped string contained a `:` or `,` of its own. Use `@file.json` or `@-` for anything non-trivial.
 
 The element instance key is the key of the process instance or the specific flow element scope you want to update. You can retrieve these keys from `c8 get pi` or `c8 search pi`.
 
@@ -666,7 +666,7 @@ c8 get form 2251799813685252 --pd
 c8 get form 2251799813685251 --profile=prod
 ```
 
-When no flag is specified, `c8ctl` searches both types and reports where the form was found.
+When no flag is specified, the CLI searches both types and reports where the form was found.
 
 ## Sorting and limiting results
 

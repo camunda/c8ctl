@@ -3,7 +3,7 @@
 module.exports = [
   {
     type: "category",
-    label: "c8ctl CLI",
+    label: "Camunda 8 CLI",
     link: {
       type: "doc",
       id: "apis-tools/c8ctl/getting-started",

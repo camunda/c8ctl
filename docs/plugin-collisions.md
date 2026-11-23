@@ -71,7 +71,7 @@ install-directory entry for command-name comparisons).
 ### The one exception: a plugin disabled by `engines.c8ctl`
 
 A plugin whose declared host requirement this c8ctl does not satisfy
-([plugins.md](plugins.md#the-c8ctl-version-a-plugin-needs)) loses a
+([plugins.md](plugins.md#the-cli-version-a-plugin-needs)) loses a
 command-name collision to a compatible plugin **regardless of load
 order**. Its own copy of that command exists only to report which c8ctl it
 needs, so letting alphabetical order hand it the name would leave the user
