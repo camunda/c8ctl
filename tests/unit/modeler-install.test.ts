@@ -744,7 +744,8 @@ describe("CLI behavioural: modeler install", () => {
 				'  "--version") exit 0 ;;',
 				'  "list --cask --versions camunda-modeler") exit 0 ;;',
 				'  "outdated --cask --quiet camunda-modeler")',
-				'    if [ "$BREW_OUTDATED" = "1" ]; then printf "camunda-modeler\\n"; fi ;;',
+				// Like real brew, a named outdated cask makes `brew outdated` exit 1.
+				'    if [ "$BREW_OUTDATED" = "1" ]; then printf "camunda-modeler\\n"; exit 1; fi ;;',
 				'  "upgrade --cask camunda-modeler") exit 0 ;;',
 				"  *) exit 1 ;;",
 				"esac",
@@ -1090,6 +1091,51 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("asks Homebrew about updates for a cask app in /Applications", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		try {
+			// Homebrew moves cask apps into /Applications, so the bundle
+			// path alone does not reveal that Homebrew owns it.
+			writeMacApp(join(sandbox.applicationsRoot, MODELER_BUNDLE), "5.51.0");
+			sandbox.fakeTool(
+				"brew",
+				[
+					'case "$*" in',
+					"  --version) exit 0 ;;",
+					'  "list --cask --versions camunda-modeler") exit 0 ;;',
+					'  "outdated --cask --quiet camunda-modeler")',
+					'    if [ "$BREW_OUTDATED" = "1" ]; then printf "camunda-modeler\\n"; exit 1; fi ;;',
+					"  *) exit 1 ;;",
+					"esac",
+				].join("\n"),
+			);
+			const checks = [
+				"brew --version",
+				"brew list --cask --versions camunda-modeler",
+				"brew outdated --cask --quiet camunda-modeler",
+			];
+
+			const current = await sandbox.install({ BREW_OUTDATED: "0" });
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.match(current.stdout, /already installed at .*; skipping/);
+			assert.strictEqual(current.stderr, "");
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+
+			sandbox.resetToolCalls();
+			const outdated = await sandbox.install({ BREW_OUTDATED: "1" });
+			assert.strictEqual(outdated.status, 0, outdated.stderr);
+			assert.match(
+				outdated.stderr,
+				/A newer Camunda Modeler is available with Homebrew\. Run `c8ctl modeler update` to update it\./,
+			);
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	for (const homebrew of [true, false]) {
 		test(`emits a JSON dry-run preview for ${homebrew ? "Homebrew" : "direct download"}`, {
 			skip: !isMac,
@@ -1143,7 +1189,8 @@ describe("CLI behavioural: modeler install", () => {
 				'case "$1" in',
 				"  --version) exit 0 ;;",
 				'  list) exit "$BREW_INSTALLED" ;;',
-				'  outdated) printf "%s" "$BREW_OUTDATED" ;;',
+				// Like real brew, a named outdated cask makes `brew outdated` exit 1.
+				'  outdated) printf "%s" "$BREW_OUTDATED"; [ -z "$BREW_OUTDATED" ] ;;',
 				'  install) /bin/mkdir -p "$APPLICATIONS_ROOT/Camunda Modeler.app" ;;',
 				"  *) exit 1 ;;",
 				"esac",

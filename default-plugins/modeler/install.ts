@@ -346,28 +346,6 @@ function runCommand(
 	}
 }
 
-function runCommandCapture(
-	command: string,
-	args: string[],
-	failureMessage: string,
-): string {
-	const result = spawnSync(command, args, {
-		encoding: "utf8",
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	const diagnostics = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-	const details = diagnostics ? `\n${diagnostics}` : "";
-	if (result.error) {
-		throw new Error(`${failureMessage}: ${result.error.message}${details}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(
-			`${failureMessage} (exit code ${formatExitCode(result.status)}).${details}`,
-		);
-	}
-	return result.stdout ?? "";
-}
-
 function registerWithLaunchServices(appPath: string, logger: Logger): void {
 	const result = spawnSync(LAUNCH_SERVICES_REGISTER, ["-f", appPath], {
 		stdio: "ignore",
@@ -1182,7 +1160,9 @@ export async function installDesktopModeler(
 	const installedPath = findInstalledModeler();
 	if (installedPath) {
 		await warnIfUpdateAvailable(ctx.logger, async () => {
-			if (isHomebrewCaskPath(installedPath)) {
+			// Homebrew moves cask apps into the app folders, so ask Homebrew
+			// whether it owns the bundle rather than inferring it from the path.
+			if (hasPackageManager("brew", "Homebrew") && homebrewModelerInstalled()) {
 				return homebrewModelerOutdated() ? HOMEBREW_UPDATE_NOTICE : undefined;
 			}
 			return newerReleaseThan(readMacModelerVersion(installedPath));
@@ -1194,14 +1174,7 @@ export async function installDesktopModeler(
 	}
 
 	if (hasPackageManager("brew", "Homebrew")) {
-		if (
-			isInstalledWith({
-				command: "brew",
-				args: ["list", "--cask", "--versions", "camunda-modeler"],
-				notInstalledStatus: 1,
-				description: "the Homebrew Modeler cask",
-			})
-		) {
+		if (homebrewModelerInstalled()) {
 			await warnIfUpdateAvailable(ctx.logger, () =>
 				homebrewModelerOutdated() ? HOMEBREW_UPDATE_NOTICE : undefined,
 			);
@@ -1327,13 +1300,34 @@ function homebrewModelerInstalled(): boolean {
 const HOMEBREW_UPDATE_NOTICE =
 	"A newer Camunda Modeler is available with Homebrew.";
 
+/**
+ * Whether Homebrew has a newer Modeler cask. `brew outdated` exits with 1
+ * when a named cask is outdated, so that status is a result, not a failure.
+ */
 function homebrewModelerOutdated(): boolean {
-	return (
-		runCommandCapture(
-			"brew",
-			["outdated", "--cask", "--quiet", "camunda-modeler"],
-			"Could not check Homebrew for Camunda Modeler updates",
-		).trim() !== ""
+	const failureMessage = "Could not check Homebrew for Camunda Modeler updates";
+	const result = spawnSync(
+		"brew",
+		["outdated", "--cask", "--quiet", "camunda-modeler"],
+		{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+	);
+	const stdout = (result.stdout ?? "").trim();
+	const diagnostics = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+	const details = diagnostics ? `\n${diagnostics}` : "";
+	if (result.error) {
+		throw new Error(`${failureMessage}: ${result.error.message}${details}`);
+	}
+	if (result.status === 0 && stdout === "") return false;
+	if (
+		(result.status === 0 || result.status === 1) &&
+		stdout
+			.split(/\r?\n/)
+			.some((line) => /(^|\/)camunda-modeler$/.test(line.trim()))
+	) {
+		return true;
+	}
+	throw new Error(
+		`${failureMessage} (exit code ${formatExitCode(result.status)}).${details}`,
 	);
 }
 
