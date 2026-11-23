@@ -555,14 +555,16 @@ describe("c8ctl setup", () => {
 				/Watch it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
 			);
 			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
-			// The CLI suggestions pin the local profile: the session's active
-			// profile may point at a remote cluster. The run path is quoted —
-			// the working directory may contain spaces. One command per line:
-			// && is a syntax error in Windows PowerShell 5.1.
+			// Tenant and profile are pinned: the session's active selections
+			// may point at a remote cluster or a non-default tenant.
+			assert.match(out, /Inspect it:\s+c8ctl use tenant "<default>"/);
 			assert.match(
 				out,
-				/Inspect it:\s+c8ctl get process-instance 2251799813686751 --profile local/,
+				/c8ctl get process-instance 2251799813686751 --profile local/,
 			);
+			// The run path is quoted — the working directory may contain
+			// spaces. One command per line: && is a syntax error in
+			// Windows PowerShell 5.1.
 			assert.match(
 				out,
 				/Run again:\s+c8ctl run ".*rocket-launch[/\\]rocket-launch\.bpmn" --profile local/,
