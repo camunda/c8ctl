@@ -49,6 +49,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
 	ProcessDefinitionId,
+	type ProcessInstanceKey,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
 import {
@@ -125,7 +126,7 @@ interface SetupRun {
 	/** Set when the cluster step succeeded — drives the final Operate hint. */
 	clusterStarted?: boolean;
 	/** Set when the deploy step started the blueprint's process instance. */
-	instanceStarted?: boolean;
+	processInstanceKey?: ProcessInstanceKey;
 }
 
 /**
@@ -516,7 +517,7 @@ async function runBlueprintDeploy(
 			}),
 		});
 	logger.info(`Process instance created: ${created.processInstanceKey}`);
-	run.instanceStarted = true;
+	run.processInstanceKey = created.processInstanceKey;
 }
 
 /**
@@ -1365,8 +1366,13 @@ async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 		// Outcome lines describe the started instance — claim them only
 		// when the deploy step actually started one. On a failed deploy
 		// the Project/Guide references below still apply.
-		if (run.instanceStarted) {
-			nextSteps.push(...blueprint.nextSteps(run.blueprintDir));
+		if (run.processInstanceKey !== undefined) {
+			nextSteps.push(
+				...blueprint.nextSteps({
+					projectDir: run.blueprintDir,
+					processInstanceKey: run.processInstanceKey,
+				}),
+			);
 		}
 		nextSteps.push(`Project: ${run.blueprintDir}`);
 		nextSteps.push(`Guide: ${blueprint.guideUrl}`);

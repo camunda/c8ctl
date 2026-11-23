@@ -552,15 +552,30 @@ describe("c8ctl setup", () => {
 				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
 			);
 			// The box is actionable: setup already started an instance, and
-			// the box says so and names the command that shows it.
-			assert.match(out, /A Rocket Launch instance is already running/);
-			// Tenant and profile are pinned: a saved session tenant or a
-			// remote active profile must not redirect the suggestion. Two
-			// separate lines — && is a syntax error in Windows
-			// PowerShell 5.1.
-			assert.match(out, /See it:/);
-			assert.match(out, /c8ctl use tenant "<default>"/);
-			assert.match(out, /c8ctl search process-instance --profile local/);
+			// the box deeplinks it in Operate (naming the local credentials)
+			// and gives the CLI commands that inspect it and start another.
+			assert.match(out, /Process instance is running on the local cluster\./);
+			assert.match(
+				out,
+				/Watch it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
+			);
+			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
+			// The profile is pinned: the session's active profile may point
+			// at a remote cluster. The tenant is deliberately not pinned —
+			// the first-run audience has no session tenant, so resolution
+			// already lands on <default>.
+			assert.match(
+				out,
+				/Inspect it:\s+c8ctl get process-instance 2251799813686751 --profile local/,
+			);
+			assert.doesNotMatch(out, /use tenant/);
+			// The run path is quoted — the working directory may contain
+			// spaces — and the rerun carries the same start variables
+			// setup used, so the mission decision cannot incident.
+			assert.match(
+				out,
+				/Run again:\s+c8ctl run ".*rocket-launch[/\\]rocket-launch\.bpmn" --profile local --variables '\{"missionName":"Apollo","fuelLevel":80\}'/,
+			);
 			assert.doesNotMatch(out, /&&/);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
@@ -2081,8 +2096,10 @@ describe("c8ctl setup", () => {
 			// problem detail never surfaces as a four-space summary line.
 			assert.doesNotMatch(out, /^ {4}INVALID_ARGUMENT$/m);
 			// No instance was started, so the box must not claim one is
-			// running — only the Project/Guide references remain.
-			assert.doesNotMatch(out, /already running/);
+			// running or deeplink one — only the Project/Guide references
+			// remain.
+			assert.doesNotMatch(out, /Process instance is running/);
+			assert.doesNotMatch(out, /operate\/processes\//);
 			assert.match(out, /Project: .*rocket-launch/);
 		} finally {
 			stub.cleanup();
@@ -2269,17 +2286,51 @@ describe("c8ctl setup", () => {
 				),
 				"service-worker blueprint was not scaffolded",
 			);
-			// The instance stalls at its service task until a worker connects —
-			// the closing box must say so and hand over the commands.
-			assert.match(out, /The order process waits for a worker/);
-			// Quoted, so a working directory with spaces stays usable;
+			// The instance stalls at its service task until a worker
+			// connects — the closing box says so, deeplinks it in Operate
+			// (naming the local credentials), and hands over one worker
+			// block per shipped language.
+			assert.match(out, /Process instance is running on the local cluster\./);
+			assert.match(
+				out,
+				/waits at the first service task until a worker connects/,
+			);
+			assert.match(
+				out,
+				/Open it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
+			);
+			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
+			assert.match(out, /Start a worker in your language:/);
+			// Paths are quoted (the working directory may contain spaces);
 			// either path separator, so the Windows matrix sees its own.
-			assert.match(out, /cd ".*service-worker[/\\]nodejs"/);
-			// Separate lines: && is a syntax error in Windows
-			// PowerShell 5.1.
+			// Node.js and Python cd into the worker directory: npm misreads
+			// a bare --prefix install on Windows, and the Python worker
+			// needs a virtualenv (pip into an externally managed system
+			// Python fails). Java and C# address the project directly.
+			assert.match(out, /Node\.js:\s+cd ".*service-worker[/\\]nodejs"/);
 			assert.match(out, /npm install/);
 			assert.match(out, /npm start/);
-			assert.doesNotMatch(out, /npm install && npm start/);
+			assert.match(out, /Python:\s+cd ".*service-worker[/\\]python"/);
+			assert.match(out, /python -m venv \.venv/);
+			assert.match(
+				out,
+				/source \.venv\/bin\/activate\s+# Windows: \.venv\\Scripts\\activate/,
+			);
+			assert.match(out, /pip install -r requirements\.txt/);
+			assert.match(out, /python main\.py/);
+			assert.match(
+				out,
+				/Java:\s+mvn -f ".*service-worker[/\\]java" spring-boot:run/,
+			);
+			assert.match(
+				out,
+				/C#:\s+dotnet run --project ".*service-worker[/\\]csharp"/,
+			);
+			// Never suggest the Windows-broken prefix form.
+			assert.doesNotMatch(out, /--prefix/);
+			// Install and start stay on separate lines: && is a syntax
+			// error in Windows PowerShell 5.1.
+			assert.doesNotMatch(out, /&&/);
 			assert.match(
 				out,
 				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,

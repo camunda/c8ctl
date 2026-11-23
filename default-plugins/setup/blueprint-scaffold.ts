@@ -58,12 +58,21 @@ export interface SetupBlueprint {
 	readonly startVariables?: Record<string, unknown>;
 	/**
 	 * Actionable closing lines for the setup "What's next" box, given the
-	 * scaffolded project directory. Rendered ahead of the generic
-	 * Project / Guide / Operate lines, so each blueprint can say what the
-	 * run left behind and what to do with it.
+	 * scaffolded project directory and the key of the process instance
+	 * setup started. Rendered ahead of the generic Project / Guide /
+	 * Operate lines, so each blueprint can say what the run left behind
+	 * and what to do with it.
 	 */
-	readonly nextSteps: (projectDir: string) => readonly string[];
+	readonly nextSteps: (context: {
+		readonly projectDir: string;
+		readonly processInstanceKey: string;
+	}) => readonly string[];
 }
+
+// The mission decision reads these; the upstream quick-start's
+// "full send" launch. Shared between the start call and the rerun
+// suggestion so the two cannot drift.
+const ROCKET_LAUNCH_START_VARIABLES = { missionName: "Apollo", fuelLevel: 80 };
 
 export const SETUP_BLUEPRINTS = [
 	{
@@ -79,19 +88,25 @@ export const SETUP_BLUEPRINTS = [
 			path: "1-rocket-launch",
 		},
 		processFile: "rocket-launch.bpmn",
-		// The mission decision reads these; the upstream quick-start's
-		// "full send" launch.
-		startVariables: { missionName: "Apollo", fuelLevel: 80 },
+		startVariables: ROCKET_LAUNCH_START_VARIABLES,
 		// Fully automated: setup already deployed and launched an
-		// instance, so the next step is looking at it. The suggestion pins
-		// the local profile and its <default> tenant — the session's
-		// active profile and tenant may point elsewhere. Two lines: && is
-		// a syntax error in Windows PowerShell 5.1.
-		nextSteps: () => [
-			"A Rocket Launch instance is already running on the local cluster.",
-			"See it:",
-			'  c8ctl use tenant "<default>"',
-			"  c8ctl search process-instance --profile local",
+		// instance, so the next step is looking at it. The deeplink opens
+		// the started instance in Operate directly — no filter clearing.
+		// The CLI lines pin the local profile (the session's active
+		// profile may point elsewhere) but not the tenant: the first-run
+		// audience has no session tenant, so resolution already lands on
+		// <default>. The rerun carries the same start variables setup
+		// used, or the mission decision incidents; the JSON is
+		// single-quoted, which cmd.exe does not strip — cmd users quote
+		// the other way around. The run path is quoted: the working
+		// directory may contain spaces. All lines stay printable ASCII so
+		// the box keeps its borders.
+		nextSteps: ({ projectDir, processInstanceKey }) => [
+			"Process instance is running on the local cluster.",
+			`Watch it:   http://localhost:8080/operate/processes/${processInstanceKey}`,
+			"            (login using demo / demo as username / password)",
+			`Inspect it: c8ctl get process-instance ${processInstanceKey} --profile local`,
+			`Run again:  c8ctl run "${join(projectDir, "rocket-launch.bpmn")}" --profile local --variables '${JSON.stringify(ROCKET_LAUNCH_START_VARIABLES)}'`,
 		],
 	},
 	{
@@ -111,15 +126,33 @@ export const SETUP_BLUEPRINTS = [
 		processFile: "bpmn/order-process.bpmn",
 		// The started instance stalls at its first service task until a
 		// worker connects — starting one is the whole point of the box.
-		// The path is quoted: the working directory may contain spaces.
-		// npm install and npm start are separate lines: && is a syntax
-		// error in Windows PowerShell 5.1.
-		nextSteps: (projectDir) => [
-			"The order process waits for a worker. Start one:",
-			`  cd "${join(projectDir, "nodejs")}"`,
-			"  npm install",
-			"  npm start",
-			"Then watch the instance complete in Operate.",
+		// One block per shipped worker language. Node.js and Python cd
+		// into the worker directory: a bare `npm install --prefix <dir>`
+		// is misread by npm on Windows as a global install of the
+		// caller's directory, and the Python worker needs a virtualenv —
+		// pip into an externally managed system Python fails (PEP 668).
+		// Java and C# can address the project directly: -f and --project
+		// share neither defect. Paths are quoted (the working directory
+		// may contain spaces), every command gets its own line (&& is a
+		// syntax error in Windows PowerShell 5.1), and all lines stay
+		// printable ASCII so the box keeps its borders.
+		nextSteps: ({ projectDir, processInstanceKey }) => [
+			"Process instance is running on the local cluster.",
+			"It waits at the first service task until a worker connects.",
+			`Open it:  http://localhost:8080/operate/processes/${processInstanceKey}`,
+			"          (login using demo / demo as username / password)",
+			"",
+			"Start a worker in your language:",
+			`  Node.js:  cd "${join(projectDir, "nodejs")}"`,
+			"            npm install",
+			"            npm start",
+			`  Python:   cd "${join(projectDir, "python")}"`,
+			"            python -m venv .venv",
+			"            source .venv/bin/activate   # Windows: .venv\\Scripts\\activate",
+			"            pip install -r requirements.txt",
+			"            python main.py",
+			`  Java:     mvn -f "${join(projectDir, "java")}" spring-boot:run`,
+			`  C#:       dotnet run --project "${join(projectDir, "csharp")}"`,
 		],
 	},
 ] as const satisfies readonly SetupBlueprint[];
