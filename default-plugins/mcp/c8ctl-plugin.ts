@@ -10,6 +10,7 @@
 
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	DEFAULT_PROFILE,
 	getModelerDataDir,
@@ -90,7 +91,7 @@ On uninstall, --preserve-conflicts leaves entries that no longer match the c8ctl
  * (entry: dist/index.js) — take the first candidate that exists.
  */
 const CLI_ENTRY = (() => {
-	const dir = realpathSync(import.meta.dirname);
+	const dir = realpathSync(fileURLToPath(new URL(".", import.meta.url)));
 	const candidates = [
 		resolve(dir, "..", "..", "index.js"),
 		resolve(dir, "..", "..", "src", "index.ts"),

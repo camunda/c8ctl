@@ -47,6 +47,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	ProcessDefinitionId,
 	type ProcessInstanceKey,
@@ -190,7 +191,7 @@ async function runPrerequisites(ctx: PluginCtx): Promise<void> {
  * take the first candidate that exists.
  */
 const CLI_ENTRY = (() => {
-	const dir = realpathSync(import.meta.dirname);
+	const dir = realpathSync(fileURLToPath(new URL(".", import.meta.url)));
 	const candidates = [
 		resolve(dir, "..", "..", "index.js"),
 		resolve(dir, "..", "..", "src", "index.ts"),
