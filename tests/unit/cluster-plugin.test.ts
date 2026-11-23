@@ -11,6 +11,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -2671,6 +2672,19 @@ describe("Cluster Plugin – followLogFiles", () => {
 		});
 
 		assert.strictEqual(output, "old line one\nold line two\nnew\n");
+	});
+
+	test("reads a file rotated in place from the start, even when it is not smaller", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const rotated = join(tempDir, "camunda.log.new");
+		writeFileSync(camunda, "old\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(rotated, "new one\nnew two\n");
+			renameSync(rotated, camunda);
+		});
+
+		assert.strictEqual(output, "old\nnew one\nnew two\n");
 	});
 
 	test("prints the last lines in full however long they are", async () => {

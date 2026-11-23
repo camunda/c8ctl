@@ -3321,7 +3321,7 @@ const isMissingFile = error => error?.code === 'ENOENT';
  * Follow log files without `tail`, which Windows does not ship. Prints the
  * last lines of each file (with `==> file <==` headers when there are several,
  * as `tail` does), then polls for appended bytes until `signal` aborts.
- * A file that shrinks (truncated or rotated) is re-read from the start.
+ * A file that shrinks or is replaced (truncated or rotated) is re-read from the start.
  */
 export async function followLogFiles(files, {
   signal,
@@ -3343,8 +3343,13 @@ export async function followLogFiles(files, {
   // and is picked up again on a later poll.
   const readAppended = (file, entry) => {
     try {
-      const size = statSync(file).size;
-      if (size < entry.offset) {
+      const stats = statSync(file, { bigint: true });
+      const size = Number(stats.size);
+      const id = `${stats.dev}:${stats.ino}`;
+      // A replaced file can be as large as the one it rotated out.
+      const replaced = entry.id !== undefined && entry.id !== id;
+      entry.id = id;
+      if (replaced || size < entry.offset) {
         entry.offset = 0;
         entry.decoder = new StringDecoder('utf8');
       }
