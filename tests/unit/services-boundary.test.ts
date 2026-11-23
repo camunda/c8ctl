@@ -13,7 +13,7 @@
  *   `process.stderr`, `console.*`).
  *
  * The behavioral side (a service run with a poisoned runtime and a
- * bogus host environment) is covered by `internal-api.test.ts`.
+ * bogus host environment) is covered by `internal.test.ts`.
  */
 
 import assert from "node:assert";
@@ -24,6 +24,7 @@ import { findRuntimeGlobalReads } from "../utils/no-runtime-global-reads.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const SERVICES_DIR = join(PROJECT_ROOT, "src", "services");
+const INTERNAL_DIR = join(PROJECT_ROOT, "src", "internal");
 /** The parts of the contract that live in core. */
 const CORE_CONTRACT_FILES = ["context.ts", "target.ts"].map((name) =>
 	join(PROJECT_ROOT, "src", "core", name),
@@ -65,7 +66,11 @@ function listTsFiles(dir: string): string[] {
 describe("architectural guard: services read nothing but their context", () => {
 	test("no services file reads the CLI runtime, the process, or the console", () => {
 		const violations: string[] = [];
-		for (const file of [...listTsFiles(SERVICES_DIR), ...CORE_CONTRACT_FILES]) {
+		for (const file of [
+			...listTsFiles(SERVICES_DIR),
+			...listTsFiles(INTERNAL_DIR),
+			...CORE_CONTRACT_FILES,
+		]) {
 			for (const { object, fields } of FORBIDDEN) {
 				for (const read of findRuntimeGlobalReads(file, fields, object)) {
 					const rel = file.slice(PROJECT_ROOT.length + 1).split(/[\\/]/);

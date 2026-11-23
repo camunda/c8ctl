@@ -20,6 +20,9 @@
  *                                          framework/commands, so hosts other
  *                                          than the CLI can import it)
  *   - framework/ → core, utils, framework (never commands)
+ *   - internal/  → core, utils, services (the `@camunda8/cli/internal`
+ *                                          entry for hosts; nothing in
+ *                                          src/ imports it)
  *   - commands/  → core, utils, services, framework, commands
  *   - src/*.ts   → anything               (composition root: index.ts,
  *                                          command-dispatch.ts — an explicit
@@ -87,13 +90,22 @@ const ROOT_FILES: ReadonlySet<string> = new Set([
 	"command-dispatch.ts",
 ]);
 
-type Layer = "core" | "utils" | "services" | "framework" | "commands" | "root";
+type Layer =
+	| "core"
+	| "utils"
+	| "services"
+	| "internal"
+	| "framework"
+	| "commands"
+	| "root";
 
 /** Each layer maps to the set of layers it is allowed to import from. */
 const ALLOWED: Record<Layer, ReadonlySet<Layer>> = {
 	core: new Set<Layer>(["core"]),
 	utils: new Set<Layer>(["core", "utils"]),
 	services: new Set<Layer>(["core", "utils", "services"]),
+	// The host entry: re-exports, never imported from inside src/.
+	internal: new Set<Layer>(["core", "utils", "services", "internal"]),
 	framework: new Set<Layer>(["core", "utils", "framework"]),
 	commands: new Set<Layer>([
 		"core",
@@ -132,6 +144,7 @@ function layerOf(absPath: string): Layer | "unknown" {
 	if (segment === "core") return "core";
 	if (segment === "utils") return "utils";
 	if (segment === "services") return "services";
+	if (segment === "internal") return "internal";
 	if (segment === "framework") return "framework";
 	if (segment === "commands") return "commands";
 	return "unknown";

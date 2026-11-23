@@ -30,6 +30,7 @@ The following are upstream dependencies — when they misbehave, report it. Do n
 | `src/utils/` | Leaf-layer helpers (alongside `core`; never import `framework`/`commands`) |
 | `src/utils/shared/` | Genuine cross-cutting leaves — `date-filter`, `resource-extensions`, `ignore`, `validation` |
 | `src/utils/command-local/` | Pure helpers that are the guts of a single command, kept test-visible — `open-helpers`, `search-helpers`, `mcp-proxy-helpers`, `watch-constants` |
+| `src/services/` | Embedding contract — services (`deploy`, `resolveDeployment`) shared by the CLI and other hosts. Hosts import them through `src/internal/` (see below). See [Services](#services-the-embedding-contract) |
 | `src/commands/` | Command handler implementations |
 | `src/commands/helpers/` | Command-private helpers, test-invisible (guarded by `helpers-import-boundary.test.ts`) |
 | `src/templates/` | Plugin scaffold templates — do not edit directly |
@@ -78,6 +79,7 @@ composition root (src/index.ts, src/command-dispatch.ts)  →  commands  →  fr
 | `utils/` | `core`, `utils` (leaf: never `framework`/`commands`) |
 | `services/` | `core`, `utils`, `services` (never `framework`/`commands`) |
 | `framework/` | `core`, `utils`, `framework` (never `commands`) |
+| `internal/` | `core`, `utils`, `services` — the `@camunda8/cli/internal` entry for hosts; nothing in `src/` imports it |
 | `commands/` | `core`, `utils`, `services`, `framework`, `commands` |
 | composition root (`src/index.ts`, `src/command-dispatch.ts`) | anything |
 
@@ -108,6 +110,16 @@ Per-invocation request state — whether `--dry-run` / `--verbose` were passed �
 - **`ctx.verbose`** — whether `--verbose` was passed.
 
 `src/commands/**` and `src/framework/**` must obtain these from `ctx` (handlers) or an explicit parameter (non-handler framework entry points such as `installCompletion`/`refreshCompletionsIfStale`), and must **not** read `c8ctl.dryRun` or `c8ctl.verbose` back off the global. This is guarded by [`tests/unit/no-runtime-global-reads-in-handlers.test.ts`](tests/unit/no-runtime-global-reads-in-handlers.test.ts) (AST-based, so the field names are safe to mention in comments and strings). `c8ctl.outputMode` is *session display state*, not a per-invocation request flag — read it via `logger.mode` where a logger is in scope; the `session` command reads it directly because managing session state is its job.
+
+##### Services: the embedding contract
+
+`src/services/` holds the logic that other hosts import instead of spawning the CLI, such as Desktop Modeler. The package exports the curated host surface as `@camunda8/cli/internal` (`src/internal/index.ts`). "Internal" means no compatibility promise: versions follow the CLI, and consumers pin an exact version.
+
+- **Shape.** A service is `fn(input, ctx)`. Inputs and results are plain, serializable objects. `ctx` (`C8ctlContext`) carries everything host-specific: `signal` (cancellation), `onProgress` (notices, warnings, progress), data directories, `fetch`, and the `env` the cluster client may read. Contract helpers live in `src/core/` (`src/core/context.ts`, `src/core/target.ts`); deploy path resolution in `src/utils/shared/deploy-resolution.ts`.
+- **Target.** `{ profile }` (a c8ctl profile or `modeler:<id>`) or `{ cluster }` (a resolved configuration). Hosts resolve session, `--profile` and env into a target; services never do.
+- **Errors.** Every failure is a `C8ctlError` (`src/core/c8ctl-error.ts`) with a stable `code` from `C8CTL_ERROR_CODES`, an optional `field`, `problem` (RFC 9457 from the cluster) and `details`. Hosts branch on `code`, never on `message`.
+- **No host state.** Services do not read the CLI runtime, `process.env`, `process.argv` or `process.cwd`, never print and never exit. Guarded statically by [`tests/unit/services-boundary.test.ts`](tests/unit/services-boundary.test.ts) and behaviorally by [`tests/unit/internal.test.ts`](tests/unit/internal.test.ts) (runs the packaged entry point from CommonJS with a poisoned runtime).
+- **The CLI is a host too.** `src/commands/helpers/deploy-helpers.ts` resolves the CLI's target, passes `process.env`, and renders the services' events, results and errors. Keep CLI wording, prompts and output there, not in services.
 
 ### Commit message guidelines
 
