@@ -1846,8 +1846,10 @@ describe("c8ctl setup", () => {
 			// problem detail never surfaces as a four-space summary line.
 			assert.doesNotMatch(out, /^ {4}INVALID_ARGUMENT$/m);
 			// No instance was started, so the box must not claim one is
-			// running — only the Project/Guide references remain.
-			assert.doesNotMatch(out, /already running/);
+			// running or deeplink one — only the Project/Guide references
+			// remain.
+			assert.doesNotMatch(out, /Process instance is running/);
+			assert.doesNotMatch(out, /operate\/processes\//);
 			assert.match(out, /Project: .*rocket-launch/);
 		} finally {
 			stub.cleanup();
