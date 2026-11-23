@@ -54,6 +54,9 @@
  *   C8CTL_SETUP_STUB_MODELER=homebrew — preview a Homebrew-managed app.
  *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
  *                                   warning on stderr while succeeding.
+ *   C8CTL_SETUP_STUB_MODELER_WARN=1 — fake `modeler install` as a skip
+ *                                   that prints an update warning among
+ *                                   routine stderr.
  *   C8CTL_SETUP_STUB_SKILL_PATH=path — report a listed skill at this
  *                                   path, for removal safety tests.
  *   C8CTL_SETUP_STUB_SKILL_SECOND_PATH=path — report a second path for each
@@ -230,6 +233,11 @@ const CLUSTER_CHILD_OUTPUT = {
 /** A plugin warning that a successful `cluster start` can still print. */
 const CLUSTER_CHILD_WARNING =
 	"Could not persist the durable cluster PID record (disk full); the cluster is still tracked via its markers and pidfiles.\n";
+
+/** A skipped `modeler install`: an update warning after routine stderr. */
+const MODELER_INSTALL_UPDATE_WARNING =
+	"routine modeler stderr\n" +
+	"Camunda Modeler 5.51.0 is installed, but 5.52.0 is available. Run `c8ctl modeler update` to update it.\n";
 
 function fakeChild(
 	exitCode: number,
@@ -455,6 +463,17 @@ Object.defineProperty(childProcess, "spawn", {
 				});
 			}
 			return fakeChild(1);
+		}
+		if (
+			process.env.C8CTL_SETUP_STUB_MODELER_WARN === "1" &&
+			argv.includes("modeler") &&
+			argv.includes("install")
+		) {
+			return fakeChild(0, {
+				stdout:
+					"Camunda Modeler is already installed at /usr/bin/camunda-modeler; skipping installation.\n",
+				stderr: MODELER_INSTALL_UPDATE_WARNING,
+			});
 		}
 		// `modeler remove` would uninstall a real Modeler — fake it like the
 		// cluster children. The dry-run probe answers a JSON payload; the
