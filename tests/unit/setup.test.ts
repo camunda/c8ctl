@@ -555,13 +555,15 @@ describe("c8ctl setup", () => {
 				/Watch it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
 			);
 			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
-			// Tenant and profile are pinned: the session's active selections
-			// may point at a remote cluster or a non-default tenant.
-			assert.match(out, /Inspect it:\s+c8ctl use tenant "<default>"/);
+			// The profile is pinned: the session's active profile may point
+			// at a remote cluster. The tenant is deliberately not pinned —
+			// the first-run audience has no session tenant, so resolution
+			// already lands on <default>.
 			assert.match(
 				out,
-				/c8ctl get process-instance 2251799813686751 --profile local/,
+				/Inspect it:\s+c8ctl get process-instance 2251799813686751 --profile local/,
 			);
+			assert.doesNotMatch(out, /use tenant/);
 			// The run path is quoted — the working directory may contain
 			// spaces. One command per line: && is a syntax error in
 			// Windows PowerShell 5.1.

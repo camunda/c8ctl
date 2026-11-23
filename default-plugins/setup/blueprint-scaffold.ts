@@ -89,16 +89,17 @@ export const SETUP_BLUEPRINTS = [
 		// Fully automated: setup already deployed and launched an
 		// instance, so the next step is looking at it. The deeplink opens
 		// the started instance in Operate directly — no filter clearing.
-		// The CLI lines pin the tenant and profile: the session's active
-		// selections may point elsewhere. The run path is quoted: the
-		// working directory may contain spaces. All lines stay printable
-		// ASCII so the box keeps its borders.
+		// The CLI lines pin the local profile (the session's active
+		// profile may point elsewhere) but not the tenant: the first-run
+		// audience has no session tenant, so resolution already lands on
+		// <default>. The run path is quoted: the working directory may
+		// contain spaces. All lines stay printable ASCII so the box keeps
+		// its borders.
 		nextSteps: ({ projectDir, processInstanceKey }) => [
 			"Process instance is running on the local cluster.",
 			`Watch it:   http://localhost:8080/operate/processes/${processInstanceKey}`,
 			"            (login using demo / demo as username / password)",
-			'Inspect it: c8ctl use tenant "<default>"',
-			`            c8ctl get process-instance ${processInstanceKey} --profile local`,
+			`Inspect it: c8ctl get process-instance ${processInstanceKey} --profile local`,
 			`Run again:  c8ctl run "${join(projectDir, "rocket-launch.bpmn")}" --profile local`,
 			"            (deploys and starts the process; no Tasklist needed)",
 		],
