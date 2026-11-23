@@ -3406,6 +3406,18 @@ export async function followLogFiles(files, {
   });
 }
 
+/** Follows log files until Ctrl+C, which ends the command cleanly. */
+export async function followLogsUntilInterrupted(files, options = {}) {
+  const controller = new AbortController();
+  const sigintHandler = () => controller.abort();
+  process.on('SIGINT', sigintHandler);
+  try {
+    await followLogFiles(files, { ...options, signal: controller.signal });
+  } finally {
+    process.removeListener('SIGINT', sigintHandler);
+  }
+}
+
 export async function streamLogs(cacheDir) {
   const logger = getLogger();
   const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
@@ -3453,14 +3465,7 @@ export async function streamLogs(cacheDir) {
 
   if (osPlatform() === 'win32') {
     // Windows has no `tail`, so follow the files in-process.
-    const controller = new AbortController();
-    const sigintHandler = () => controller.abort();
-    process.on('SIGINT', sigintHandler);
-    try {
-      await followLogFiles(existingLogs, { signal: controller.signal });
-    } finally {
-      process.removeListener('SIGINT', sigintHandler);
-    }
+    await followLogsUntilInterrupted(existingLogs);
     return;
   }
 

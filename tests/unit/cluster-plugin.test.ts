@@ -6,6 +6,7 @@ import assert from "node:assert";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -2708,6 +2709,55 @@ describe("Cluster Plugin – followLogFiles", () => {
 		});
 
 		assert.strictEqual(output, "first\n");
+	});
+
+	test("prints appends while following and stops cleanly on Ctrl+C", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+		const chunks: string[] = [];
+		const output = () => chunks.join("");
+		let abandoned = false;
+
+		const before = new Set(process.listeners("SIGINT"));
+		const done = plugin.followLogsUntilInterrupted([camunda], {
+			write: (chunk: string) => {
+				// Lets a failing test end following when no handler was registered.
+				if (abandoned) throw new Error("test abandoned following");
+				chunks.push(chunk);
+			},
+			intervalMs: 20,
+		});
+		// Called directly: emitting SIGINT would also reach the test runner's handler.
+		const handlers = process.listeners("SIGINT").filter((l) => !before.has(l));
+		try {
+			assert.strictEqual(handlers.length, 1, "registers one SIGINT handler");
+			assert.strictEqual(output(), "first\n");
+
+			appendFileSync(camunda, "second\n");
+			const seen = await pollUntil(
+				async () => output() === "first\nsecond\n",
+				10_000,
+				10,
+			);
+			assert.ok(
+				seen,
+				`appended line not printed while following: ${JSON.stringify(output())}`,
+			);
+		} finally {
+			if (handlers.length === 0) {
+				abandoned = true;
+				appendFileSync(camunda, "end\n");
+				await done.catch(() => {});
+			}
+			for (const handler of handlers) handler("SIGINT");
+		}
+
+		await done;
+		assert.deepStrictEqual(
+			process.listeners("SIGINT").filter((l) => !before.has(l)),
+			[],
+			"removes its SIGINT handler",
+		);
 	});
 });
 
