@@ -366,11 +366,27 @@ async function detectModelerRemoval(): Promise<
 		);
 	}
 	if (!payload.wouldChange) return undefined;
+	const removalTarget = payload.removalTarget;
+	if (
+		!isRecord(removalTarget) ||
+		typeof removalTarget.method !== "string" ||
+		removalTarget.method.length === 0 ||
+		typeof removalTarget.path !== "string" ||
+		removalTarget.path.length === 0
+	) {
+		throw new Error(
+			'modeler remove --dry-run returned an invalid response: expected a "removalTarget" object with nonempty "method" and "path".',
+		);
+	}
 	return {
 		message:
 			typeof payload.message === "string"
 				? payload.message
 				: "remove Camunda Desktop Modeler",
+		target: {
+			method: removalTarget.method,
+			path: removalTarget.path,
+		},
 	};
 }
 
@@ -1106,6 +1122,11 @@ async function applySetupRemoval(
 				// Registration-cleanup warnings and failure diagnostics ride
 				// stderr — keep them visible in quiet removal runs.
 				stderrPassthrough: true,
+				extraEnv: {
+					C8CTL_SETUP_MODELER_REMOVAL_TARGET: JSON.stringify(
+						inventory.modeler.target,
+					),
+				},
 			});
 		} catch (error) {
 			failures += 1;

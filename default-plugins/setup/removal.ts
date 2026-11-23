@@ -38,6 +38,10 @@ export interface SetupBlueprintPlanningFailure {
 export interface SetupModelerRemoval {
 	/** The modeler plugin's own dry-run description of the removal. */
 	readonly message: string;
+	readonly target: {
+		readonly method: string;
+		readonly path: string;
+	};
 }
 
 export interface SetupModelerInspectionFailure {

@@ -49,6 +49,9 @@
  *                                   so removal previews omit Modeler.
  *   C8CTL_SETUP_STUB_MODELER=malformed — the probe omits `wouldChange` to
  *                                   simulate an invalid response.
+ *   C8CTL_SETUP_STUB_MODELER=malformed-target — the probe says removal
+ *                                   would change state but omits its target.
+ *   C8CTL_SETUP_STUB_MODELER=homebrew — preview a Homebrew-managed app.
  *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
  *                                   warning on stderr while succeeding.
  *   C8CTL_SETUP_STUB_SKILL_PATH=path — report a listed skill at this
@@ -458,11 +461,22 @@ Object.defineProperty(childProcess, "spawn", {
 		// actual removal pretends an app-bundle removal. `modeler install`
 		// keeps running its real plugin code under this stub.
 		if (argv.includes("modeler") && argv.includes("remove")) {
+			const modelerMode = process.env.C8CTL_SETUP_STUB_MODELER;
+			const modelerTarget =
+				modelerMode === "homebrew"
+					? {
+							method: "homebrew-cask",
+							path: "/opt/homebrew/Caskroom/camunda-modeler/5.52.0/Camunda Modeler.app",
+						}
+					: {
+							method: "macos-app-bundle",
+							path: "/Applications/Camunda Modeler.app",
+						};
 			if (argv.includes("--dry-run")) {
 				if (failStep === "probe-modeler") {
 					return fakeChild(1, { stderr: "stubbed modeler probe failure\n" });
 				}
-				if (process.env.C8CTL_SETUP_STUB_MODELER === "malformed") {
+				if (modelerMode === "malformed") {
 					return fakeChild(0, {
 						stdout: `${JSON.stringify({
 							dryRun: true,
@@ -471,16 +485,42 @@ Object.defineProperty(childProcess, "spawn", {
 						})}\n`,
 					});
 				}
-				const absent = process.env.C8CTL_SETUP_STUB_MODELER === "absent";
+				if (modelerMode === "malformed-target") {
+					return fakeChild(0, {
+						stdout: `${JSON.stringify({
+							dryRun: true,
+							command: "modeler remove",
+							message: "Unexpected probe response",
+							wouldChange: true,
+						})}\n`,
+					});
+				}
+				const absent = modelerMode === "absent";
 				return fakeChild(0, {
 					stdout: `${JSON.stringify({
 						dryRun: true,
 						command: "modeler remove",
 						message: absent
 							? "Camunda Modeler is not installed; run `c8ctl modeler install` first."
-							: "Dry run: would remove the Camunda Modeler app bundle at /Applications/Camunda Modeler.app.",
+							: modelerMode === "homebrew"
+								? "Dry run: would remove Camunda Modeler with `brew uninstall --cask camunda-modeler`."
+								: "Dry run: would remove the Camunda Modeler app bundle at /Applications/Camunda Modeler.app.",
 						wouldChange: !absent,
+						...(!absent ? { removalTarget: modelerTarget } : {}),
 					})}\n`,
+				});
+			}
+			const spawnOptions = args[2];
+			const childEnv =
+				isRecord(spawnOptions) && isRecord(spawnOptions.env)
+					? spawnOptions.env
+					: undefined;
+			if (
+				childEnv?.C8CTL_SETUP_MODELER_REMOVAL_TARGET !==
+				JSON.stringify(modelerTarget)
+			) {
+				return fakeChild(1, {
+					stderr: "stubbed Modeler target did not match the preview\n",
 				});
 			}
 			if (failStep === "remove-modeler") {
@@ -490,7 +530,9 @@ Object.defineProperty(childProcess, "spawn", {
 			}
 			return fakeChild(0, {
 				stdout:
-					"Removed Camunda Modeler from /Applications/Camunda Modeler.app.\n",
+					modelerMode === "homebrew"
+						? "Removed Camunda Modeler with Homebrew.\n"
+						: "Removed Camunda Modeler from /Applications/Camunda Modeler.app.\n",
 			});
 		}
 		// Skill discovery, installation, and updates use the GitHub CLI.

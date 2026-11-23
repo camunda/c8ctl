@@ -9,7 +9,7 @@
  *   c8ctl modeler remove
  */
 
-import { renderCommandFailure } from "../../src/core/index.ts";
+import { isRecord, renderCommandFailure } from "../../src/core/index.ts";
 import type {
 	PluginCommands,
 	PluginCtx,
@@ -17,6 +17,7 @@ import type {
 } from "../../src/framework/plugins/plugin-loader.ts";
 import {
 	installDesktopModeler,
+	type ModelerRemovalTarget,
 	removeDesktopModeler,
 	updateDesktopModeler,
 } from "./install.ts";
@@ -63,6 +64,30 @@ export const metadata: PluginMetadata = {
 	},
 };
 
+function expectedRemovalTargetFromEnvironment():
+	| ModelerRemovalTarget
+	| undefined {
+	const serialized = process.env.C8CTL_SETUP_MODELER_REMOVAL_TARGET;
+	if (serialized === undefined) return undefined;
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(serialized);
+	} catch {
+		throw new Error("Invalid setup-provided Modeler removal target.");
+	}
+	if (
+		!isRecord(parsed) ||
+		typeof parsed.method !== "string" ||
+		parsed.method.length === 0 ||
+		typeof parsed.path !== "string" ||
+		parsed.path.length === 0
+	) {
+		throw new Error("Invalid setup-provided Modeler removal target.");
+	}
+	return { method: parsed.method, path: parsed.path };
+}
+
 async function modelerHandler(
 	args: string[],
 	_flags: Record<string, unknown> | undefined,
@@ -97,6 +122,11 @@ async function modelerHandler(
 			isDryRun: ctx.dryRun,
 			logger,
 			quiet: ctx.quiet,
+			...(action === "remove"
+				? {
+						expectedRemovalTarget: expectedRemovalTargetFromEnvironment(),
+					}
+				: {}),
 		});
 		// A dry run owes automation the JSON preview on stdout even when
 		// nothing would change (Modeler absent or already current).

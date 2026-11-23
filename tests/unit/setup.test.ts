@@ -932,6 +932,23 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(docsStep.status, "planned");
 	});
 
+	test("passes the probed Homebrew Modeler target to delegated removal", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "homebrew";
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.strictEqual(removal.status, 0, removal.stderr + removal.stdout);
+			assert.match(removal.stdout, /Removed Camunda Modeler with Homebrew/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("--remove previews setup-owned files and requires confirmation", async () => {
 		const stub = stubbedExecution();
 		try {
@@ -1411,6 +1428,29 @@ describe("c8ctl setup", () => {
 				/Warning: Could not inspect the Camunda Desktop Modeler installation:.*invalid response/,
 			);
 			assert.match(output, /No setup-managed components were found/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("fails removal when the Modeler probe omits its target", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "malformed-target";
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(
+				output,
+				/invalid response: expected a "removalTarget" object with nonempty "method" and "path"/,
+			);
+			assert.doesNotMatch(output, /Removed Camunda Modeler/);
 		} finally {
 			stub.cleanup();
 		}
