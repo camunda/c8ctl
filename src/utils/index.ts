@@ -14,6 +14,7 @@ export * from "./command-local/skills-install-helpers.ts";
 export * from "./command-local/watch-constants.ts";
 export * from "./shared/camunda-json.ts";
 export * from "./shared/date-filter.ts";
+export * from "./shared/deploy-resolution.ts";
 export * from "./shared/deploy-resource-selection.ts";
 export * from "./shared/ignore.ts";
 export * from "./shared/npm-exec.ts";

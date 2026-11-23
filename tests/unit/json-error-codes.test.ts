@@ -42,4 +42,13 @@ describe("JSON errors carry a stable code", () => {
 		assert.strictEqual(error.code, "profile-not-found");
 		assert.strictEqual(error.field, "profile");
 	});
+
+	test("a directory without deployable files fails with no-deployable-files", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "c8ctl-json-error-code-"));
+
+		const result = await c8("deploy", dir, "--force", "--json");
+
+		assert.strictEqual(result.status, 1, result.stderr);
+		assert.strictEqual(errorOutput(result.stderr).code, "no-deployable-files");
+	});
 });

@@ -12,6 +12,7 @@ import {
 	requireCsvEnum,
 	requireEnum,
 	requireOption,
+	validateFlags,
 } from "../../src/framework/command-validation.ts";
 import {
 	requireOneOf,
@@ -262,7 +263,6 @@ import {
 	GLOBAL_FLAGS,
 	resolveAlias,
 } from "../../src/framework/command-registry.ts";
-import { validateFlags } from "../../src/framework/command-validation.ts";
 
 /** Widened read-only view of COMMAND_REGISTRY for iterating with index signatures. */
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
