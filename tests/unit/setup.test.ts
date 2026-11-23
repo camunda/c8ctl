@@ -2051,18 +2051,21 @@ describe("c8ctl setup", () => {
 			assert.match(out, /Start a worker in your language:/);
 			// Paths are quoted (the working directory may contain spaces);
 			// either path separator, so the Windows matrix sees its own.
-			// --prefix/--project/-f stand in for cd, so every command is
-			// copy-pasteable from any directory.
+			// Node.js and Python cd into the worker directory: npm misreads
+			// a bare --prefix install on Windows, and the Python worker
+			// needs a virtualenv (pip into an externally managed system
+			// Python fails). Java and C# address the project directly.
+			assert.match(out, /Node\.js:\s+cd ".*service-worker[/\\]nodejs"/);
+			assert.match(out, /npm install/);
+			assert.match(out, /npm start/);
+			assert.match(out, /Python:\s+cd ".*service-worker[/\\]python"/);
+			assert.match(out, /python -m venv \.venv/);
 			assert.match(
 				out,
-				/Node\.js:\s+npm --prefix ".*service-worker[/\\]nodejs" install/,
+				/source \.venv\/bin\/activate\s+\(Windows: \.venv\\Scripts\\activate\)/,
 			);
-			assert.match(out, /npm --prefix ".*service-worker[/\\]nodejs" start/);
-			assert.match(
-				out,
-				/Python:\s+pip install -r ".*service-worker[/\\]python[/\\]requirements\.txt"/,
-			);
-			assert.match(out, /python ".*service-worker[/\\]python[/\\]main\.py"/);
+			assert.match(out, /pip install -r requirements\.txt/);
+			assert.match(out, /python main\.py/);
 			assert.match(
 				out,
 				/Java:\s+mvn -f ".*service-worker[/\\]java" spring-boot:run/,
@@ -2071,6 +2074,8 @@ describe("c8ctl setup", () => {
 				out,
 				/C#:\s+dotnet run --project ".*service-worker[/\\]csharp"/,
 			);
+			// Never suggest the Windows-broken prefix form.
+			assert.doesNotMatch(out, /--prefix/);
 			// Install and start stay on separate lines: && is a syntax
 			// error in Windows PowerShell 5.1.
 			assert.doesNotMatch(out, /&&/);

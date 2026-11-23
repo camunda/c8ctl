@@ -120,12 +120,16 @@ export const SETUP_BLUEPRINTS = [
 		processFile: "bpmn/order-process.bpmn",
 		// The started instance stalls at its first service task until a
 		// worker connects — starting one is the whole point of the box.
-		// One block per shipped worker language, kept to copy-pasteable
-		// commands that work from any directory: --prefix, --project and
-		// -f stand in for cd, and paths are quoted (the working directory
-		// may contain spaces). npm and pip keep their install step on a
-		// separate line: && is a syntax error in Windows PowerShell 5.1.
-		// All lines stay printable ASCII so the box keeps its borders.
+		// One block per shipped worker language. Node.js and Python cd
+		// into the worker directory: a bare `npm install --prefix <dir>`
+		// is misread by npm on Windows as a global install of the
+		// caller's directory, and the Python worker needs a virtualenv —
+		// pip into an externally managed system Python fails (PEP 668).
+		// Java and C# can address the project directly: -f and --project
+		// share neither defect. Paths are quoted (the working directory
+		// may contain spaces), every command gets its own line (&& is a
+		// syntax error in Windows PowerShell 5.1), and all lines stay
+		// printable ASCII so the box keeps its borders.
 		nextSteps: ({ projectDir, processInstanceKey }) => [
 			"Process instance is running on the local cluster.",
 			"It waits at the first service task until a worker connects.",
@@ -133,10 +137,14 @@ export const SETUP_BLUEPRINTS = [
 			"          (login using demo / demo as username / password)",
 			"",
 			"Start a worker in your language:",
-			`  Node.js:  npm --prefix "${join(projectDir, "nodejs")}" install`,
-			`            npm --prefix "${join(projectDir, "nodejs")}" start`,
-			`  Python:   pip install -r "${join(projectDir, "python", "requirements.txt")}"`,
-			`            python "${join(projectDir, "python", "main.py")}"`,
+			`  Node.js:  cd "${join(projectDir, "nodejs")}"`,
+			"            npm install",
+			"            npm start",
+			`  Python:   cd "${join(projectDir, "python")}"`,
+			"            python -m venv .venv",
+			"            source .venv/bin/activate   (Windows: .venv\\Scripts\\activate)",
+			"            pip install -r requirements.txt",
+			"            python main.py",
 			`  Java:     mvn -f "${join(projectDir, "java")}" spring-boot:run`,
 			`  C#:       dotnet run --project "${join(projectDir, "csharp")}"`,
 		],
