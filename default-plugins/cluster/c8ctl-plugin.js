@@ -10,14 +10,18 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import {
+  closeSync,
   createWriteStream,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   writeFileSync,
   renameSync,
   rmSync,
   readdirSync,
   readFileSync,
+  readSync,
   statSync,
 } from 'node:fs';
 import { once } from 'node:events';
@@ -25,6 +29,7 @@ import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
 import { join, dirname, isAbsolute, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -3265,6 +3270,164 @@ export async function purgeClusterData(cacheDir, versionSpec) {
 
 const LOG_FILES = ['camunda.log', 'connectors.log'];
 
+// Like `tail -f`: show the last lines of each file, then follow appends.
+const FOLLOW_INITIAL_LINES = 10;
+// Logs can be large, so the initial lines are found by scanning back in blocks.
+const TAIL_BLOCK_BYTES = 64 * 1024;
+const NEWLINE = 0x0a;
+
+function readRange(file, start, end) {
+  const fd = openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(end - start);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, start);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Byte offset at which the last `count` lines of `file` start. Scans back
+ * from the end until enough newlines are found, so a single entry longer
+ * than any fixed window is still shown in full. The offset is always at a
+ * line start, so decoding from it never splits a UTF-8 character. Also
+ * returns the identity of the scanned file, to detect a later replacement.
+ */
+function tailStart(file, count) {
+  const fd = openSync(file, 'r');
+  try {
+    const stats = fstatSync(fd, { bigint: true });
+    const id = fileIdentity(stats);
+    const size = Number(stats.size);
+    const buffer = Buffer.alloc(TAIL_BLOCK_BYTES);
+    let newlines = 0;
+    for (let end = size; end > 0;) {
+      const start = Math.max(0, end - buffer.length);
+      const bytesRead = readSync(fd, buffer, 0, end - start, start);
+      for (let i = bytesRead - 1; i >= 0; i--) {
+        // A trailing newline ends the last line rather than starting a new one.
+        if (buffer[i] !== NEWLINE || start + i === size - 1) continue;
+        if (++newlines === count) return { offset: start + i + 1, id };
+      }
+      end = start;
+    }
+    return { offset: 0, id };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const isMissingFile = error => error?.code === 'ENOENT';
+
+const fileIdentity = stats => `${stats.dev}:${stats.ino}`;
+
+/**
+ * Follow log files without `tail`, which Windows does not ship. Prints the
+ * last lines of each file (with `==> file <==` headers when there are several,
+ * as `tail` does), then polls for appended bytes until `signal` aborts.
+ * A file that shrinks or is replaced (truncated or rotated) is re-read from the start.
+ */
+export async function followLogFiles(files, {
+  signal,
+  write = chunk => process.stdout.write(chunk),
+  intervalMs = 500,
+} = {}) {
+  const multiple = files.length > 1;
+  let current = null;
+  const emit = (file, text) => {
+    if (multiple && current !== file) {
+      write(`${current === null ? '' : '\n'}==> ${file} <==\n`);
+      current = file;
+    }
+    if (text) write(text);
+  };
+
+  // Reads whatever was appended since the last read. A file can vanish at
+  // any point while it is rotated, so a missing file just yields nothing
+  // and is picked up again on a later poll.
+  const readAppended = (file, entry) => {
+    try {
+      const stats = statSync(file, { bigint: true });
+      const size = Number(stats.size);
+      const id = fileIdentity(stats);
+      // A replaced file can be as large as the one it rotated out.
+      const replaced = entry.id !== undefined && entry.id !== id;
+      entry.id = id;
+      if (replaced || size < entry.offset) {
+        entry.offset = 0;
+        entry.decoder = new StringDecoder('utf8');
+      }
+      if (size === entry.offset) return '';
+      const chunk = readRange(file, entry.offset, size);
+      entry.offset += chunk.length;
+      return entry.decoder.write(chunk);
+    } catch (error) {
+      if (isMissingFile(error)) return '';
+      throw error;
+    }
+  };
+
+  const state = new Map();
+  for (const file of files) {
+    let start = { offset: 0, id: undefined };
+    try {
+      start = tailStart(file, FOLLOW_INITIAL_LINES);
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    const entry = { ...start, decoder: new StringDecoder('utf8') };
+    state.set(file, entry);
+    // Emitted even when empty, so every file gets its header up front.
+    emit(file, readAppended(file, entry));
+  }
+
+  const poll = () => {
+    for (const file of files) {
+      const text = readAppended(file, state.get(file));
+      if (text) emit(file, text);
+    }
+  };
+
+  await new Promise((resolve, reject) => {
+    let timer;
+    const settle = error => {
+      clearInterval(timer);
+      signal?.removeEventListener('abort', stop);
+      if (error) reject(error);
+      else resolve();
+    };
+    // An unexpected read error ends following instead of escaping the timer.
+    const tick = () => {
+      try {
+        poll();
+        return true;
+      } catch (error) {
+        settle(error);
+        return false;
+      }
+    };
+    function stop() {
+      if (tick()) settle();
+    }
+    timer = setInterval(tick, intervalMs);
+    if (signal?.aborted) stop();
+    else signal?.addEventListener('abort', stop, { once: true });
+  });
+}
+
+/** Follows log files until Ctrl+C, which ends the command cleanly. */
+export async function followLogsUntilInterrupted(files, options = {}) {
+  const controller = new AbortController();
+  const sigintHandler = () => controller.abort();
+  process.on('SIGINT', sigintHandler);
+  try {
+    await followLogFiles(files, { ...options, signal: controller.signal });
+  } finally {
+    process.removeListener('SIGINT', sigintHandler);
+  }
+}
+
 export async function streamLogs(cacheDir) {
   const logger = getLogger();
   const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
@@ -3309,6 +3472,12 @@ export async function streamLogs(cacheDir) {
 
   logger.info(`Streaming logs from ${logDir} (Ctrl+C to stop)...`);
   logger.info('');
+
+  if (osPlatform() === 'win32') {
+    // Windows has no `tail`, so follow the files in-process.
+    await followLogsUntilInterrupted(existingLogs);
+    return;
+  }
 
   // Use tail -f to follow all log files
   const tailArgs = ['-f', ...existingLogs];

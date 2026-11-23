@@ -9,5 +9,6 @@ export * from "./config.ts";
 export * from "./env-address.ts";
 export * from "./errors.ts";
 export * from "./logger.ts";
+export * from "./node-version.ts";
 export * from "./runtime.ts";
 export * from "./update-check.ts";

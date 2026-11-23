@@ -6,10 +6,12 @@ import assert from "node:assert";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -2587,6 +2589,188 @@ describe("Cluster Plugin – streamLogs", () => {
 		assert.ok(
 			output.includes("No log files found"),
 			"Should warn about missing log files",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// followLogFiles — the in-process `tail -f` used on Windows
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – followLogFiles", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-follow-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	/**
+	 * Start following, run `act` while following, then stop. Stopping polls
+	 * once more before resolving, so whatever `act` wrote is always read; the
+	 * long interval keeps the timer out of it, making the output deterministic.
+	 */
+	async function follow(files: string[], act: () => void): Promise<string> {
+		const chunks: string[] = [];
+		const controller = new AbortController();
+		const done = plugin.followLogFiles(files, {
+			signal: controller.signal,
+			write: (chunk: string) => chunks.push(chunk),
+			intervalMs: 60_000,
+		});
+		act();
+		controller.abort();
+		await done;
+		return chunks.join("");
+	}
+
+	test("prints the last 10 lines of each file with headers, then appended lines", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const connectors = join(tempDir, "connectors.log");
+		writeFileSync(
+			camunda,
+			`${Array.from({ length: 15 }, (_, i) => `c${i + 1}`).join("\n")}\n`,
+		);
+		writeFileSync(connectors, "k1\n");
+
+		const output = await follow([camunda, connectors], () => {
+			writeFileSync(connectors, "k1\nk2\n");
+		});
+
+		const expectedInitial = Array.from(
+			{ length: 10 },
+			(_, i) => `c${i + 6}\n`,
+		).join("");
+		assert.strictEqual(
+			output,
+			`==> ${camunda} <==\n${expectedInitial}` +
+				`\n==> ${connectors} <==\nk1\n` +
+				"k2\n",
+		);
+	});
+
+	test("omits headers when following a single file", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "first\nsecond\n");
+		});
+
+		assert.strictEqual(output, "first\nsecond\n");
+	});
+
+	test("re-reads a truncated file from the start", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "old line one\nold line two\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "new\n");
+		});
+
+		assert.strictEqual(output, "old line one\nold line two\nnew\n");
+	});
+
+	test("reads a file rotated in place from the start, even when it is not smaller", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const rotated = join(tempDir, "camunda.log.new");
+		writeFileSync(camunda, "old\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(rotated, "new one\nnew two\n");
+			renameSync(rotated, camunda);
+		});
+
+		assert.strictEqual(output, "old\nnew one\nnew two\n");
+	});
+
+	test("prints the last lines in full however long they are", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		// Longer than any fixed read-back window, e.g. a large stack trace.
+		const longLine = "é".repeat(100_000);
+		writeFileSync(camunda, `before\nlast but one\n${longLine}\n`);
+
+		const output = await follow([camunda], () => {});
+
+		const expected = `before\nlast but one\n${longLine}\n`;
+		// Keep a failure readable rather than diffing 100,000 characters.
+		assert.ok(
+			output === expected,
+			`expected all ${expected.length} characters, got ${output.length}: ${JSON.stringify(output.slice(0, 40))}`,
+		);
+	});
+
+	test("keeps an unterminated last line as-is so appends continue it", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "one\ntwo");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "one\ntwo more\n");
+		});
+
+		assert.strictEqual(output, "one\ntwo more\n");
+	});
+
+	test("keeps following while a file is briefly missing", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			rmSync(camunda);
+		});
+
+		assert.strictEqual(output, "first\n");
+	});
+
+	test("prints appends while following and stops cleanly on Ctrl+C", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+		const chunks: string[] = [];
+		const output = () => chunks.join("");
+		let abandoned = false;
+
+		const before = new Set(process.listeners("SIGINT"));
+		const done = plugin.followLogsUntilInterrupted([camunda], {
+			write: (chunk: string) => {
+				// Lets a failing test end following when no handler was registered.
+				if (abandoned) throw new Error("test abandoned following");
+				chunks.push(chunk);
+			},
+			intervalMs: 20,
+		});
+		// Called directly: emitting SIGINT would also reach the test runner's handler.
+		const handlers = process.listeners("SIGINT").filter((l) => !before.has(l));
+		try {
+			assert.strictEqual(handlers.length, 1, "registers one SIGINT handler");
+			assert.strictEqual(output(), "first\n");
+
+			appendFileSync(camunda, "second\n");
+			const seen = await pollUntil(
+				async () => output() === "first\nsecond\n",
+				10_000,
+				10,
+			);
+			assert.ok(
+				seen,
+				`appended line not printed while following: ${JSON.stringify(output())}`,
+			);
+		} finally {
+			if (handlers.length === 0) {
+				abandoned = true;
+				appendFileSync(camunda, "end\n");
+				await done.catch(() => {});
+			}
+			for (const handler of handlers) handler("SIGINT");
+		}
+
+		await done;
+		assert.deepStrictEqual(
+			process.listeners("SIGINT").filter((l) => !before.has(l)),
+			[],
+			"removes its SIGINT handler",
 		);
 	});
 });

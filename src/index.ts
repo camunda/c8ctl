@@ -10,6 +10,7 @@ import { COMMAND_DISPATCH } from "./command-dispatch.ts";
 import {
 	c8ctl,
 	createClient,
+	describeUnsupportedNode,
 	getLogger,
 	getModelerDataDir,
 	getUserDataDir,
@@ -255,6 +256,9 @@ async function main() {
 		getModelerDataDir,
 		npm,
 	});
+
+	const unsupportedNode = describeUnsupportedNode();
+	if (unsupportedNode) getLogger().warn(unsupportedNode);
 
 	// Load installed plugins
 	await loadInstalledPlugins();
