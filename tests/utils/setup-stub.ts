@@ -556,6 +556,12 @@ Object.defineProperty(childProcess, "spawnSync", {
 			const commandArgs = Array.isArray(args[1]) ? args[1].map(String) : [];
 			return fakeGh(commandArgs);
 		}
+		// `modeler install` checks winget for an update to the Modeler the
+		// existsSync patch reports; answer "no applications found" so tests
+		// never query the host's real winget.
+		if (basename(String(args[0])) === "winget") {
+			return { status: 0x8a150014, stdout: "", stderr: "" };
+		}
 		return Reflect.apply(realSpawnSync, childProcess, args);
 	},
 });

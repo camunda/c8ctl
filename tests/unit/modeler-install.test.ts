@@ -1065,6 +1065,31 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("warns when a skipped installation is older than the latest release", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		try {
+			const appPath = join(sandbox.home, "Applications", MODELER_BUNDLE);
+			writeMacApp(appPath, "5.52.0");
+
+			const current = await sandbox.install();
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.strictEqual(current.stderr, "");
+
+			writeMacApp(appPath, "5.51.0");
+			const outdated = await sandbox.install({}, "--quiet");
+			assert.strictEqual(outdated.status, 0, outdated.stderr);
+			assert.match(
+				outdated.stderr,
+				/Camunda Modeler 5\.51\.0 is installed, but 5\.52\.0 is available\. Run `c8ctl modeler update` to update it\./,
+			);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	for (const homebrew of [true, false]) {
 		test(`emits a JSON dry-run preview for ${homebrew ? "Homebrew" : "direct download"}`, {
 			skip: !isMac,
@@ -1118,6 +1143,7 @@ describe("CLI behavioural: modeler install", () => {
 				'case "$1" in',
 				"  --version) exit 0 ;;",
 				'  list) exit "$BREW_INSTALLED" ;;',
+				'  outdated) printf "%s" "$BREW_OUTDATED" ;;',
 				'  install) /bin/mkdir -p "$APPLICATIONS_ROOT/Camunda Modeler.app" ;;',
 				"  *) exit 1 ;;",
 				"esac",
@@ -1154,7 +1180,21 @@ describe("CLI behavioural: modeler install", () => {
 			const alreadyInstalled = await sandbox.install({ BREW_INSTALLED: "0" });
 			assert.strictEqual(alreadyInstalled.status, 0, alreadyInstalled.stderr);
 			assert.match(alreadyInstalled.stdout, /already installed with Homebrew/);
-			assert.deepStrictEqual(sandbox.toolCalls(), brewChecks);
+			assert.strictEqual(alreadyInstalled.stderr, "");
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				...brewChecks,
+				"brew outdated --cask --quiet camunda-modeler",
+			]);
+
+			const outdated = await sandbox.install({
+				BREW_INSTALLED: "0",
+				BREW_OUTDATED: "camunda-modeler",
+			});
+			assert.strictEqual(outdated.status, 0, outdated.stderr);
+			assert.match(
+				outdated.stderr,
+				/A newer Camunda Modeler is available with Homebrew\. Run `c8ctl modeler update` to update it\./,
+			);
 		} finally {
 			sandbox.cleanup();
 		}
@@ -1378,7 +1418,53 @@ describe("CLI behavioural: modeler install", () => {
 
 			assert.strictEqual(result.status, 0, result.stderr);
 			assert.match(result.stdout, /already installed at .*; skipping/);
-			assert.deepStrictEqual(sandbox.toolCalls(), []);
+			assert.strictEqual(result.stderr, "");
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				"winget list --upgrade-available --id Camunda.Modeler --exact --source winget",
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	for (const quiet of [false, true]) {
+		test(`warns when a skipped Windows installation is outdated${quiet ? " with --quiet" : ""}`, {
+			skip: !isWindows,
+		}, async () => {
+			const sandbox = createWindowsSandbox();
+			try {
+				mkdirSync(sandbox.installDir, { recursive: true });
+				writeFileSync(join(sandbox.installDir, MODELER_EXECUTABLE), "");
+
+				const result = await sandbox.install(
+					{ WINGET: "installed", WINGET_UPGRADE: "available" },
+					...(quiet ? ["--quiet"] : []),
+				);
+
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(
+					result.stderr,
+					/A newer Camunda Modeler is available with winget\. Run `c8ctl modeler update` to update it\./,
+				);
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
+
+	test("skips an existing installation when the update check fails", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		try {
+			mkdirSync(sandbox.installDir, { recursive: true });
+			writeFileSync(join(sandbox.installDir, MODELER_EXECUTABLE), "");
+
+			const result = await sandbox.install({ WINGET: "missing" });
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /already installed at .*; skipping/);
+			assert.strictEqual(result.stderr, "");
 		} finally {
 			sandbox.cleanup();
 		}
@@ -1478,7 +1564,10 @@ describe("CLI behavioural: modeler install", () => {
 			const alreadyInstalled = await sandbox.install({ WINGET: "installed" });
 			assert.strictEqual(alreadyInstalled.status, 0, alreadyInstalled.stderr);
 			assert.match(alreadyInstalled.stdout, /already installed with winget/);
-			assert.deepStrictEqual(sandbox.toolCalls(), wingetChecks);
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				...wingetChecks,
+				"winget list --upgrade-available --id Camunda.Modeler --exact --source winget",
+			]);
 		} finally {
 			sandbox.cleanup();
 		}
