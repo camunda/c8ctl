@@ -43,7 +43,7 @@ export const metadata: PluginMetadata = {
 Requires GitHub CLI 2.90 or later; its skill commands are in preview.
 Re-run to update the same skill directories without duplicates when upstream changes. Local edits to up-to-date skills are preserved; upstream updates may replace edited files.
 To restore one skill's upstream files, use \`gh skill update --force --dir <skills-root> <skill-name>\`; pass the parent skills directory (for example \`~/.claude/skills\`), not the listed skill directory. Find names with \`gh skill list --scope user --agent <agent-id>\`. Extra local files are retained.
-Use \`skills list\` to inspect installed skills and \`skills remove\` to remove them. Removal deletes the full skill directories, including local edits. Name one or more skills to remove only those; unknown names fail before anything is deleted. Use a GitHub CLI agent ID for --harness; see \`gh skill install --help\` for supported IDs. Pass \`--yes\` for non-interactive removal; \`--dry-run\` previews without deleting.`,
+Use \`skills list\` to inspect installed skills and \`skills remove\` to remove them. Removal deletes the full skill directories, including local edits. Name one or more skills to remove only those; unknown names fail before anything is deleted. When a name is installed at multiple paths, pair each positional name with a matching \`--skill-path\` value to remove only that installation. Use a GitHub CLI agent ID for --harness; see \`gh skill install --help\` for supported IDs. Pass \`--yes\` for non-interactive removal; \`--dry-run\` previews without deleting.`,
 			subcommands: [
 				{
 					name: "install",
@@ -132,6 +132,28 @@ function skillRows(skills: CamundaSkillInstallation[]) {
 	return skills.map(({ name, harness, path }) => ({ name, harness, path }));
 }
 
+function parseSkillPaths(rawSkillPaths: unknown): string[] | undefined {
+	if (rawSkillPaths === undefined) return undefined;
+	const values: Iterable<unknown> = Array.isArray(rawSkillPaths)
+		? rawSkillPaths
+		: [rawSkillPaths];
+	const paths: string[] = [];
+	for (const value of values) {
+		if (typeof value !== "string" || value.length === 0) {
+			throw new Error(
+				"Invalid --skill-path: provide one non-empty path for each named skill.",
+			);
+		}
+		paths.push(value);
+	}
+	if (paths.length === 0) {
+		throw new Error(
+			"Invalid --skill-path: provide one non-empty path for each named skill.",
+		);
+	}
+	return paths;
+}
+
 /**
  * Emit JSON for a rows payload. With `--fields`, emit the rows directly
  * so logger.json filters each row's keys; the envelope would swallow
@@ -182,13 +204,14 @@ async function listSkills(rawHarness: unknown, ctx: PluginCtx): Promise<void> {
 async function removeSkills(
 	rawHarness: unknown,
 	extraArgs: string[],
+	rawSkillPaths: unknown,
 	ctx: PluginCtx,
 ): Promise<void> {
 	const { logger } = ctx;
 	try {
 		if (ctx.unrecognizedFlags && ctx.unrecognizedFlags.length > 0) {
 			throw new Error(
-				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'skills remove'. Only --harness selects the removal scope; fix or remove the flag before deleting skills.`,
+				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'skills remove'. Only --harness and --skill-path are supported removal selectors; fix or remove the flag before deleting skills.`,
 			);
 		}
 		// A mistyped flag can also be swallowed as the value of a string
@@ -197,15 +220,51 @@ async function removeSkills(
 		const swallowed = ctx.suspiciousFlagValues?.[0];
 		if (swallowed) {
 			throw new Error(
-				`"${swallowed}" looks like a flag but was passed as a value. Only --harness selects the removal scope; fix the invocation before deleting skills.`,
+				`"${swallowed}" looks like a flag but was passed as a value. Fix the invocation before deleting skills.`,
 			);
 		}
-		// Positional arguments name the skills to remove; without names,
-		// removal covers every Camunda skill in the selected harnesses.
-		const requestedNames = [...new Set(extraArgs)];
+		const skillPaths = parseSkillPaths(rawSkillPaths);
+		if (skillPaths !== undefined && skillPaths.length !== extraArgs.length) {
+			throw new Error(
+				"Provide --skill-path once for each positional skill name, in the same order; nothing was removed.",
+			);
+		}
+		// Positional names without paths select every matching installation.
+		// With paths, each pair selects one exact installation.
+		const requestedNames =
+			skillPaths === undefined ? [...new Set(extraArgs)] : extraArgs;
+		let requestedTargets: Array<{ name: string; path: string }> | undefined;
+		if (skillPaths !== undefined) {
+			requestedTargets = [];
+			for (const [index, path] of skillPaths.entries()) {
+				const name = requestedNames[index];
+				if (name === undefined) {
+					throw new Error(
+						"Provide --skill-path once for each positional skill name, in the same order; nothing was removed.",
+					);
+				}
+				requestedTargets.push({ name, path });
+			}
+		}
 		const { harnesses, requestedHarness } = resolveHarnesses(rawHarness);
 		const discovered = await inspectSkills(harnesses);
-		if (requestedNames.length > 0) {
+		if (requestedTargets !== undefined) {
+			const unknown = requestedTargets.filter(
+				(target) =>
+					!discovered.some(
+						(skill) => skill.name === target.name && skill.path === target.path,
+					),
+			);
+			if (unknown.length > 0) {
+				throw new Error(
+					`Unknown Camunda skill target${unknown.length === 1 ? "" : "s"} ${unknown
+						.map(({ name, path }) => `"${name}" (${path})`)
+						.join(
+							", ",
+						)} — not installed for ${harnesses.join(", ")}. Run "c8ctl skills list" for the installed set; nothing was removed.`,
+				);
+			}
+		} else if (requestedNames.length > 0) {
 			const installedNames = new Set(discovered.map((skill) => skill.name));
 			const unknown = requestedNames.filter(
 				(name) => !installedNames.has(name),
@@ -221,9 +280,16 @@ async function removeSkills(
 			}
 		}
 		const skills =
-			requestedNames.length === 0
-				? discovered
-				: discovered.filter((skill) => requestedNames.includes(skill.name));
+			requestedTargets !== undefined
+				? discovered.filter((skill) =>
+						requestedTargets.some(
+							(target) =>
+								skill.name === target.name && skill.path === target.path,
+						),
+					)
+				: requestedNames.length === 0
+					? discovered
+					: discovered.filter((skill) => requestedNames.includes(skill.name));
 		for (const skill of skills) camundaSkillRemovalPath(skill);
 		const items = skills.map(({ name, harness, path }) => ({
 			type: "skill",
@@ -292,17 +358,24 @@ async function removeSkills(
 					return;
 				}
 			} else {
-				const command = [
-					"c8ctl",
-					"skills",
-					"remove",
-					...requestedNames,
-					...(requestedHarness ? ["--harness", requestedHarness] : []),
-					"--yes",
-				].join(" ");
-				logger.info(`Nothing was removed. Run "${command}" to confirm.`, {
-					essential: true,
-				});
+				if (skillPaths !== undefined) {
+					logger.info(
+						"Nothing was removed. Re-run the same command with --yes to confirm.",
+						{ essential: true },
+					);
+				} else {
+					const command = [
+						"c8ctl",
+						"skills",
+						"remove",
+						...requestedNames,
+						...(requestedHarness ? ["--harness", requestedHarness] : []),
+						"--yes",
+					].join(" ");
+					logger.info(`Nothing was removed. Run "${command}" to confirm.`, {
+						essential: true,
+					});
+				}
 				return;
 			}
 		}
@@ -312,10 +385,15 @@ async function removeSkills(
 		// was open. Refuse changed entries and require a fresh preview.
 		const revalidated = await inspectSkills(harnesses);
 		const listedKeys = new Set(
-			revalidated.map((skill) => `${skill.harness} ${skill.path}`),
+			revalidated.map((skill) =>
+				JSON.stringify([skill.harness, skill.name, skill.path]),
+			),
 		);
 		const stale = skills.filter(
-			(skill) => !listedKeys.has(`${skill.harness} ${skill.path}`),
+			(skill) =>
+				!listedKeys.has(
+					JSON.stringify([skill.harness, skill.name, skill.path]),
+				),
 		);
 		if (stale.length > 0) {
 			throw new Error(
@@ -387,12 +465,23 @@ async function skillsHandler(
 	if (!ctx) throw new Error("skills requires the plugin host context");
 	const { logger } = ctx;
 
+	if (args[0] !== "remove" && flags?.["skill-path"] !== undefined) {
+		logger.error("--skill-path can only be used with 'skills remove'.");
+		process.exitCode = 1;
+		return;
+	}
+
 	if (args[0] === "list") {
 		await listSkills(flags?.harness, ctx);
 		return;
 	}
 	if (args[0] === "remove") {
-		await removeSkills(flags?.harness, args.slice(1), ctx);
+		await removeSkills(
+			flags?.harness,
+			args.slice(1),
+			flags?.["skill-path"],
+			ctx,
+		);
 		return;
 	}
 
@@ -474,6 +563,12 @@ export const commands: PluginCommands = {
 				rejectEmpty: true,
 				description:
 					"GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted)",
+			},
+			"skill-path": {
+				type: "string",
+				multiple: true,
+				description:
+					"During removal, match each positional skill name to one installed path; repeat once for each name",
 			},
 		},
 		handler: skillsHandler,

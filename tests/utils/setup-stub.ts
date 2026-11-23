@@ -47,10 +47,23 @@
  *   C8CTL_SETUP_STUB_MODELER=absent — the faked `modeler remove --dry-run`
  *                                   probe reports no managed installation,
  *                                   so removal previews omit Modeler.
+ *   C8CTL_SETUP_STUB_MODELER=malformed — the probe omits `wouldChange` to
+ *                                   simulate an invalid response.
  *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
  *                                   warning on stderr while succeeding.
  *   C8CTL_SETUP_STUB_SKILL_PATH=path — report a listed skill at this
  *                                   path, for removal safety tests.
+ *   C8CTL_SETUP_STUB_SKILL_SECOND_PATH=path — report a second path for each
+ *                                   installed skill.
+ *   C8CTL_SETUP_STUB_SKILL_APPEAR_AFTER_FIRST_LIST=path and
+ *   C8CTL_SETUP_STUB_SKILL_APPEAR_STATE=file — report an extra path only
+ *                                   after the first `gh skill list`.
+ *   C8CTL_SETUP_STUB_SKILL_NAME_AFTER_FIRST_LIST=name and
+ *   C8CTL_SETUP_STUB_SKILL_NAME_STATE=file — report a changed skill identity
+ *                                   after the first `gh skill list`.
+ *   C8CTL_SETUP_STUB_MCP_CONFLICT_PATH=file — replace the orchestration
+ *                                   entry with a foreign one before the
+ *                                   first `mcp uninstall` child.
  */
 
 import childProcess from "node:child_process";
@@ -175,11 +188,16 @@ function json(body: unknown, status = 200): Response {
 const clusterUpAtBoot = process.env.C8CTL_SETUP_STUB_CLUSTER === "up";
 const failStep = process.env.C8CTL_SETUP_STUB_FAIL;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * Flipped by a successful fake `cluster start`; the health endpoint
  * follows it, so the setup flow observes a cluster that actually came up.
  */
 let clusterRunning = clusterUpAtBoot;
+let mcpConflictInjected = false;
 
 // ── Child processes ────────────────────────────────────────────────
 
@@ -262,6 +280,44 @@ function fakeGh(commandArgs: string[]): {
 				stderr: 'unknown command "skill" for "gh"',
 			};
 		}
+		const appearAfterFirstPath =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_APPEAR_AFTER_FIRST_LIST
+				: undefined;
+		const appearState =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_APPEAR_STATE
+				: undefined;
+		const nameAfterFirstList =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_NAME_AFTER_FIRST_LIST
+				: undefined;
+		const nameState =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_NAME_STATE
+				: undefined;
+		const includeAppearingPath =
+			appearAfterFirstPath !== undefined &&
+			appearState !== undefined &&
+			fs.existsSync(appearState);
+		const includeChangedName =
+			nameAfterFirstList !== undefined &&
+			nameState !== undefined &&
+			fs.existsSync(nameState);
+		if (
+			appearAfterFirstPath !== undefined &&
+			appearState !== undefined &&
+			!includeAppearingPath
+		) {
+			fs.writeFileSync(appearState, "listed");
+		}
+		if (
+			nameAfterFirstList !== undefined &&
+			nameState !== undefined &&
+			!includeChangedName
+		) {
+			fs.writeFileSync(nameState, "listed");
+		}
 		// C8CTL_SETUP_STUB_SKILL_UNLIST_AFTER_FIRST=<state file>: the first
 		// list reports installed skills, later lists report none — simulating
 		// an inventory that changed between preview and deletion.
@@ -276,18 +332,31 @@ function fakeGh(commandArgs: string[]): {
 			status: 0,
 			stdout: JSON.stringify(
 				installedSkillNames.flatMap((skillName) => {
-					const path =
+					const paths = [
 						process.env.C8CTL_SETUP_STUB_SKILL_PATH ??
-						join(skillRoot, skillName);
-					return fs.existsSync(path)
-						? [
-								{
-									skillName,
-									sourceURL: "https://github.com/camunda/skills",
-									path,
-								},
-							]
-						: [];
+							join(skillRoot, skillName),
+						...(commandArgs[3] === "claude-code" &&
+						process.env.C8CTL_SETUP_STUB_SKILL_SECOND_PATH
+							? [process.env.C8CTL_SETUP_STUB_SKILL_SECOND_PATH]
+							: []),
+						...(includeAppearingPath &&
+						appearAfterFirstPath !== undefined &&
+						basename(appearAfterFirstPath) === skillName
+							? [appearAfterFirstPath]
+							: []),
+					];
+					return paths
+						.filter(
+							(path) => basename(path) === skillName && fs.existsSync(path),
+						)
+						.map((path) => ({
+							skillName:
+								includeChangedName && nameAfterFirstList !== undefined
+									? nameAfterFirstList
+									: skillName,
+							sourceURL: "https://github.com/camunda/skills",
+							path,
+						}));
 				}),
 			),
 			stderr: "",
@@ -334,6 +403,25 @@ Object.defineProperty(childProcess, "spawn", {
 		const argv = [command, ...(Array.isArray(rest[0]) ? rest[0] : [])].map(
 			String,
 		);
+		const mcpConflictPath = process.env.C8CTL_SETUP_STUB_MCP_CONFLICT_PATH;
+		if (
+			!mcpConflictInjected &&
+			mcpConflictPath &&
+			argv.includes("mcp") &&
+			argv.includes("uninstall")
+		) {
+			const config: unknown = JSON.parse(
+				fs.readFileSync(mcpConflictPath, "utf-8"),
+			);
+			if (!isRecord(config) || !isRecord(config.mcpServers)) {
+				throw new Error("setup-stub: expected an MCP server config");
+			}
+			config.mcpServers.camunda = {
+				url: "https://foreign.example.invalid/mcp",
+			};
+			fs.writeFileSync(mcpConflictPath, JSON.stringify(config));
+			mcpConflictInjected = true;
+		}
 		// setup self-invokes the cluster plugin to start the cluster.
 		if (argv.includes("cluster")) {
 			if (argv.includes("start")) {
@@ -373,6 +461,15 @@ Object.defineProperty(childProcess, "spawn", {
 			if (argv.includes("--dry-run")) {
 				if (failStep === "probe-modeler") {
 					return fakeChild(1, { stderr: "stubbed modeler probe failure\n" });
+				}
+				if (process.env.C8CTL_SETUP_STUB_MODELER === "malformed") {
+					return fakeChild(0, {
+						stdout: `${JSON.stringify({
+							dryRun: true,
+							command: "modeler remove",
+							message: "Unexpected probe response",
+						})}\n`,
+					});
 				}
 				const absent = process.env.C8CTL_SETUP_STUB_MODELER === "absent";
 				return fakeChild(0, {

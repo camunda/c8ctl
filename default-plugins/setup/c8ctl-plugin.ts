@@ -349,8 +349,8 @@ function captureC8ctlJson(argv: string[]): Promise<unknown> {
 /**
  * Probe the modeler plugin's own dry run: it decides whether a managed
  * Modeler installation exists and describes the removal in its own words,
- * so setup never duplicates platform-specific detection. A payload
- * without `wouldChange` means there is nothing to remove.
+ * so setup never duplicates platform-specific detection. A false
+ * `wouldChange` value means there is nothing to remove.
  */
 async function detectModelerRemoval(): Promise<
 	SetupModelerRemoval | undefined
@@ -360,7 +360,12 @@ async function detectModelerRemoval(): Promise<
 		"remove",
 		"--dry-run",
 	]);
-	if (!isRecord(payload) || payload.wouldChange !== true) return undefined;
+	if (!isRecord(payload) || typeof payload.wouldChange !== "boolean") {
+		throw new Error(
+			'modeler remove --dry-run returned an invalid response: expected a boolean "wouldChange" field.',
+		);
+	}
+	if (!payload.wouldChange) return undefined;
 	return {
 		message:
 			typeof payload.message === "string"
@@ -1016,7 +1021,9 @@ async function applySetupRemoval(
 	// which mirror the previewed inventory. The child is scoped to the
 	// previewed targets: a managed entry added while the confirmation was
 	// open belongs to a target the user never confirmed, so --docs or
-	// --orchestration is omitted accordingly.
+	// --orchestration is omitted accordingly. A selected entry that becomes
+	// foreign after the preview makes the child fail instead of being
+	// preserved silently and reported as removed.
 	for (const { plan, servers } of inventory.mcp) {
 		if (servers.length === 0) continue; // preserved-only: nothing to remove
 		const targets = [
@@ -1028,7 +1035,7 @@ async function applySetupRemoval(
 		try {
 			await spawnC8ctl(
 				ctx,
-				["mcp", "uninstall", plan.harness, ...targets, "--preserve-conflicts"],
+				["mcp", "uninstall", plan.harness, ...targets],
 				// stderr stays visible: a failing child's diagnostics are
 				// otherwise suppressed with the rest of the quiet output.
 				{ skipStdoutLine: () => true, stderrPassthrough: true },
@@ -1051,21 +1058,29 @@ async function applySetupRemoval(
 
 	// The skills plugin owns skill removal — including its
 	// revalidation-before-delete check. One child per harness, mirroring
-	// the install step's failure granularity. The child is constrained to
-	// the confirmed skill names: a Camunda skill installed while the
-	// confirmation was open was never previewed, so it is not the user's
-	// confirmed scope — and a previewed skill that vanished fails the
-	// child instead of silently shrinking the set.
+	// the install step's failure granularity. Pass every confirmed
+	// name/path pair: a same-named skill installed while confirmation was
+	// open is outside the preview and must remain untouched.
 	for (const harness of new Set(
 		inventory.skills.map((skill) => skill.harness),
 	)) {
-		const names = inventory.skills
-			.filter((skill) => skill.harness === harness)
-			.map((skill) => skill.name);
+		const skills = inventory.skills.filter(
+			(skill) => skill.harness === harness,
+		);
+		const names = skills.map((skill) => skill.name);
+		const skillPaths = skills.flatMap((skill) => ["--skill-path", skill.path]);
 		try {
 			await spawnC8ctl(
 				ctx,
-				["skills", "remove", ...names, "--harness", harness, "--yes"],
+				[
+					"skills",
+					"remove",
+					...names,
+					"--harness",
+					harness,
+					...skillPaths,
+					"--yes",
+				],
 				{
 					skipStdoutLine: (line) =>
 						line === "Skills removal preview:" ||

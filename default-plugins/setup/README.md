@@ -29,7 +29,7 @@ only when a step fails.
 Removal orchestrates the same owners: the unified preview is built from
 shared inspection helpers and a `modeler remove --dry-run` probe, and after
 one confirmation the actual teardown runs as child commands —
-`c8ctl mcp uninstall --preserve-conflicts` per harness,
+`c8ctl mcp uninstall` per harness,
 `c8ctl skills remove --harness <harness> --yes`, and `c8ctl modeler remove`.
 
 ## Flags

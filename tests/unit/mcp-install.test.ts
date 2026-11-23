@@ -628,6 +628,10 @@ test("MCP help and shell completions expose target selection and uninstall", asy
 		assert.equal(completion.status, 0, completion.stderr);
 		assert.match(completion.stdout, /orchestration/);
 		assert.match(completion.stdout, /docs/);
+		assert.match(
+			completion.stdout,
+			shell === "fish" ? /-l preserve-conflicts/ : /--preserve-conflicts/,
+		);
 	}
 });
 

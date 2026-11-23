@@ -12,9 +12,12 @@ harnesses.
   GitHub CLI agent ID.
 - `c8ctl skills list [--harness <agent-id>]` — list installed Camunda skills
   and their harnesses and paths.
-- `c8ctl skills remove [name...] [--harness <agent-id>]` — preview and remove
-  installed Camunda skills from the detected harnesses or one selected
-  harness. Naming skills removes only those; an unknown name fails before
+- `c8ctl skills remove [name...] [--skill-path <path>...] [--harness <agent-id>]`
+  — preview and remove installed Camunda skills from the detected harnesses
+  or one selected harness. Naming skills removes matching installations; an
+  unknown name fails before anything is deleted. To select one installation
+  when a name exists at multiple paths, pair each positional name with one
+  `--skill-path` value in the same order. Unknown name/path pairs fail before
   anything is deleted.
 
 Requires GitHub CLI 2.90 or later; its skill commands are in preview.
@@ -25,5 +28,7 @@ Without `--harness`, c8ctl detects Claude Code and GitHub Copilot CLI. Pass
 `--yes` to confirm removal in non-interactive use. `--dry-run` prints a removal
 preview without deleting files. Removal deletes the full Camunda skill
 directories, including local edits, and leaves other skills untouched.
+Without `--skill-path`, a name selects every matching installation. When
+`--skill-path` is provided, each name is limited to its matching listed path.
 
 Supports the global `--dry-run`, `--json`, `--quiet`, and `--verbose` flags.

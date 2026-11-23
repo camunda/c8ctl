@@ -1011,6 +1011,93 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("--remove keeps a same-named skill path added after the preview", async () => {
+		const stub = stubbedExecution();
+		try {
+			const skillRoot = join(stub.home, ".claude", "skills");
+			const firstSkillPath = join(skillRoot, "camunda-c8ctl");
+			const alternateConfig = join(stub.home, ".claude-alt");
+			const secondSkillPath = join(alternateConfig, "skills", "camunda-c8ctl");
+			const lateSkillPath = join(
+				alternateConfig,
+				"skills",
+				"later",
+				"camunda-c8ctl",
+			);
+			for (const skillPath of [
+				firstSkillPath,
+				secondSkillPath,
+				lateSkillPath,
+			]) {
+				mkdirSync(skillPath, { recursive: true });
+				writeFileSync(join(skillPath, "SKILL.md"), "# Camunda c8ctl\n");
+			}
+			writeFileSync(join(skillRoot, ".c8ctl-installed"), "camunda-c8ctl\n");
+			stub.options.env.CLAUDE_CONFIG_DIR = alternateConfig;
+			stub.options.env.C8CTL_SETUP_STUB_SKILL_SECOND_PATH = secondSkillPath;
+			stub.options.env.C8CTL_SETUP_STUB_SKILL_APPEAR_AFTER_FIRST_LIST =
+				lateSkillPath;
+			stub.options.env.C8CTL_SETUP_STUB_SKILL_APPEAR_STATE = join(
+				stub.cwd,
+				"skill-appeared.state",
+			);
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+
+			const result = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			assert.equal(result.status, 0, result.stderr + result.stdout);
+			assert.ok(!result.stdout.includes(lateSkillPath));
+			assert.ok(!existsSync(firstSkillPath));
+			assert.ok(!existsSync(secondSkillPath));
+			assert.ok(existsSync(lateSkillPath));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("--remove does not report an MCP conflict as removed after the preview", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+			const mcpConfigPath = join(stub.home, ".claude", ".claude.json");
+			stub.options.env.C8CTL_SETUP_STUB_MCP_CONFLICT_PATH = mcpConfigPath;
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Could not remove MCP configuration/);
+			assert.doesNotMatch(output, /Removed MCP server "camunda"/);
+
+			const remaining: unknown = JSON.parse(
+				readFileSync(mcpConfigPath, "utf-8"),
+			);
+			assert.ok(
+				isRecord(remaining) &&
+					isRecord(remaining.mcpServers) &&
+					isRecord(remaining.mcpServers.camunda),
+			);
+			assert.deepStrictEqual(remaining.mcpServers.camunda, {
+				url: "https://foreign.example.invalid/mcp",
+			});
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("skips skill discovery when no user skills directory exists", async () => {
 		const stub = stubbedExecution({ failStep: "list-skills" });
 		const ghCapture = join(stub.cwd, "gh-calls.jsonl");
@@ -1299,6 +1386,29 @@ describe("c8ctl setup", () => {
 			assert.match(
 				output,
 				/Warning: Could not inspect the Camunda Desktop Modeler installation/,
+			);
+			assert.match(output, /No setup-managed components were found/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("fails an otherwise empty removal when the Modeler probe response is malformed", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "malformed";
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(
+				output,
+				/Warning: Could not inspect the Camunda Desktop Modeler installation:.*invalid response/,
 			);
 			assert.match(output, /No setup-managed components were found/);
 		} finally {
