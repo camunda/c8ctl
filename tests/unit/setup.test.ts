@@ -565,13 +565,12 @@ describe("c8ctl setup", () => {
 			);
 			assert.doesNotMatch(out, /use tenant/);
 			// The run path is quoted — the working directory may contain
-			// spaces. One command per line: && is a syntax error in
-			// Windows PowerShell 5.1.
+			// spaces — and the rerun carries the same start variables
+			// setup used, so the mission decision cannot incident.
 			assert.match(
 				out,
-				/Run again:\s+c8ctl run ".*rocket-launch[/\\]rocket-launch\.bpmn" --profile local/,
+				/Run again:\s+c8ctl run ".*rocket-launch[/\\]rocket-launch\.bpmn" --profile local --variables '\{"missionName":"Apollo","fuelLevel":80\}'/,
 			);
-			assert.match(out, /deploys and starts the process; no Tasklist needed/);
 			assert.doesNotMatch(out, /&&/);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.

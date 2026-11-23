@@ -69,6 +69,11 @@ export interface SetupBlueprint {
 	}) => readonly string[];
 }
 
+// The mission decision reads these; the upstream quick-start's
+// "full send" launch. Shared between the start call and the rerun
+// suggestion so the two cannot drift.
+const ROCKET_LAUNCH_START_VARIABLES = { missionName: "Apollo", fuelLevel: 80 };
+
 export const SETUP_BLUEPRINTS = [
 	{
 		id: "rocket-launch",
@@ -83,25 +88,25 @@ export const SETUP_BLUEPRINTS = [
 			path: "1-rocket-launch",
 		},
 		processFile: "rocket-launch.bpmn",
-		// The mission decision reads these; the upstream quick-start's
-		// "full send" launch.
-		startVariables: { missionName: "Apollo", fuelLevel: 80 },
+		startVariables: ROCKET_LAUNCH_START_VARIABLES,
 		// Fully automated: setup already deployed and launched an
 		// instance, so the next step is looking at it. The deeplink opens
 		// the started instance in Operate directly — no filter clearing.
 		// The CLI lines pin the local profile (the session's active
 		// profile may point elsewhere) but not the tenant: the first-run
 		// audience has no session tenant, so resolution already lands on
-		// <default>. The run path is quoted: the working directory may
-		// contain spaces. All lines stay printable ASCII so the box keeps
-		// its borders.
+		// <default>. The rerun carries the same start variables setup
+		// used, or the mission decision incidents; the JSON is
+		// single-quoted, which cmd.exe does not strip — cmd users quote
+		// the other way around. The run path is quoted: the working
+		// directory may contain spaces. All lines stay printable ASCII so
+		// the box keeps its borders.
 		nextSteps: ({ projectDir, processInstanceKey }) => [
 			"Process instance is running on the local cluster.",
 			`Watch it:   http://localhost:8080/operate/processes/${processInstanceKey}`,
 			"            (login using demo / demo as username / password)",
 			`Inspect it: c8ctl get process-instance ${processInstanceKey} --profile local`,
-			`Run again:  c8ctl run "${join(projectDir, "rocket-launch.bpmn")}" --profile local`,
-			"            (deploys and starts the process; no Tasklist needed)",
+			`Run again:  c8ctl run "${join(projectDir, "rocket-launch.bpmn")}" --profile local --variables '${JSON.stringify(ROCKET_LAUNCH_START_VARIABLES)}'`,
 		],
 	},
 	{
