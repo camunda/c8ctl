@@ -78,7 +78,7 @@ composition root (src/index.ts, src/command-dispatch.ts)  →  commands  →  fr
 | `core/` | `core` |
 | `utils/` | `core`, `utils` (leaf: never `framework`/`commands`) |
 | `services/` | `core`, `utils`, `services` (never `framework`/`commands`) |
-| `framework/` | `core`, `utils`, `framework` (never `commands`) |
+| `framework/` | `core`, `utils`, `services`, `framework` (never `commands`) |
 | `internal/` | `core`, `utils`, `services` — the `@camunda8/cli/internal` entry for hosts; nothing in `src/` imports it |
 | `commands/` | `core`, `utils`, `services`, `framework`, `commands` |
 | composition root (`src/index.ts`, `src/command-dispatch.ts`) | anything |
@@ -115,11 +115,20 @@ Per-invocation request state — whether `--dry-run` / `--verbose` were passed �
 
 `src/services/` holds the logic that other hosts import instead of spawning the CLI, such as Desktop Modeler. The package exports the curated host surface as `@camunda8/cli/internal` (`src/internal/index.ts`). "Internal" means no compatibility promise: versions follow the CLI, and consumers pin an exact version.
 
-- **Shape.** A service is `fn(input, ctx)`. Inputs and results are plain, serializable objects. `ctx` (`C8ctlContext`) carries everything host-specific: `signal` (cancellation), `onProgress` (notices, warnings, progress), data directories, `fetch`, and the `env` the cluster client may read. Contract helpers live in `src/core/` (`src/core/context.ts`, `src/core/target.ts`); deploy path resolution in `src/utils/shared/deploy-resolution.ts`.
+- **Shape.** A service is `fn(input, ctx)`. Inputs and results are plain, serializable objects. `ctx` (`C8ctlContext`) carries everything host-specific: `signal` (cancellation), `onProgress` (notices, warnings, progress), data directories, `fetch`, and the `env` the cluster client may read. Contract helpers live in `src/core/` (`src/core/context.ts`, `src/core/target.ts`, `src/core/cluster-errors.ts`, `src/core/input.ts`); deploy path resolution in `src/utils/shared/deploy-resolution.ts`.
 - **Target.** `{ profile }` (a c8ctl profile or `modeler:<id>`) or `{ cluster }` (a resolved configuration). Hosts resolve session, `--profile` and env into a target; services never do.
 - **Errors.** Every failure is a `C8ctlError` (`src/core/c8ctl-error.ts`) with a stable `code` from `C8CTL_ERROR_CODES`, an optional `field`, `problem` (RFC 9457 from the cluster) and `details`. Hosts branch on `code`, never on `message`.
 - **No host state.** Services do not read the CLI runtime, `process.env`, `process.argv` or `process.cwd`, never print and never exit. Guarded statically by [`tests/unit/services-boundary.test.ts`](tests/unit/services-boundary.test.ts) and behaviorally by [`tests/unit/internal.test.ts`](tests/unit/internal.test.ts) (runs the packaged entry point from CommonJS with a poisoned runtime).
 - **The CLI is a host too.** `src/commands/helpers/deploy-helpers.ts` resolves the CLI's target, passes `process.env`, and renders the services' events, results and errors. Keep CLI wording, prompts and output there, not in services.
+- **Cluster-API services** (one module per resource, e.g. `src/services/incidents.ts`):
+  - Name services after the command: `listIncidents`, `getIncident`, `resolveIncident`.
+  - Input = the command's parameters (plain, serializable) plus `ClusterInput` (`target`, optional `tenantId`). Connect with `connect(input.target, ctx)`; the tenant is `input.tenantId ?? defaultTenantId`.
+  - Wrap every SDK call in `callCluster(() => …, ctx)`, so failures become `C8ctlError`s (`connection-failed`, `unauthorized`, `forbidden`, `not-found`, `request-rejected`, …) with the message the CLI showed before, and `ctx.signal` cancels the request (`cancelled`; nothing is sent after an abort). A paged request passes the signal it receives on: `callCluster((signal) => fetchAllPages(…, signal), ctx)`. Cancelling a mutation that was already sent does not undo it.
+  - Return the SDK's objects: `{ items }` for lists, the object for gets, a small result (e.g. the key) for mutations. Keep today's `limit` behavior (`fetchAllPages`).
+  - Export `<service>Request(input, tenantId)` → `{ method, endpoint, body }`; the service sends that body and `--dry-run` shows it.
+  - Invalid input throws `C8ctlError("invalid-input", <the CLI's message>, { field })`.
+  - The command is `defineServiceCommand(verb, resource, { toInput, dryRun, service, render })` in `src/commands/`: `toInput` maps flags, positionals and context; `render` keeps the CLI's columns and messages.
+  - Export the service and its input types from `src/internal/index.ts`.
 
 ### Commit message guidelines
 

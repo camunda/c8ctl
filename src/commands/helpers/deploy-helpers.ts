@@ -131,6 +131,7 @@ const REQUEST_ERROR_CODES: ReadonlySet<C8ctlErrorCode> = new Set([
 	"unauthorized",
 	"forbidden",
 	"payload-too-large",
+	"not-found",
 	"deployment-rejected",
 	"unknown",
 ]);

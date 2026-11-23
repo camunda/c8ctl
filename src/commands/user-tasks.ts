@@ -1,115 +1,63 @@
 /**
- * User task commands
+ * User task commands — CLI bindings of the user task services.
  */
 
-import { fetchAllPages } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+import { defineServiceCommand } from "../framework/index.ts";
 import {
-	buildDateFilter,
-	parseBetween,
-	parseVariablesFlag,
-} from "../utils/index.ts";
+	completeUserTask,
+	completeUserTaskRequest,
+	listUserTasks,
+	listUserTasksRequest,
+} from "../services/index.ts";
+import { parseVariablesFlag } from "../utils/index.ts";
 
 /**
  * List user tasks
  */
-export const listUserTasksCommand = defineCommand(
-	"list",
-	"user-task",
-	async (ctx, flags) => {
-		const { client, tenantId, profile, limit, all, between, dateField } = ctx;
-
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
-		};
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		} else if (!all) {
-			// By default, exclude COMPLETED tasks unless --all is specified
-			filter.filter.state = "CREATED";
-		}
-
-		if (flags.assignee) {
-			filter.filter.assignee = flags.assignee;
-		}
-
-		if (between) {
-			const parsed = parseBetween(between);
-			if (parsed) {
-				const field = dateField ?? "creationDate";
-				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
-
-		const dr = ctx.dryRun({
-			command: "list user-tasks",
-			method: "POST",
-			endpoint: "/user-tasks/search",
-			profile,
-			body: filter,
-		});
-		if (dr) return dr;
-
-		const allItems = await fetchAllPages(
-			(f, opts) => client.searchUserTasks(f, opts),
-			filter,
-			undefined,
-			limit,
-		);
-
-		return {
-			kind: "list",
-			items: allItems.map((task) => ({
-				Key: task.userTaskKey,
-				Name: task.name || task.elementId,
-				State: task.state,
-				Assignee: task.assignee || "(unassigned)",
-				Created: task.creationDate || "-",
-				"Process Instance": task.processInstanceKey,
-				"Tenant ID": task.tenantId,
-			})),
-			emptyMessage: "No user tasks found",
-		};
-	},
-);
+export const listUserTasksCommand = defineServiceCommand("list", "user-task", {
+	toInput: (flags, _args, scope) => ({
+		state: flags.state,
+		assignee: flags.assignee,
+		all: scope.all,
+		between: scope.between,
+		dateField: scope.dateField,
+		limit: scope.limit,
+	}),
+	dryRun: { command: "list user-tasks", request: listUserTasksRequest },
+	service: listUserTasks,
+	render: ({ items }) => ({
+		kind: "list",
+		items: items.map((task) => ({
+			Key: task.userTaskKey,
+			Name: task.name || task.elementId,
+			State: task.state,
+			Assignee: task.assignee || "(unassigned)",
+			Created: task.creationDate || "-",
+			"Process Instance": task.processInstanceKey,
+			"Tenant ID": task.tenantId,
+		})),
+		emptyMessage: "No user tasks found",
+	}),
+});
 
 /**
  * Complete user task
  */
-export const completeUserTaskCommand = defineCommand(
+export const completeUserTaskCommand = defineServiceCommand(
 	"complete",
 	"user-task",
-	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const body: Record<string, unknown> = {};
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			variables = parseVariablesFlag({ raw: flags.variables });
-			body.variables = variables;
-		}
-
-		const dr = ctx.dryRun({
-			command: "complete user-task",
-			method: "POST",
-			endpoint: `/user-tasks/${key}/completion`,
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.completeUserTask({
-			userTaskKey: key,
-			...(variables !== undefined && { variables }),
-		});
-		return { kind: "success", message: `User task ${key} completed` };
+	{
+		toInput: (flags, args) => ({
+			userTaskKey: args.key,
+			variables: flags.variables
+				? parseVariablesFlag({ raw: flags.variables })
+				: undefined,
+		}),
+		dryRun: { command: "complete user-task", request: completeUserTaskRequest },
+		service: completeUserTask,
+		render: ({ userTaskKey }) => ({
+			kind: "success",
+			message: `User task ${userTaskKey} completed`,
+		}),
 	},
 );

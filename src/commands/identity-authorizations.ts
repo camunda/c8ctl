@@ -1,156 +1,118 @@
 /**
- * Identity authorization commands
+ * Identity authorization commands — CLI bindings of the authorization
+ * services.
  */
 
 import {
-	type OwnerTypeEnum,
 	OwnerTypeEnum as OwnerTypeValues,
-	type PermissionTypeEnum,
 	PermissionTypeEnum as PermissionTypeValues,
-	type ResourceTypeEnum,
 	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages, sortTableData } from "../core/index.ts";
 import {
-	defineCommand,
+	defineServiceCommand,
 	requireCsvEnum,
 	requireEnum,
 	requireOption,
 } from "../framework/index.ts";
+import {
+	type CreateAuthorizationInput,
+	createAuthorization,
+	createAuthorizationRequest,
+	deleteAuthorization,
+	deleteAuthorizationRequest,
+	getAuthorization,
+	getAuthorizationRequest,
+	listAuthorizations,
+	listAuthorizationsRequest,
+	searchAuthorizations,
+	searchAuthorizationsRequest,
+} from "../services/index.ts";
+
+/** Table row of an authorization. */
+function row(a: {
+	authorizationKey?: string | null;
+	ownerId?: string | null;
+	ownerType?: string | null;
+	resourceType?: string | null;
+	resourceId?: string | null;
+	permissionTypes?: readonly string[] | null;
+}) {
+	return {
+		Key: a.authorizationKey ?? "",
+		"Owner ID": a.ownerId ?? "",
+		"Owner Type": a.ownerType ?? "",
+		"Resource Type": a.resourceType ?? "",
+		"Resource ID": a.resourceId ?? "",
+		Permissions: Array.isArray(a.permissionTypes)
+			? a.permissionTypes.join(", ")
+			: "",
+	};
+}
 
 /**
  * List all authorizations
  */
-export const listAuthorizationsCommand = defineCommand(
+export const listAuthorizationsCommand = defineServiceCommand(
 	"list",
 	"authorization",
-	async (ctx) => {
-		const { client, profile, limit } = ctx;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, _args, scope) => ({ limit: scope.limit }),
+		dryRun: {
 			command: "list authorizations",
-			method: "POST",
-			endpoint: "/authorizations/search",
-			profile,
-			body: {},
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(filter, opts) => client.searchAuthorizations(filter, opts),
-			{},
-			undefined,
-			limit,
-		);
-
-		return {
+			request: listAuthorizationsRequest,
+		},
+		service: listAuthorizations,
+		render: ({ items }) => ({
 			kind: "list",
-			items: items.map((a) => ({
-				Key: a.authorizationKey ?? "",
-				"Owner ID": a.ownerId ?? "",
-				"Owner Type": a.ownerType ?? "",
-				"Resource Type": a.resourceType ?? "",
-				"Resource ID": a.resourceId ?? "",
-				Permissions: Array.isArray(a.permissionTypes)
-					? a.permissionTypes.join(", ")
-					: "",
-			})),
+			items: items.map(row),
 			emptyMessage: "No authorizations found",
-		};
+		}),
 	},
 );
+
 /**
  * Search authorizations with filters
  */
-export const searchIdentityAuthorizationsCommand = defineCommand(
+export const searchIdentityAuthorizationsCommand = defineServiceCommand(
 	"search",
 	"authorization",
-	async (ctx, flags, _args) => {
-		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
-
-		const filter: Record<string, unknown> = {};
-		if (flags.ownerId) filter.ownerId = flags.ownerId;
-		if (flags.ownerType) filter.ownerType = flags.ownerType;
-		if (flags.resourceType) filter.resourceType = flags.resourceType;
-		if (flags.resourceId) filter.resourceIds = [flags.resourceId];
-
-		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (flags, _args, scope) => ({
+			ownerId: flags.ownerId,
+			ownerType: flags.ownerType,
+			resourceType: flags.resourceType,
+			resourceId: flags.resourceId,
+			limit: scope.limit,
+		}),
+		dryRun: {
 			command: "search authorizations",
-			method: "POST",
-			endpoint: "/authorizations/search",
-			profile,
-			body: searchFilter,
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(f, opts) => client.searchAuthorizations(f, opts),
-			searchFilter,
-			undefined,
-			limit,
-		);
-
-		if (items.length === 0) {
-			logger.info("No authorizations found", { essential: true });
-			return;
-		}
-
-		let tableData = items.map((a) => ({
-			Key: a.authorizationKey ?? "",
-			"Owner ID": a.ownerId ?? "",
-			"Owner Type": a.ownerType ?? "",
-			"Resource Type": a.resourceType ?? "",
-			"Resource ID": a.resourceId ?? "",
-			Permissions: Array.isArray(a.permissionTypes)
-				? a.permissionTypes.join(", ")
-				: "",
-		}));
-		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
-		logger.table(tableData);
+			request: searchAuthorizationsRequest,
+		},
+		service: searchAuthorizations,
+		render: ({ items }) => ({
+			kind: "list",
+			items: items.map(row),
+			emptyMessage: "No authorizations found",
+		}),
 	},
 );
 
 /**
  * Get a single authorization by key
  */
-export const getIdentityAuthorizationCommand = defineCommand(
+export const getIdentityAuthorizationCommand = defineServiceCommand(
 	"get",
 	"authorization",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const authorizationKey = args.authorizationKey;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, args) => ({ authorizationKey: args.authorizationKey }),
+		dryRun: {
 			command: "get authorization",
-			method: "GET",
-			endpoint: `/authorizations/${authorizationKey}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getAuthorization(
-			{ authorizationKey },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		return { kind: "get", data: result };
+			request: getAuthorizationRequest,
+		},
+		service: getAuthorization,
+		render: (authorization) => ({ kind: "get", data: authorization }),
 	},
 );
-
-/**
- * Validated inputs for creating an authorization.
- * All fields are guaranteed present and type-narrowed by
- * validateCreateAuthorizationOptions() before reaching the handler.
- */
-export interface CreateAuthorizationInput {
-	profile?: string;
-	ownerId: string;
-	ownerType: OwnerTypeEnum;
-	resourceType: ResourceTypeEnum;
-	resourceId: string;
-	permissionTypes: PermissionTypeEnum[];
-}
 
 /**
  * Validate raw CLI options for the create authorization command.
@@ -158,7 +120,6 @@ export interface CreateAuthorizationInput {
  * Exits with code 1 on invalid input.
  */
 function validateCreateAuthorizationOptions(options: {
-	profile?: string;
 	ownerId?: string;
 	ownerType?: string;
 	resourceType?: string;
@@ -166,7 +127,6 @@ function validateCreateAuthorizationOptions(options: {
 	permissions?: string;
 }): CreateAuthorizationInput {
 	return {
-		profile: options.profile,
 		ownerId: requireOption(options.ownerId, "ownerId"),
 		ownerType: requireEnum(
 			requireOption(options.ownerType, "ownerType"),
@@ -190,66 +150,43 @@ function validateCreateAuthorizationOptions(options: {
 /**
  * Create a new authorization
  */
-export const createIdentityAuthorizationCommand = defineCommand(
+export const createIdentityAuthorizationCommand = defineServiceCommand(
 	"create",
 	"authorization",
-	async (ctx, flags, _args) => {
-		const { client, profile } = ctx;
-
-		const validated = validateCreateAuthorizationOptions({
-			profile,
-			ownerId: flags.ownerId,
-			ownerType: flags.ownerType,
-			resourceType: flags.resourceType,
-			resourceId: flags.resourceId,
-			permissions: flags.permissions,
-		});
-
-		const body = {
-			ownerId: validated.ownerId,
-			ownerType: validated.ownerType,
-			resourceType: validated.resourceType,
-			resourceId: validated.resourceId,
-			permissionTypes: validated.permissionTypes,
-		};
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (flags) =>
+			validateCreateAuthorizationOptions({
+				ownerId: flags.ownerId,
+				ownerType: flags.ownerType,
+				resourceType: flags.resourceType,
+				resourceId: flags.resourceId,
+				permissions: flags.permissions,
+			}),
+		dryRun: {
 			command: "create authorization",
-			method: "POST",
-			endpoint: "/authorizations",
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.createAuthorization(body);
-		return { kind: "success", message: "Authorization created" };
+			request: createAuthorizationRequest,
+		},
+		service: createAuthorization,
+		render: () => ({ kind: "success", message: "Authorization created" }),
 	},
 );
 
 /**
  * Delete an authorization by key
  */
-export const deleteIdentityAuthorizationCommand = defineCommand(
+export const deleteIdentityAuthorizationCommand = defineServiceCommand(
 	"delete",
 	"authorization",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const authorizationKey = args.authorizationKey;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, args) => ({ authorizationKey: args.authorizationKey }),
+		dryRun: {
 			command: "delete authorization",
-			method: "DELETE",
-			endpoint: `/authorizations/${encodeURIComponent(String(authorizationKey))}`,
-			profile,
-			body: null,
-		});
-		if (dr) return dr;
-
-		await client.deleteAuthorization({ authorizationKey });
-		return {
+			request: deleteAuthorizationRequest,
+		},
+		service: deleteAuthorization,
+		render: ({ authorizationKey }) => ({
 			kind: "success",
 			message: `Authorization '${authorizationKey}' deleted`,
-		};
+		}),
 	},
 );

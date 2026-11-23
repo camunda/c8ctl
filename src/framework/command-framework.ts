@@ -14,6 +14,7 @@
  */
 
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
+import type { C8ctlContext, ClusterInput, Target } from "../core/index.ts";
 import {
 	getLogger,
 	handleCommandError,
@@ -637,4 +638,100 @@ export function createDryRun(isDryRun: boolean): DryRunFn {
 			},
 		};
 	};
+}
+
+// ─── defineServiceCommand ──────────────────────────────────────────────────
+
+/** The request a command shows for `--dry-run`. */
+export interface DryRunRequest {
+	method: string;
+	endpoint: string;
+	body?: unknown;
+}
+
+/** Context fields a command's flags may map to a service input. */
+export type CommandScope = Pick<
+	CommandContext,
+	| "tenantId"
+	| "limit"
+	| "all"
+	| "between"
+	| "dateField"
+	| "sortBy"
+	| "sortOrder"
+	| "version"
+	| "resource"
+	| "positionals"
+>;
+
+/**
+ * A CLI command backed by a service (`src/services/`): how flags
+ * become the service input, what `--dry-run` shows, and how the result
+ * is rendered.
+ */
+export interface ServiceBinding<
+	V extends keyof Registry,
+	R extends string,
+	Input extends object,
+	Output,
+> {
+	/** Map parsed flags, positionals and context to the service input. */
+	toInput(
+		flags: InferFlags<ResolvedFlags<V, R>>,
+		args: InferPositionals<ResolvedPositionals<V, R>>,
+		scope: CommandScope,
+	): Input;
+	/** What `--dry-run` shows instead of running the service. */
+	dryRun?: {
+		command: string;
+		request(input: Input, tenantId: string | undefined): DryRunRequest;
+	};
+	/** The service; the host adds the target and tenant. */
+	service(
+		input: Input & { target: Target; tenantId?: string },
+		ctx: C8ctlContext,
+	): Promise<Output>;
+	/** Render the result for the terminal (table, JSON, message). */
+	render(output: Output, input: Input, scope: CommandScope): CommandResult;
+}
+
+/**
+ * The cluster input of a service the CLI runs: the client it resolved
+ * from `--profile`, session and env, and the active tenant.
+ */
+export function clusterInputOf(ctx: CommandContext): ClusterInput {
+	return { target: { client: ctx.client }, tenantId: ctx.tenantId };
+}
+
+/**
+ * Define a command whose work is a service. The CLI handler builds the
+ * input, handles `--dry-run`, runs the service with the client the CLI
+ * resolved from `--profile`, session and env, and renders the result.
+ */
+export function defineServiceCommand<
+	V extends keyof Registry,
+	R extends string,
+	Input extends object,
+	Output,
+>(
+	verb: V,
+	resource: R,
+	binding: ServiceBinding<V, R, Input, Output>,
+): CommandHandler<V, R> {
+	return defineCommand(verb, resource, async (ctx, flags, args) => {
+		const input = binding.toInput(flags, args, ctx);
+		if (binding.dryRun) {
+			const dr = ctx.dryRun({
+				command: binding.dryRun.command,
+				profile: ctx.profile,
+				...binding.dryRun.request(input, ctx.tenantId),
+			});
+			if (dr) return dr;
+		}
+		const output = await binding.service(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
+		);
+		return binding.render(output, input, ctx);
+	});
 }

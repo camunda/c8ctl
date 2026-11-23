@@ -152,6 +152,7 @@ function isNetworkError(error: Error): boolean {
 	const message = error.message || "";
 	// Node.js native fetch surfaces this when the TCP connection is refused
 	if (message.toLowerCase().includes("fetch failed")) return true;
+	if (isC8ctlError(error)) return error.code === "connection-failed";
 
 	// Check for Node.js system error codes (e.g. ECONNREFUSED). The `code` and
 	// `cause` properties are carried by Node's system errors but not declared on

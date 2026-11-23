@@ -11,7 +11,9 @@ import {
 	getProfileOrModeler,
 	profileToClusterConfig,
 } from "./config.ts";
-import type { C8ctlContext, Target } from "./context.ts";
+import { type C8ctlContext, type Target, throwIfCancelled } from "./context.ts";
+import { normalizeToError } from "./errors.ts";
+import { isRecord } from "./logger.ts";
 
 export interface ResolvedTarget {
 	config: ClusterConfig;
@@ -20,7 +22,7 @@ export interface ResolvedTarget {
 }
 
 export function resolveTarget(
-	target: Target,
+	target: Exclude<Target, { client: CamundaClient }>,
 	ctx: C8ctlContext,
 ): ResolvedTarget {
 	if ("cluster" in target) {
@@ -56,9 +58,54 @@ export function createTargetClient(
 	config: ClusterConfig,
 	ctx: C8ctlContext,
 ): CamundaClient {
-	return createClientFromConfig(config, {
-		env: ctx.env ?? {},
-		logLevel: ctx.sdkLogLevel ?? (ctx.env ? undefined : "silent"),
-		fetch: ctx.fetch,
-	});
+	try {
+		return createClientFromConfig(config, {
+			env: ctx.env ?? {},
+			logLevel: ctx.sdkLogLevel ?? (ctx.env ? undefined : "silent"),
+			fetch: ctx.fetch,
+		});
+	} catch (error) {
+		throw invalidConnection(error);
+	}
+}
+
+/**
+ * The SDK rejects an incomplete configuration with a
+ * `CamundaConfigurationError`; its issues name configuration keys only.
+ */
+function invalidConnection(error: unknown): unknown {
+	if (!isRecord(error) || error.name !== "CamundaConfigurationError") {
+		return error;
+	}
+	const issues = Array.isArray(error.errors)
+		? error.errors.filter(isRecord).map((issue) => ({
+				code: issue.code,
+				...(issue.key === undefined ? {} : { key: issue.key }),
+				message: issue.message,
+			}))
+		: [];
+	return new C8ctlError(
+		"invalid-connection",
+		normalizeToError(error, "Invalid cluster configuration").message,
+		{ cause: error, details: { issues } },
+	);
+}
+
+/** A connected target: the client to use and the profile's default tenant. */
+export interface ConnectedTarget {
+	client: CamundaClient;
+	defaultTenantId?: string;
+}
+
+/** Connect to a target: resolve it and build a client for the context. */
+export function connect(target: Target, ctx: C8ctlContext): ConnectedTarget {
+	throwIfCancelled(ctx);
+	if ("client" in target) {
+		return { client: target.client };
+	}
+	const { config, defaultTenantId } = resolveTarget(target, ctx);
+	return {
+		client: createTargetClient(config, ctx),
+		...(defaultTenantId === undefined ? {} : { defaultTenantId }),
+	};
 }

@@ -19,7 +19,7 @@
  *   - services/ → core, utils, services (the embedding contract: never
  *                                          framework/commands, so hosts other
  *                                          than the CLI can import it)
- *   - framework/ → core, utils, framework (never commands)
+ *   - framework/ → core, utils, services, framework (never commands)
  *   - internal/  → core, utils, services (the `@camunda8/cli/internal`
  *                                          entry for hosts; nothing in
  *                                          src/ imports it)
@@ -106,7 +106,7 @@ const ALLOWED: Record<Layer, ReadonlySet<Layer>> = {
 	services: new Set<Layer>(["core", "utils", "services"]),
 	// The host entry: re-exports, never imported from inside src/.
 	internal: new Set<Layer>(["core", "utils", "services", "internal"]),
-	framework: new Set<Layer>(["core", "utils", "framework"]),
+	framework: new Set<Layer>(["core", "utils", "services", "framework"]),
 	commands: new Set<Layer>([
 		"core",
 		"utils",

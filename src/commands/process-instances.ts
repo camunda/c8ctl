@@ -2,25 +2,41 @@
  * Process instance commands
  */
 
-import type {
-	createProcessInstanceInput,
-	migrateProcessInstanceInput,
-	migrateProcessInstancesBatchOperationInput,
-	modifyProcessInstanceInput,
-	modifyProcessInstancesBatchOperationInput,
-	ProcessInstanceModificationInstruction,
-} from "@camunda8/orchestration-cluster-api";
+import type { ProcessInstanceModificationInstruction } from "@camunda8/orchestration-cluster-api";
+import { ProcessDefinitionKey } from "@camunda8/orchestration-cluster-api";
+import { C8ctlError } from "../core/index.ts";
 import {
-	ProcessDefinitionId,
-	ProcessDefinitionKey,
-	TenantId,
-} from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+	type CommandContext,
+	clusterInputOf,
+	defineCommand,
+	defineServiceCommand,
+} from "../framework/index.ts";
 import {
-	buildDateFilter,
+	awaitProcessInstance,
+	awaitProcessInstanceRequest,
+	cancelProcessInstance,
+	cancelProcessInstanceRequest,
+	createProcessInstance,
+	createProcessInstanceRequest,
+	getProcessInstance,
+	getProcessInstanceRequest,
+	listProcessInstances,
+	listProcessInstancesRequest,
+	migrateProcessInstance,
+	migrateProcessInstanceRequest,
+	migrateProcessInstances,
+	migrateProcessInstancesRequest,
+	modifyProcessInstance,
+	modifyProcessInstanceRequest,
+	modifyProcessInstances,
+	modifyProcessInstancesRequest,
+	resumeProcessInstance,
+	resumeProcessInstanceRequest,
+	suspendProcessInstance,
+	suspendProcessInstanceRequest,
+} from "../services/index.ts";
+import {
 	parseActivateFlag,
-	parseBetween,
 	parseJsonObjectFlag,
 	parseMigrationMapping,
 	parseModificationInstructions,
@@ -35,71 +51,31 @@ import {
 /**
  * List process instances
  */
-export const listProcessInstancesCommand = defineCommand(
+export const listProcessInstancesCommand = defineServiceCommand(
 	"list",
 	"process-instance",
-	async (ctx, flags) => {
-		const { client, tenantId, profile, limit, all, between, dateField } = ctx;
-
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
-		};
-
-		const processDefinitionId =
-			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
-		if (processDefinitionId) {
-			filter.filter.processDefinitionId = processDefinitionId;
-		}
-		if (flags.businessId) {
-			filter.filter.businessId = flags.businessId;
-		}
-
-		// `--version` is a global flag, parsed as a string after the verb
-		// (stage 2 of the two-stage parser) and surfaced as ctx.version.
-		const version = ctx.version;
-		if (version !== undefined && !Number.isNaN(version)) {
-			filter.filter.processDefinitionVersion = version;
-		}
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		} else if (!all) {
-			filter.filter.state = "ACTIVE";
-		}
-
-		if (between) {
-			const parsed = parseBetween(between);
-			if (parsed) {
-				const field = dateField ?? "startDate";
-				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (flags, _args, scope) => ({
+			processDefinitionId:
+				flags.id || flags.processDefinitionId || flags.bpmnProcessId,
+			businessId: flags.businessId,
+			// `--version` is a global flag, parsed as a string after the verb
+			// (stage 2 of the two-stage parser) and surfaced as scope.version.
+			version: scope.version,
+			state: flags.state,
+			all: scope.all,
+			between: scope.between,
+			dateField: scope.dateField,
+			limit: scope.limit,
+		}),
+		dryRun: {
 			command: "list process-instances",
-			method: "POST",
-			endpoint: "/process-instances/search",
-			profile,
-			body: filter,
-		});
-		if (dr) return dr;
-
-		const allItems = await fetchAllPages(
-			(f, opts) => client.searchProcessInstances(f, opts),
-			filter,
-			undefined,
-			limit,
-		);
-
-		return {
+			request: listProcessInstancesRequest,
+		},
+		service: listProcessInstances,
+		render: ({ items }, input, scope) => ({
 			kind: "list",
-			items: allItems.map((pi) => ({
+			items: items.map((pi) => ({
 				Key: `${pi.hasIncident ? "⚠ " : ""}${pi.processInstanceKey}`,
 				"Business ID": pi.businessId || "-",
 				"Process ID": pi.processDefinitionId,
@@ -108,117 +84,102 @@ export const listProcessInstancesCommand = defineCommand(
 				"Start Date": pi.startDate || "-",
 				"Tenant ID": pi.tenantId,
 			})),
-			emptyMessage: processInstancesEmptyMessage(filter.filter),
-		};
+			emptyMessage: processInstancesEmptyMessage(
+				listProcessInstancesRequest(input, scope.tenantId).body.filter,
+			),
+		}),
 	},
 );
 
 /**
  * Get process instance by key
  */
-export const getProcessInstanceCommand = defineCommand(
+export const getProcessInstanceCommand = defineServiceCommand(
 	"get",
 	"process-instance",
-	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-		const consistencyOptions = { consistency: { waitUpToMs: 0 } };
-		// --variables is a boolean toggle for `get pi` (and a string for
-		// `create pi`): stage 2 parses it against this command's own flag table.
-		const includeVariables = flags.variables === true;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (flags, args) => ({
+			processInstanceKey: args.key,
+			// --variables is a boolean toggle for `get pi` (and a string for
+			// `create pi`): stage 2 parses it against this command's own flag
+			// table.
+			includeVariables: flags.variables === true,
+		}),
+		dryRun: {
 			command: "get process-instance",
-			method: "GET",
-			endpoint: `/process-instances/${key}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getProcessInstance(
-			{ processInstanceKey: key },
-			consistencyOptions,
-		);
-
-		if (includeVariables) {
-			const variablesResult = await client.searchVariables(
-				{
-					filter: {
-						processInstanceKey: key,
-					},
-					truncateValues: false,
-				},
-				consistencyOptions,
-			);
-
-			return {
-				kind: "get",
-				data: {
-					...result,
-					variables: variablesResult.items || [],
-				},
-			};
-		}
-
-		return { kind: "get", data: result };
+			request: getProcessInstanceRequest,
+		},
+		service: getProcessInstance,
+		render: (processInstance) => ({ kind: "get", data: processInstance }),
 	},
 );
 
+const PROCESS_DEFINITION_ID_REQUIRED =
+	"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag";
+
+/** The flags `create` and `await` share, as the service input. */
+function createInputOf(
+	ctx: CommandContext,
+	flags: {
+		id?: string;
+		processDefinitionId?: string;
+		bpmnProcessId?: string;
+		variables?: string;
+		businessId?: string;
+		requestTimeout?: string;
+	},
+) {
+	const processDefinitionId =
+		flags.id || flags.processDefinitionId || flags.bpmnProcessId;
+	if (!processDefinitionId) {
+		throw new C8ctlError("invalid-input", PROCESS_DEFINITION_ID_REQUIRED, {
+			field: "processDefinitionId",
+		});
+	}
+	return {
+		processDefinitionId,
+		version: ctx.version,
+		// Parse variables early for clear error reporting
+		variables: flags.variables
+			? parseVariablesFlag({ raw: flags.variables })
+			: undefined,
+		businessId: flags.businessId,
+		requestTimeout:
+			flags.requestTimeout !== undefined
+				? parseInt(flags.requestTimeout, 10)
+				: undefined,
+	};
+}
+
+const FETCH_VARIABLES_NOTE =
+	"Note: --fetchVariables is not yet supported by the API. All variables will be returned.";
+
 /**
- * Create process instance
+ * Create process instance. A plain handler: it reports progress and prints
+ * the completed instance next to the success message.
  */
 export const createProcessInstanceCommand = defineCommand(
 	"create",
 	"process-instance",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
-		const processDefinitionId =
-			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
-
-		if (!processDefinitionId) {
-			throw new Error(
-				"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag",
-			);
-		}
-
-		const version = ctx.version;
+		const { logger } = ctx;
 		const awaitCompletion = flags.awaitCompletion;
 		const fetchVariables = flags.fetchVariables;
-		const requestTimeout =
-			flags.requestTimeout !== undefined
-				? parseInt(flags.requestTimeout, 10)
-				: undefined;
-
-		// Parse variables early for clear error reporting
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			variables = parseVariablesFlag({ raw: flags.variables });
-		}
-
-		// Dry-run: emit the would-be API request without executing
-		const body: Record<string, unknown> = {
-			processDefinitionId,
-			tenantId,
-		};
-		if (version !== undefined) body.processDefinitionVersion = version;
-		if (variables !== undefined) body.variables = variables;
-		if (flags.businessId) body.businessId = flags.businessId;
-		if (awaitCompletion) body.awaitCompletion = true;
-		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
+		const input = { ...createInputOf(ctx, flags), awaitCompletion };
 
 		const dr = ctx.dryRun({
 			command: "create process-instance",
-			method: "POST",
-			endpoint: "/process-instances",
-			profile,
-			body,
+			profile: ctx.profile,
+			...createProcessInstanceRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		// Validate: fetchVariables requires awaitCompletion
 		if (fetchVariables && !awaitCompletion) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"--fetchVariables can only be used with --awaitCompletion",
+				{ field: "fetchVariables" },
 			);
 		}
 
@@ -226,36 +187,17 @@ export const createProcessInstanceCommand = defineCommand(
 		// The orchestration-cluster-api currently does not support filtering variables
 		// The API returns all variables by default when awaitCompletion is true
 		if (fetchVariables) {
-			logger.info(
-				"Note: --fetchVariables is not yet supported by the API. All variables will be returned.",
-			);
+			logger.info(FETCH_VARIABLES_NOTE);
 		}
 
 		if (awaitCompletion) {
 			logger.info("Waiting for process instance to complete...");
 		}
 
-		// Build the request with SDK types as single source of truth
-		const request = {
-			processDefinitionId:
-				ProcessDefinitionId.assumeExists(processDefinitionId),
-			...(tenantId !== undefined && {
-				tenantId: TenantId.assumeExists(tenantId),
-			}),
-			...(version !== undefined && {
-				processDefinitionVersion: version,
-			}),
-			...(variables !== undefined && { variables }),
-			...(flags.businessId !== undefined && {
-				businessId: flags.businessId,
-			}),
-			...(awaitCompletion && { awaitCompletion: true }),
-			...(requestTimeout !== undefined && {
-				requestTimeout,
-			}),
-		} satisfies createProcessInstanceInput;
-
-		const result = await client.createProcessInstance(request);
+		const result = await createProcessInstance(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
+		);
 
 		if (awaitCompletion) {
 			// When awaitCompletion is true, the API returns the completed process instance with variables
@@ -275,77 +217,27 @@ export const awaitProcessInstanceCommand = defineCommand(
 	"await",
 	"process-instance",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
-		const processDefinitionId =
-			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
-
-		if (!processDefinitionId) {
-			throw new Error(
-				"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag",
-			);
-		}
-
-		const version = ctx.version;
-		const requestTimeout =
-			flags.requestTimeout !== undefined
-				? parseInt(flags.requestTimeout, 10)
-				: undefined;
-
-		// Parse variables early for clear error reporting
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			variables = parseVariablesFlag({ raw: flags.variables });
-		}
-
-		// Dry-run: emit the would-be API request without executing
-		const body: Record<string, unknown> = {
-			processDefinitionId,
-			tenantId,
-			awaitCompletion: true,
-		};
-		if (version !== undefined) body.processDefinitionVersion = version;
-		if (variables !== undefined) body.variables = variables;
-		if (flags.businessId) body.businessId = flags.businessId;
-		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
+		const { logger } = ctx;
+		const input = createInputOf(ctx, flags);
 
 		const dr = ctx.dryRun({
 			command: "await process-instance",
-			method: "POST",
-			endpoint: "/process-instances",
-			profile,
-			body,
+			profile: ctx.profile,
+			...awaitProcessInstanceRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		// Note: fetchVariables parameter is reserved for future API enhancement
 		if (flags.fetchVariables) {
-			logger.info(
-				"Note: --fetchVariables is not yet supported by the API. All variables will be returned.",
-			);
+			logger.info(FETCH_VARIABLES_NOTE);
 		}
 
 		logger.info("Waiting for process instance to complete...");
 
-		const request = {
-			processDefinitionId:
-				ProcessDefinitionId.assumeExists(processDefinitionId),
-			...(tenantId !== undefined && {
-				tenantId: TenantId.assumeExists(tenantId),
-			}),
-			...(version !== undefined && {
-				processDefinitionVersion: version,
-			}),
-			...(variables !== undefined && { variables }),
-			...(flags.businessId !== undefined && {
-				businessId: flags.businessId,
-			}),
-			awaitCompletion: true,
-			...(requestTimeout !== undefined && {
-				requestTimeout,
-			}),
-		} satisfies createProcessInstanceInput;
-
-		const result = await client.createProcessInstance(request);
+		const result = await awaitProcessInstance(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
+		);
 
 		logger.success("Process instance completed", result.processInstanceKey);
 		logger.json(result);
@@ -355,72 +247,60 @@ export const awaitProcessInstanceCommand = defineCommand(
 /**
  * Cancel process instance
  */
-export const cancelProcessInstanceCommand = defineCommand(
+export const cancelProcessInstanceCommand = defineServiceCommand(
 	"cancel",
 	"process-instance",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, args) => ({ processInstanceKey: args.key }),
+		dryRun: {
 			command: "cancel process-instance",
-			method: "POST",
-			endpoint: `/process-instances/${key}/cancellation`,
-			profile,
-			body: {},
-		});
-		if (dr) return dr;
-
-		await client.cancelProcessInstance({ processInstanceKey: key });
-		return { kind: "success", message: `Process instance ${key} cancelled` };
+			request: cancelProcessInstanceRequest,
+		},
+		service: cancelProcessInstance,
+		render: ({ processInstanceKey }) => ({
+			kind: "success",
+			message: `Process instance ${processInstanceKey} cancelled`,
+		}),
 	},
 );
 
 /**
  * Suspend process instance
  */
-export const suspendProcessInstanceCommand = defineCommand(
+export const suspendProcessInstanceCommand = defineServiceCommand(
 	"suspend",
 	"process-instance",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, args) => ({ processInstanceKey: args.key }),
+		dryRun: {
 			command: "suspend process-instance",
-			method: "POST",
-			endpoint: `/process-instances/${key}/suspension`,
-			profile,
-			body: {},
-		});
-		if (dr) return dr;
-
-		await client.suspendProcessInstance({ processInstanceKey: key });
-		return { kind: "success", message: `Process instance ${key} suspended` };
+			request: suspendProcessInstanceRequest,
+		},
+		service: suspendProcessInstance,
+		render: ({ processInstanceKey }) => ({
+			kind: "success",
+			message: `Process instance ${processInstanceKey} suspended`,
+		}),
 	},
 );
 
 /**
  * Resume process instance
  */
-export const resumeProcessInstanceCommand = defineCommand(
+export const resumeProcessInstanceCommand = defineServiceCommand(
 	"resume",
 	"process-instance",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, args) => ({ processInstanceKey: args.key }),
+		dryRun: {
 			command: "resume process-instance",
-			method: "POST",
-			endpoint: `/process-instances/${key}/resumption`,
-			profile,
-			body: {},
-		});
-		if (dr) return dr;
-
-		await client.resumeProcessInstance({ processInstanceKey: key });
-		return { kind: "success", message: `Process instance ${key} resumed` };
+			request: resumeProcessInstanceRequest,
+		},
+		service: resumeProcessInstance,
+		render: ({ processInstanceKey }) => ({
+			kind: "success",
+			message: `Process instance ${processInstanceKey} resumed`,
+		}),
 	},
 );
 
@@ -430,7 +310,9 @@ function parseFlagValue<T>(flag: string, parse: () => T): T {
 		return parse();
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Invalid --${flag}: ${message}`);
+		throw new C8ctlError("invalid-input", `Invalid --${flag}: ${message}`, {
+			field: flag,
+		});
 	}
 }
 
@@ -440,13 +322,13 @@ function parseFlagValue<T>(flag: string, parse: () => T): T {
  * With a positional key, migrates that single instance synchronously. With
  * `--processDefinitionKey` instead, starts an asynchronous batch operation
  * that migrates every active instance of that source definition. Exactly one
- * of the two must be given so a batch is never started by accident.
+ * of the two must be given so a batch is never started by accident. A plain
+ * handler, because the two forms are two services.
  */
 export const migrateProcessInstanceCommand = defineCommand(
 	"migrate",
 	"process-instance",
 	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
 		const key = args.key;
 		const sourceDefinitionKey = flags.processDefinitionKey;
 		// Branded here rather than via a FlagDef validator: required flags stay
@@ -457,61 +339,60 @@ export const migrateProcessInstanceCommand = defineCommand(
 		);
 
 		if (key && sourceDefinitionKey) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"Pass either a process instance key (single migration) or --processDefinitionKey (batch migration), not both",
+				{ field: "processDefinitionKey" },
 			);
 		}
 		if (!key && !sourceDefinitionKey) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"Process instance key or --processDefinitionKey required. Usage: c8 migrate pi <key> --targetProcessDefinitionKey <key> --map <sourceElementId>=<targetElementId>, or replace <key> with --processDefinitionKey <sourceKey> to migrate all active instances of a definition",
+				{ field: "processDefinitionKey" },
 			);
 		}
 		if (!flags.map) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"At least one --map <sourceElementId>=<targetElementId> is required: map each active element of the source instance to its counterpart in the target definition",
+				{ field: "map" },
 			);
 		}
 
 		const mappingInstructions = flags.map.map((value) =>
 			parseFlagValue("map", () => parseMigrationMapping(value)),
 		);
-		const migrationPlan = { targetProcessDefinitionKey, mappingInstructions };
+		const plan = { targetProcessDefinitionKey, mappingInstructions };
 
 		if (key) {
+			const input = { processInstanceKey: key, ...plan };
 			const dr = ctx.dryRun({
 				command: "migrate process-instance",
-				method: "POST",
-				endpoint: `/process-instances/${key}/migration`,
-				profile,
-				body: migrationPlan,
+				profile: ctx.profile,
+				...migrateProcessInstanceRequest(input),
 			});
 			if (dr) return dr;
 
-			await client.migrateProcessInstance({
-				processInstanceKey: key,
-				...migrationPlan,
-			} satisfies migrateProcessInstanceInput);
+			await migrateProcessInstance({ ...input, ...clusterInputOf(ctx) }, {});
 			return {
 				kind: "success",
 				message: `Process instance ${key} migrated to process definition ${targetProcessDefinitionKey}`,
 			};
 		}
 
-		const request = {
-			filter: { processDefinitionKey: sourceDefinitionKey },
-			migrationPlan,
-		} satisfies migrateProcessInstancesBatchOperationInput;
-
+		const input = { processDefinitionKey: sourceDefinitionKey ?? "", ...plan };
 		const dr = ctx.dryRun({
 			command: "migrate process-instances",
-			method: "POST",
-			endpoint: "/process-instances/migration",
-			profile,
-			body: request,
+			profile: ctx.profile,
+			...migrateProcessInstancesRequest(input),
 		});
 		if (dr) return dr;
 
-		const result = await client.migrateProcessInstancesBatchOperation(request);
+		const result = await migrateProcessInstances(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
+		);
 		return {
 			kind: "success",
 			message: `Batch migration operation created for active instances of process definition ${sourceDefinitionKey}`,
@@ -533,24 +414,28 @@ const INSTRUCTIONS_FLAG = {
  * atomically (all or nothing). With `--processDefinitionKey` instead, starts
  * an asynchronous batch operation over every active instance of that
  * definition; the API only supports moves by element ID there. Exactly one of
- * the two must be given so a batch is never started by accident.
+ * the two must be given so a batch is never started by accident. A plain
+ * handler, because the two forms are two services.
  */
 export const modifyProcessInstanceCommand = defineCommand(
 	"modify",
 	"process-instance",
 	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
 		const key = args.key;
 		const definitionKey = flags.processDefinitionKey;
 
 		if (key && definitionKey) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"Pass either a process instance key (single modification) or --processDefinitionKey (batch modification), not both",
+				{ field: "processDefinitionKey" },
 			);
 		}
 		if (!key && !definitionKey) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"Process instance key or --processDefinitionKey required. Usage: c8 modify pi <key> --move <source>=<targetElementId> (or --activate / --terminate / --instructions), or replace <key> with --processDefinitionKey <key> to move tokens in all active instances of a definition",
+				{ field: "processDefinitionKey" },
 			);
 		}
 
@@ -571,33 +456,38 @@ export const modifyProcessInstanceCommand = defineCommand(
 				flags.terminate ||
 				flags.instructions !== undefined
 			) {
-				throw new Error(
+				throw new C8ctlError(
+					"invalid-input",
 					"Batch modification only supports --move <sourceElementId>=<targetElementId>: the API cannot activate, terminate or apply --instructions across a batch. Pass a process instance key to modify a single instance instead",
+					{ field: "move" },
 				);
 			}
 			if (moves.length === 0) {
-				throw new Error(
+				throw new C8ctlError(
+					"invalid-input",
 					"At least one --move <sourceElementId>=<targetElementId> is required for batch modification",
+					{ field: "move" },
 				);
 			}
-			const request = {
-				filter: { processDefinitionKey: definitionKey },
+			const input = {
+				processDefinitionKey: definitionKey ?? "",
 				moveInstructions: moves.map((move) =>
 					parseFlagValue("move", () => toBatchMoveInstruction(move)),
 				),
-				...(operationReference !== undefined && { operationReference }),
-			} satisfies modifyProcessInstancesBatchOperationInput;
+				operationReference,
+			};
 
 			const dr = ctx.dryRun({
 				command: "modify process-instances",
-				method: "POST",
-				endpoint: "/process-instances/modification",
-				profile,
-				body: request,
+				profile: ctx.profile,
+				...modifyProcessInstancesRequest(input),
 			});
 			if (dr) return dr;
 
-			const result = await client.modifyProcessInstancesBatchOperation(request);
+			const result = await modifyProcessInstances(
+				{ ...input, ...clusterInputOf(ctx) },
+				{},
+			);
 			return {
 				kind: "success",
 				message: `Batch modification operation created for active instances of process definition ${definitionKey}`,
@@ -624,8 +514,10 @@ export const modifyProcessInstanceCommand = defineCommand(
 			operationReference !== undefined &&
 			fromJson.operationReference !== undefined
 		) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"Pass operationReference either inside --instructions or as --operationReference, not both",
+				{ field: "operationReference" },
 			);
 		}
 
@@ -648,32 +540,28 @@ export const modifyProcessInstanceCommand = defineCommand(
 				terminateInstructions.length ===
 			0
 		) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"At least one modification instruction is required: pass --activate <elementId>, --terminate <elementId|elementInstanceKey>, --move <source>=<targetElementId> or --instructions <json>",
+				{ field: "instructions" },
 			);
 		}
 
-		const reference = operationReference ?? fromJson.operationReference;
-		const body = {
-			...(activateInstructions.length > 0 && { activateInstructions }),
-			...(moveInstructions.length > 0 && { moveInstructions }),
-			...(terminateInstructions.length > 0 && { terminateInstructions }),
-			...(reference !== undefined && { operationReference: reference }),
-		} satisfies ProcessInstanceModificationInstruction;
-
+		const input = {
+			processInstanceKey: key,
+			activateInstructions,
+			moveInstructions,
+			terminateInstructions,
+			operationReference: operationReference ?? fromJson.operationReference,
+		};
 		const dr = ctx.dryRun({
 			command: "modify process-instance",
-			method: "POST",
-			endpoint: `/process-instances/${key}/modification`,
-			profile,
-			body,
+			profile: ctx.profile,
+			...modifyProcessInstanceRequest(input),
 		});
 		if (dr) return dr;
 
-		await client.modifyProcessInstance({
-			processInstanceKey: key,
-			...body,
-		} satisfies modifyProcessInstanceInput);
+		await modifyProcessInstance({ ...input, ...clusterInputOf(ctx) }, {});
 		return {
 			kind: "success",
 			message: `Process instance ${key} modified`,

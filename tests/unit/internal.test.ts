@@ -31,25 +31,35 @@ const BPMN = `<?xml version="1.0" encoding="UTF-8"?>
 
 interface FakeCluster {
 	baseUrl: string;
-	requests: { method: string; url: string; headers: IncomingHttpHeaders }[];
+	requests: {
+		method: string;
+		url: string;
+		headers: IncomingHttpHeaders;
+		body: string;
+	}[];
 	/** Answer the next deployment with this RFC 9457 problem. */
 	rejectNext: (problem: Record<string, unknown>) => void;
-	/** Never answer the next deployment; call `onReceived` when it arrives. */
-	holdNext: (onReceived: () => void) => void;
+	/** Never answer the next request to `path`; call `onReceived` when it arrives. */
+	holdNext: (path: string, onReceived: () => void) => void;
 	close: () => void;
 }
 
 async function startFakeCluster(): Promise<FakeCluster> {
 	const requests: FakeCluster["requests"] = [];
 	let nextProblem: Record<string, unknown> | undefined;
-	let onHeld: (() => void) | undefined;
+	let held: { path: string; onReceived: () => void } | undefined;
 	const server = createServer((req, res) => {
-		requests.push({
+		const request = {
 			method: req.method ?? "",
 			url: req.url ?? "",
 			headers: req.headers,
+			body: "",
+		};
+		requests.push(request);
+		req.setEncoding("utf8");
+		req.on("data", (chunk: string) => {
+			request.body += chunk;
 		});
-		req.resume();
 		req.on("end", () => {
 			const send = (status: number, body: unknown) => {
 				res.writeHead(status, {
@@ -60,6 +70,12 @@ async function startFakeCluster(): Promise<FakeCluster> {
 				res.end(JSON.stringify(body));
 			};
 			const url = req.url ?? "";
+			if (held && url.endsWith(held.path)) {
+				const { onReceived } = held;
+				held = undefined;
+				onReceived();
+				return;
+			}
 			if (req.method === "GET" && url.endsWith("/topology")) {
 				send(200, {
 					brokers: [],
@@ -71,13 +87,32 @@ async function startFakeCluster(): Promise<FakeCluster> {
 				});
 				return;
 			}
+			if (req.method === "POST" && url.endsWith("/process-instances")) {
+				send(200, {
+					processDefinitionId: PROCESS_ID,
+					processDefinitionVersion: 3,
+					processDefinitionKey: "2251799813685250",
+					processInstanceKey: "2251799813690100",
+					tenantId: "<default>",
+				});
+				return;
+			}
+			if (req.method === "POST" && url.endsWith("/incidents/search")) {
+				send(200, {
+					items: [
+						{
+							incidentKey: "2251799813690001",
+							errorType: "JOB_NO_RETRIES",
+							state: "ACTIVE",
+							processInstanceKey: "2251799813690000",
+							tenantId: "<default>",
+						},
+					],
+					page: { totalItems: 1 },
+				});
+				return;
+			}
 			if (req.method === "POST" && url.endsWith("/deployments")) {
-				if (onHeld) {
-					const received = onHeld;
-					onHeld = undefined;
-					received();
-					return;
-				}
 				if (nextProblem) {
 					const problem = nextProblem;
 					nextProblem = undefined;
@@ -115,8 +150,8 @@ async function startFakeCluster(): Promise<FakeCluster> {
 		rejectNext: (problem) => {
 			nextProblem = problem;
 		},
-		holdNext: (onReceived) => {
-			onHeld = onReceived;
+		holdNext: (path, onReceived) => {
+			held = { path, onReceived };
 		},
 		close: () => {
 			server.closeAllConnections();
@@ -210,10 +245,110 @@ describe("@camunda8/cli/internal", () => {
 		assert.deepStrictEqual(Object.keys(api).sort(), [
 			"C8CTL_ERROR_CODES",
 			"C8ctlError",
+			"activateJobs",
+			"assignGroup",
+			"assignMappingRule",
+			"assignRole",
+			"assignUser",
+			"awaitProcessInstance",
+			"cancelProcessInstance",
+			"completeJob",
+			"completeUserTask",
+			"createAuthorization",
+			"createGroup",
+			"createMappingRule",
+			"createProcessInstance",
+			"createRole",
+			"createTenant",
+			"createUser",
+			"deleteAuthorization",
+			"deleteGroup",
+			"deleteMappingRule",
+			"deleteRole",
+			"deleteTenant",
+			"deleteUser",
 			"deploy",
+			"failJob",
+			"getAuthorization",
+			"getGroup",
+			"getIncident",
+			"getMappingRule",
+			"getProcessDefinition",
+			"getProcessDefinitionForm",
+			"getProcessDefinitionXml",
+			"getProcessInstance",
+			"getRole",
+			"getTenant",
+			"getTopology",
+			"getUser",
+			"getUserTaskForm",
 			"isC8ctlError",
+			"listAuthorizations",
+			"listGroups",
+			"listIncidents",
+			"listJobs",
+			"listMappingRules",
+			"listProcessDefinitions",
+			"listProcessInstances",
+			"listRoles",
+			"listTenants",
+			"listUserTasks",
+			"listUsers",
+			"migrateProcessInstance",
+			"migrateProcessInstances",
+			"modifyProcessInstance",
+			"modifyProcessInstances",
+			"publishMessage",
 			"resolveDeployment",
+			"resolveIncident",
+			"resumeProcessInstance",
+			"searchAuthorizations",
+			"searchGroups",
+			"searchIncidents",
+			"searchJobs",
+			"searchMappingRules",
+			"searchProcessDefinitions",
+			"searchProcessInstances",
+			"searchRoles",
+			"searchTenants",
+			"searchUserTasks",
+			"searchUsers",
+			"searchVariables",
+			"searchWaitStates",
+			"setVariable",
+			"suspendProcessInstance",
+			"unassignGroup",
+			"unassignMappingRule",
+			"unassignRole",
+			"unassignUser",
+			"updateJob",
 		]);
+	});
+
+	test("cluster services return the API objects and classify failures", async () => {
+		const dataDir = createDataDir(cluster.baseUrl);
+
+		const { items } = await api.listIncidents(
+			{ target: { profile: "embedded" }, state: "ACTIVE" },
+			{ dataDir },
+		);
+		assert.deepStrictEqual(
+			items.map((incident) => incident.incidentKey),
+			["2251799813690001"],
+		);
+
+		await assert.rejects(
+			api.getIncident(
+				{ target: { profile: "embedded" }, incidentKey: "404" },
+				{ dataDir },
+			),
+			(error: unknown) => {
+				assert.ok(api.isC8ctlError(error));
+				assert.strictEqual(error.code, "not-found");
+				assert.strictEqual(error.problem?.status, 404);
+				return true;
+			},
+		);
 	});
 
 	test("deploy sends a project to a profile from an explicit data dir and reports progress", async () => {
@@ -350,6 +485,26 @@ describe("@camunda8/cli/internal", () => {
 			),
 		);
 		assert.strictEqual(unreachable.code, "connection-failed");
+
+		const incomplete = await codeOf(
+			api.getTopology(
+				{
+					target: {
+						cluster: {
+							baseUrl: cluster.baseUrl,
+							authStrategy: "BASIC",
+							username: "demo",
+						},
+					},
+				},
+				{},
+			),
+		);
+		assert.strictEqual(incomplete.code, "invalid-connection");
+		assert.match(
+			JSON.stringify(incomplete.details?.issues),
+			/CAMUNDA_BASIC_AUTH_PASSWORD/,
+		);
 	});
 
 	test("deploy rejects with `cancelled` when the host aborts during progress", async () => {
@@ -377,7 +532,7 @@ describe("@camunda8/cli/internal", () => {
 
 	test("deploy rejects with `cancelled` when the host aborts the request in flight", async () => {
 		const controller = new AbortController();
-		cluster.holdNext(() => controller.abort());
+		cluster.holdNext("/deployments", () => controller.abort());
 
 		const deployment = api.deploy(
 			{ target: { profile: "embedded" }, paths: [createProject()] },
@@ -389,5 +544,163 @@ describe("@camunda8/cli/internal", () => {
 			assert.strictEqual(error.code, "cancelled");
 			return true;
 		});
+	});
+
+	test("deploy rejects with `cancelled` when the host aborts the server check", async () => {
+		const controller = new AbortController();
+		cluster.holdNext("/topology", () => controller.abort());
+
+		const deployment = api.deploy(
+			{ target: { profile: "embedded" }, paths: [createProject()] },
+			{ dataDir: createDataDir(cluster.baseUrl), signal: controller.signal },
+		);
+
+		await assert.rejects(deployment, (error: unknown) => {
+			assert.ok(api.isC8ctlError(error));
+			assert.strictEqual(error.code, "cancelled");
+			return true;
+		});
+	});
+
+	test("createProcessInstance starts an exact definition at an element", async () => {
+		const dataDir = createDataDir(cluster.baseUrl);
+		const requestsBefore = cluster.requests.length;
+
+		const created = await api.createProcessInstance(
+			{
+				target: { profile: "embedded" },
+				processDefinitionKey: "2251799813685250",
+				startInstructions: [{ elementId: "Task_1" }],
+				runtimeInstructions: [
+					{ type: "TERMINATE_PROCESS_INSTANCE", afterElementId: "Task_1" },
+				],
+			},
+			{ dataDir },
+		);
+
+		assert.strictEqual(created.processInstanceKey, "2251799813690100");
+		const [request] = cluster.requests.slice(requestsBefore);
+		assert.deepStrictEqual(JSON.parse(request.body), {
+			processDefinitionKey: "2251799813685250",
+			startInstructions: [{ elementId: "Task_1" }],
+			runtimeInstructions: [
+				{ type: "TERMINATE_PROCESS_INSTANCE", afterElementId: "Task_1" },
+			],
+		});
+
+		await assert.rejects(
+			api.createProcessInstance(
+				{ target: { profile: "embedded" } },
+				{ dataDir },
+			),
+			(error: unknown) => {
+				assert.ok(api.isC8ctlError(error));
+				assert.strictEqual(error.code, "invalid-input");
+				return true;
+			},
+		);
+	});
+
+	test("cluster services send nothing after the host aborted", async () => {
+		const requestsBefore = cluster.requests.length;
+
+		await assert.rejects(
+			api.createProcessInstance(
+				{
+					target: { profile: "embedded" },
+					processDefinitionId: PROCESS_ID,
+				},
+				{
+					dataDir: createDataDir(cluster.baseUrl),
+					signal: AbortSignal.abort(),
+				},
+			),
+			(error: unknown) => {
+				assert.ok(api.isC8ctlError(error));
+				assert.strictEqual(error.code, "cancelled");
+				return true;
+			},
+		);
+		assert.strictEqual(cluster.requests.length, requestsBefore);
+	});
+
+	test("cluster services reject with `cancelled` when the host aborts the request in flight", async () => {
+		const controller = new AbortController();
+		cluster.holdNext("/incidents/search", () => controller.abort());
+
+		const incidents = api.listIncidents(
+			{ target: { profile: "embedded" } },
+			{ dataDir: createDataDir(cluster.baseUrl), signal: controller.signal },
+		);
+
+		await assert.rejects(incidents, (error: unknown) => {
+			assert.ok(api.isC8ctlError(error));
+			assert.strictEqual(error.code, "cancelled");
+			return true;
+		});
+	});
+
+	test("searches stop paging when the host aborts", async () => {
+		// given
+		const controller = new AbortController();
+		let pages = 0;
+		const client = {
+			searchProcessDefinitions: async () => {
+				pages++;
+				if (pages === 2) controller.abort();
+				return {
+					items: [{ processDefinitionId: PROCESS_ID, version: pages }],
+					page: { endCursor: `cursor-${pages}`, totalItems: 100 },
+				};
+			},
+		};
+		// biome-ignore lint/plugin: test stub for CamundaClient with only the searched method
+		const target = { client } as unknown as InternalApi.Target;
+
+		// when
+		const search = api.searchProcessDefinitions(
+			{ target },
+			{ signal: controller.signal },
+		);
+
+		// then
+		await assert.rejects(search, (error: unknown) => {
+			assert.ok(api.isC8ctlError(error));
+			assert.strictEqual(error.code, "cancelled");
+			return true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		assert.strictEqual(pages, 2);
+	});
+
+	test("form lookups cancel the request when the host aborts", async () => {
+		// given
+		const controller = new AbortController();
+		let cancelled = false;
+		const client = {
+			getUserTaskForm: () =>
+				Object.assign(new Promise(() => {}), {
+					cancel: () => {
+						cancelled = true;
+					},
+				}),
+		};
+		// biome-ignore lint/plugin: test stub for CamundaClient with only the form method
+		const target = { client } as unknown as InternalApi.Target;
+
+		// when
+		const form = api.getUserTaskForm(
+			{ target, userTaskKey: "2251799813685251" },
+			{ signal: controller.signal },
+		);
+		controller.abort();
+
+		// then
+		await assert.rejects(form, (error: unknown) => {
+			assert.ok(api.isC8ctlError(error));
+			assert.strictEqual(error.code, "cancelled");
+			return true;
+		});
+		assert.ok(cancelled, "the SDK request was not cancelled");
 	});
 });

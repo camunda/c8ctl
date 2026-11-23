@@ -33,10 +33,14 @@ export const C8CTL_ERROR_CODES = {
 	"duplicate-definition-ids":
 		"Several resources in one deployment share a process or decision ID.",
 	"profile-not-found": "The target profile does not exist.",
+	"invalid-connection":
+		"The cluster configuration is incomplete or invalid, e.g. BASIC auth without a password (see details.issues).",
 	"connection-failed": "The cluster cannot be reached.",
 	unauthorized: "The cluster rejected the credentials (HTTP 401).",
 	forbidden: "The credentials lack the permission (HTTP 403).",
 	"payload-too-large": "The request exceeds the cluster's size limit (413).",
+	"not-found": "The requested resource does not exist (HTTP 404).",
+	"request-rejected": "The cluster rejected the request (see problem).",
 	"deployment-rejected": "The cluster rejected the deployment (see problem).",
 	cancelled: "The call was cancelled through its AbortSignal.",
 	unknown: "An unexpected error.",

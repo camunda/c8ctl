@@ -352,6 +352,7 @@ export async function fetchAllPages<
 	filter: F,
 	pageSize = DEFAULT_PAGE_SIZE,
 	maxItems = DEFAULT_MAX_ITEMS,
+	signal?: AbortSignal,
 ): Promise<T[]> {
 	const allItems: T[] = [];
 	let cursor: string | undefined;
@@ -367,7 +368,10 @@ export async function fetchAllPages<
 			},
 		};
 
-		const result = await searchFn(pageFilter, consistencyOpts);
+		const result = await withAbort(
+			() => searchFn(pageFilter, consistencyOpts),
+			signal,
+		);
 
 		if (result.items.length) {
 			allItems.push(...result.items);
@@ -391,6 +395,38 @@ export async function fetchAllPages<
 	} while (true);
 
 	return allItems;
+}
+
+/**
+ * Run a request under `signal`. Rejects with the signal's reason when it
+ * is aborted before or while the request runs, and cancels the SDK's
+ * request (`CancelablePromise.cancel()`), so it is not left running.
+ * Cancelling a mutation that was already sent does not undo it.
+ */
+export async function withAbort<T>(
+	start: () => Promise<T>,
+	signal: AbortSignal | undefined,
+): Promise<T> {
+	if (!signal) return start();
+	signal.throwIfAborted();
+	const request = start();
+	let onAbort = () => {};
+	const aborted = new Promise<never>((_, reject) => {
+		onAbort = () => {
+			if ("cancel" in request && typeof request.cancel === "function") {
+				request.cancel();
+			}
+			reject(signal.reason);
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+	// The losing side of the race must not surface as an unhandled rejection.
+	request.catch(() => {});
+	try {
+		return await Promise.race([request, aborted]);
+	} finally {
+		signal.removeEventListener("abort", onAbort);
+	}
 }
 
 /**

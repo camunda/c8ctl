@@ -6,10 +6,12 @@
 // by tests/unit/layering-import-boundary.test.ts (Rules A and B).
 export * from "./c8ctl-error.ts";
 export * from "./client.ts";
+export * from "./cluster-errors.ts";
 export * from "./config.ts";
 export * from "./context.ts";
 export * from "./env-address.ts";
 export * from "./errors.ts";
+export * from "./input.ts";
 export * from "./logger.ts";
 export * from "./node-version.ts";
 export * from "./runtime.ts";

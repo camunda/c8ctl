@@ -26,9 +26,12 @@ const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const SERVICES_DIR = join(PROJECT_ROOT, "src", "services");
 const INTERNAL_DIR = join(PROJECT_ROOT, "src", "internal");
 /** The parts of the contract that live in core. */
-const CORE_CONTRACT_FILES = ["context.ts", "target.ts"].map((name) =>
-	join(PROJECT_ROOT, "src", "core", name),
-);
+const CORE_CONTRACT_FILES = [
+	"cluster-errors.ts",
+	"context.ts",
+	"input.ts",
+	"target.ts",
+].map((name) => join(PROJECT_ROOT, "src", "core", name));
 
 const FORBIDDEN: readonly { object: string; fields: readonly string[] }[] = [
 	{

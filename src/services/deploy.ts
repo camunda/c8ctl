@@ -14,15 +14,15 @@ import {
 import {
 	type C8ctlContext,
 	C8ctlError,
-	type C8ctlErrorCode,
 	cancelledError,
-	createTargetClient,
+	clusterErrorCode,
+	connect,
 	emit,
 	isRecord,
-	type ProblemDetail,
-	resolveTarget,
+	problemOf,
 	type Target,
 	throwIfCancelled,
+	withAbort,
 } from "../core/index.ts";
 import {
 	collectResourcesForPaths,
@@ -186,9 +186,10 @@ function rejectFlagsForDescriptors(
 export async function checkServerSupportsExtensions(
 	client: CamundaClient,
 	warn: (message: string) => void,
+	signal?: AbortSignal,
 ): Promise<boolean> {
 	try {
-		const topology = await client.getTopology();
+		const topology = await withAbort(() => client.getTopology(), signal);
 		const version = String(topology.gatewayVersion ?? "");
 		const result = meetsMinExtensionVersion(version);
 		if (result === null) {
@@ -199,6 +200,7 @@ export async function checkServerSupportsExtensions(
 		}
 		return result;
 	} catch {
+		if (signal?.aborted) throw cancelledError(signal.reason);
 		warn(
 			"Could not reach the server to check its version (topology call failed).",
 		);
@@ -228,7 +230,7 @@ export async function deploy(
 	const notify = notifier(ctx);
 	const warn = (message: string) => emit(ctx, { type: "warning", message });
 
-	const { config, defaultTenantId } = resolveTarget(input.target, ctx);
+	const { client, defaultTenantId } = connect(input.target, ctx);
 	const tenantId = input.tenantId ?? defaultTenantId ?? "<default>";
 
 	let plan = hostOptions.plan;
@@ -236,8 +238,6 @@ export async function deploy(
 		plan = planDeployPaths(input.paths, { notify });
 		rejectFlagsForDescriptors(plan, input);
 	}
-
-	const client = createTargetClient(config, ctx);
 
 	// Only a default directory scan consults the extension allow-list, so
 	// `deployResources`-only deploys skip the <8.10 check.
@@ -250,7 +250,7 @@ export async function deploy(
 		emit(ctx, { type: "progress", phase: "check-server" });
 		serverSupportsExtensions = skipVersionCheck
 			? true
-			: await checkServerSupportsExtensions(client, warn);
+			: await checkServerSupportsExtensions(client, warn, ctx.signal);
 		if (!serverSupportsExtensions && input.extensions) {
 			warn(
 				`Warning: server does not support extended extensions (requires 8.10+). ` +
@@ -483,30 +483,6 @@ function formIdOf(resource: ResourceFile): string {
 	return resource.name.replace(/\.form$/, "");
 }
 
-const NETWORK_ERROR_CODES = new Set([
-	"ECONNREFUSED",
-	"ENOTFOUND",
-	"EHOSTUNREACH",
-	"ECONNRESET",
-	"ETIMEDOUT",
-]);
-
-/** The first Node.js error code in the error's `cause` chain. */
-function networkCodeOf(error: unknown): string | undefined {
-	let current: unknown = error;
-	for (let depth = 0; depth < 5 && isRecord(current); depth++) {
-		if (typeof current.code === "string") return current.code;
-		current = current.cause;
-	}
-	return undefined;
-}
-
-function isNetworkError(error: unknown): boolean {
-	const code = networkCodeOf(error);
-	if (code !== undefined) return NETWORK_ERROR_CODES.has(code);
-	return isRecord(error) && error.name === "NetworkSdkError";
-}
-
 /**
  * Map a failed deployment request to a `C8ctlError`. The original error
  * stays the `cause`; `details.attempted` lists the files sent.
@@ -517,35 +493,10 @@ function classifyDeploymentError(
 	resolvedPaths: string[],
 ): C8ctlError {
 	const raw = isRecord(error) ? error : {};
-	const status = typeof raw.status === "number" ? raw.status : undefined;
-	const title = typeof raw.title === "string" ? raw.title : undefined;
-	const problem: ProblemDetail | undefined =
-		status !== undefined || title !== undefined
-			? {
-					...(typeof raw.type === "string" ? { type: raw.type } : {}),
-					...(title === undefined ? {} : { title }),
-					...(status === undefined ? {} : { status }),
-					...(typeof raw.detail === "string" ? { detail: raw.detail } : {}),
-					...(typeof raw.instance === "string"
-						? { instance: raw.instance }
-						: {}),
-				}
-			: undefined;
-
-	let code: C8ctlErrorCode;
-	if (isNetworkError(error)) {
-		code = "connection-failed";
-	} else if (status === 401 || title === "UNAUTHENTICATED") {
-		code = "unauthorized";
-	} else if (status === 403 || title === "PERMISSION_DENIED") {
-		code = "forbidden";
-	} else if (status === 413) {
-		code = "payload-too-large";
-	} else if (problem) {
-		code = "deployment-rejected";
-	} else {
-		code = "unknown";
-	}
+	const problem = problemOf(error);
+	const status = problem?.status;
+	const title = problem?.title;
+	const code = clusterErrorCode(error, "deployment-rejected");
 
 	const message =
 		status === 413

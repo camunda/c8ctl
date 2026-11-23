@@ -3,18 +3,35 @@
  */
 
 import {
-	GroupId,
-	MappingRuleId,
-	RoleId,
-	TenantId,
-	Username,
-} from "@camunda8/orchestration-cluster-api";
-import {
-	createClient,
-	getLogger,
-	resolveClusterConfig,
+	type C8ctlContext,
+	C8ctlError,
+	type ClusterInput,
 } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+import {
+	type CommandContext,
+	type CommandResult,
+	clusterInputOf,
+	type DryRunRequest,
+	defineCommand,
+} from "../framework/index.ts";
+import {
+	assignGroup,
+	assignGroupRequest,
+	assignMappingRule,
+	assignMappingRuleRequest,
+	assignRole,
+	assignRoleRequest,
+	assignUser,
+	assignUserRequest,
+	unassignGroup,
+	unassignGroupRequest,
+	unassignMappingRule,
+	unassignMappingRuleRequest,
+	unassignRole,
+	unassignRoleRequest,
+	unassignUser,
+	unassignUserRequest,
+} from "../services/index.ts";
 
 export {
 	createIdentityAuthorizationCommand,
@@ -100,18 +117,97 @@ const ALLOWED_UNASSIGN_SOURCES: Record<string, readonly UnassignSourceFlag[]> =
 		"mapping-rule": ["from-group", "from-tenant"],
 	};
 
-/** Plural path segment for each resource */
-const RESOURCE_PATHS: Record<string, string> = {
-	user: "users",
-	role: "roles",
-	group: "groups",
-	tenant: "tenants",
-	authorization: "authorizations",
-	"mapping-rule": "mapping-rules",
-};
-
 function formatFlags(flags: readonly string[]): string {
 	return flags.map((f) => `--${f}`).join(", ");
+}
+
+type Member = "user" | "group" | "tenant" | "mappingRule";
+
+/** The service input field of each --to-* / --from-* flag. */
+const FLAG_MEMBERS: Record<AssignTargetFlag | UnassignSourceFlag, Member> = {
+	"to-user": "user",
+	"to-group": "group",
+	"to-tenant": "tenant",
+	"to-mapping-rule": "mappingRule",
+	"from-user": "user",
+	"from-group": "group",
+	"from-tenant": "tenant",
+	"from-mapping-rule": "mappingRule",
+};
+
+const RESOURCE_LABELS: Record<string, string> = {
+	role: "Role",
+	user: "User",
+	group: "Group",
+	"mapping-rule": "Mapping rule",
+};
+
+const MEMBER_LABELS: Record<Member, string> = {
+	user: "user",
+	group: "group",
+	tenant: "tenant",
+	mappingRule: "mapping rule",
+};
+
+function invalidInput(message: string, field: string): C8ctlError {
+	return new C8ctlError("invalid-input", message, { field });
+}
+
+/**
+ * Run the assign or unassign call of a resource: `--dry-run` shows
+ * the request, otherwise the service runs. Returns the dry-run result,
+ * or null when the service ran.
+ */
+async function runAssignment(
+	ctx: CommandContext,
+	verb: "assign" | "unassign",
+	resource: string,
+	id: string,
+	member: Member,
+	memberId: string,
+): Promise<CommandResult | null> {
+	const members: Partial<Record<Member, string>> = { [member]: memberId };
+	async function run<I extends object>(
+		input: I,
+		request: (input: I) => DryRunRequest,
+		service: (input: I & ClusterInput, ctx: C8ctlContext) => Promise<unknown>,
+	): Promise<CommandResult | null> {
+		const dr = ctx.dryRun({
+			command: verb,
+			profile: ctx.profile,
+			...request(input),
+		});
+		if (dr) return dr;
+		await service({ ...input, ...clusterInputOf(ctx) }, {});
+		return null;
+	}
+	const assign = verb === "assign";
+	switch (resource) {
+		case "role": {
+			const input = { roleId: id, ...members };
+			return assign
+				? run(input, assignRoleRequest, assignRole)
+				: run(input, unassignRoleRequest, unassignRole);
+		}
+		case "user": {
+			const input = { username: id, ...members };
+			return assign
+				? run(input, assignUserRequest, assignUser)
+				: run(input, unassignUserRequest, unassignUser);
+		}
+		case "group": {
+			const input = { groupId: id, ...members };
+			return assign
+				? run(input, assignGroupRequest, assignGroup)
+				: run(input, unassignGroupRequest, unassignGroup);
+		}
+		default: {
+			const input = { mappingRuleId: id, ...members };
+			return assign
+				? run(input, assignMappingRuleRequest, assignMappingRule)
+				: run(input, unassignMappingRuleRequest, unassignMappingRule);
+		}
+	}
 }
 
 /**
@@ -124,159 +220,57 @@ function formatFlags(flags: readonly string[]): string {
  * `tests/unit/no-process-exit-in-handlers.test.ts` will reject it.
  */
 async function handleAssign(
+	ctx: CommandContext,
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,
-	options: { profile?: string; isDryRun: boolean },
-): Promise<void> {
-	const logger = getLogger();
+): Promise<CommandResult> {
 	const allowedTargets = ALLOWED_ASSIGN_TARGETS[resource];
 	if (!allowedTargets) {
-		throw new Error(
+		throw invalidInput(
 			`Cannot assign resource type: ${resource}. Supported: ${Object.keys(ALLOWED_ASSIGN_TARGETS).join(", ")}.`,
+			"resource",
 		);
 	}
 
 	// Validate exactly one --to-* flag is provided
 	const provided = ASSIGN_TARGET_FLAGS.filter((f) => values[f]);
 	if (provided.length > 1) {
-		throw new Error(
+		throw invalidInput(
 			`Exactly one target flag is required. Conflicting flags: ${formatFlags(provided)}`,
+			provided[0],
 		);
 	}
 	if (provided.length === 0) {
-		throw new Error(`Target required. Use ${formatFlags(allowedTargets)}.`);
+		throw invalidInput(
+			`Target required. Use ${formatFlags(allowedTargets)}.`,
+			allowedTargets[0],
+		);
 	}
 
 	const targetFlag = provided[0];
 	if (!allowedTargets.includes(targetFlag)) {
-		throw new Error(
+		throw invalidInput(
 			`Unsupported target flag --${targetFlag} for resource '${resource}'. Use ${formatFlags(allowedTargets)}.`,
+			targetFlag,
 		);
 	}
 
-	const targetValue = values[targetFlag];
-	const resourcePath = RESOURCE_PATHS[resource];
-	const targetPath = `${targetFlag.replace(/^to-/, "")}s`;
-
-	if (options.isDryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
-			command: "assign",
-			method: "POST",
-			url: `${config.baseUrl}/${resourcePath}/${encodeURIComponent(String(id))}/${targetPath}/${encodeURIComponent(String(targetValue))}`,
-			body: null,
-		});
-		return;
-	}
-
-	const client = createClient(options.profile);
-
-	switch (resource) {
-		case "role": {
-			if (values["to-user"]) {
-				await client.assignRoleToUser({
-					roleId: RoleId.assumeExists(id),
-					username: Username.assumeExists(String(values["to-user"])),
-				});
-				logger.success(`Role '${id}' assigned to user '${values["to-user"]}'`);
-			} else if (values["to-group"]) {
-				await client.assignRoleToGroup({
-					roleId: RoleId.assumeExists(id),
-					groupId: GroupId.assumeExists(String(values["to-group"])),
-				});
-				logger.success(
-					`Role '${id}' assigned to group '${values["to-group"]}'`,
-				);
-			} else if (values["to-tenant"]) {
-				await client.assignRoleToTenant({
-					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					roleId: RoleId.assumeExists(id),
-				});
-				logger.success(
-					`Role '${id}' assigned to tenant '${values["to-tenant"]}'`,
-				);
-			} else if (values["to-mapping-rule"]) {
-				await client.assignRoleToMappingRule({
-					roleId: RoleId.assumeExists(id),
-					mappingRuleId: MappingRuleId.assumeExists(
-						String(values["to-mapping-rule"]),
-					),
-				});
-				logger.success(
-					`Role '${id}' assigned to mapping rule '${values["to-mapping-rule"]}'`,
-				);
-			} else {
-				throw new Error(
-					"Target required. Use --to-user, --to-group, --to-tenant, or --to-mapping-rule.",
-				);
-			}
-			break;
-		}
-		case "user": {
-			if (values["to-group"]) {
-				await client.assignUserToGroup({
-					groupId: GroupId.assumeExists(String(values["to-group"])),
-					username: Username.assumeExists(id),
-				});
-				logger.success(
-					`User '${id}' assigned to group '${values["to-group"]}'`,
-				);
-			} else if (values["to-tenant"]) {
-				await client.assignUserToTenant({
-					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					username: Username.assumeExists(id),
-				});
-				logger.success(
-					`User '${id}' assigned to tenant '${values["to-tenant"]}'`,
-				);
-			} else {
-				throw new Error("Target required. Use --to-group or --to-tenant.");
-			}
-			break;
-		}
-		case "group": {
-			if (values["to-tenant"]) {
-				await client.assignGroupToTenant({
-					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					groupId: GroupId.assumeExists(id),
-				});
-				logger.success(
-					`Group '${id}' assigned to tenant '${values["to-tenant"]}'`,
-				);
-			} else {
-				throw new Error("Target required. Use --to-tenant.");
-			}
-			break;
-		}
-		case "mapping-rule": {
-			if (values["to-group"]) {
-				await client.assignMappingRuleToGroup({
-					groupId: GroupId.assumeExists(String(values["to-group"])),
-					mappingRuleId: MappingRuleId.assumeExists(id),
-				});
-				logger.success(
-					`Mapping rule '${id}' assigned to group '${values["to-group"]}'`,
-				);
-			} else if (values["to-tenant"]) {
-				await client.assignMappingRuleToTenant({
-					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					mappingRuleId: MappingRuleId.assumeExists(id),
-				});
-				logger.success(
-					`Mapping rule '${id}' assigned to tenant '${values["to-tenant"]}'`,
-				);
-			} else {
-				throw new Error("Target required. Use --to-group or --to-tenant.");
-			}
-			break;
-		}
-		default:
-			throw new Error(
-				`Cannot assign resource type: ${resource}. Supported: role, user, group, mapping-rule.`,
-			);
-	}
+	const member = FLAG_MEMBERS[targetFlag];
+	const targetValue = String(values[targetFlag]);
+	const dr = await runAssignment(
+		ctx,
+		"assign",
+		resource,
+		id,
+		member,
+		targetValue,
+	);
+	if (dr) return dr;
+	return {
+		kind: "success",
+		message: `${RESOURCE_LABELS[resource]} '${id}' assigned to ${MEMBER_LABELS[member]} '${targetValue}'`,
+	};
 }
 
 /**
@@ -284,161 +278,57 @@ async function handleAssign(
  * error-handling contract (throw, do not `process.exit`).
  */
 async function handleUnassign(
+	ctx: CommandContext,
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,
-	options: { profile?: string; isDryRun: boolean },
-): Promise<void> {
-	const logger = getLogger();
+): Promise<CommandResult> {
 	const allowedSources = ALLOWED_UNASSIGN_SOURCES[resource];
 	if (!allowedSources) {
-		throw new Error(
+		throw invalidInput(
 			`Cannot unassign resource type: ${resource}. Supported: ${Object.keys(ALLOWED_UNASSIGN_SOURCES).join(", ")}.`,
+			"resource",
 		);
 	}
 
 	// Validate exactly one --from-* flag is provided
 	const provided = UNASSIGN_SOURCE_FLAGS.filter((f) => values[f]);
 	if (provided.length > 1) {
-		throw new Error(
+		throw invalidInput(
 			`Exactly one source flag is required. Conflicting flags: ${formatFlags(provided)}`,
+			provided[0],
 		);
 	}
 	if (provided.length === 0) {
-		throw new Error(`Source required. Use ${formatFlags(allowedSources)}.`);
+		throw invalidInput(
+			`Source required. Use ${formatFlags(allowedSources)}.`,
+			allowedSources[0],
+		);
 	}
 
 	const sourceFlag = provided[0];
 	if (!allowedSources.includes(sourceFlag)) {
-		throw new Error(
+		throw invalidInput(
 			`Unsupported source flag --${sourceFlag} for resource '${resource}'. Use ${formatFlags(allowedSources)}.`,
+			sourceFlag,
 		);
 	}
 
-	const sourceValue = values[sourceFlag];
-	const resourcePath = RESOURCE_PATHS[resource];
-	const sourcePath = `${sourceFlag.replace(/^from-/, "")}s`;
-
-	if (options.isDryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
-			command: "unassign",
-			method: "DELETE",
-			url: `${config.baseUrl}/${resourcePath}/${encodeURIComponent(String(id))}/${sourcePath}/${encodeURIComponent(String(sourceValue))}`,
-			body: null,
-		});
-		return;
-	}
-
-	const client = createClient(options.profile);
-
-	switch (resource) {
-		case "role": {
-			if (values["from-user"]) {
-				await client.unassignRoleFromUser({
-					roleId: RoleId.assumeExists(id),
-					username: Username.assumeExists(String(values["from-user"])),
-				});
-				logger.success(
-					`Role '${id}' unassigned from user '${values["from-user"]}'`,
-				);
-			} else if (values["from-group"]) {
-				await client.unassignRoleFromGroup({
-					roleId: RoleId.assumeExists(id),
-					groupId: GroupId.assumeExists(String(values["from-group"])),
-				});
-				logger.success(
-					`Role '${id}' unassigned from group '${values["from-group"]}'`,
-				);
-			} else if (values["from-tenant"]) {
-				await client.unassignRoleFromTenant({
-					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					roleId: RoleId.assumeExists(id),
-				});
-				logger.success(
-					`Role '${id}' unassigned from tenant '${values["from-tenant"]}'`,
-				);
-			} else if (values["from-mapping-rule"]) {
-				await client.unassignRoleFromMappingRule({
-					roleId: RoleId.assumeExists(id),
-					mappingRuleId: MappingRuleId.assumeExists(
-						String(values["from-mapping-rule"]),
-					),
-				});
-				logger.success(
-					`Role '${id}' unassigned from mapping rule '${values["from-mapping-rule"]}'`,
-				);
-			} else {
-				throw new Error(
-					"Source required. Use --from-user, --from-group, --from-tenant, or --from-mapping-rule.",
-				);
-			}
-			break;
-		}
-		case "user": {
-			if (values["from-group"]) {
-				await client.unassignUserFromGroup({
-					groupId: GroupId.assumeExists(String(values["from-group"])),
-					username: Username.assumeExists(id),
-				});
-				logger.success(
-					`User '${id}' unassigned from group '${values["from-group"]}'`,
-				);
-			} else if (values["from-tenant"]) {
-				await client.unassignUserFromTenant({
-					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					username: Username.assumeExists(id),
-				});
-				logger.success(
-					`User '${id}' unassigned from tenant '${values["from-tenant"]}'`,
-				);
-			} else {
-				throw new Error("Source required. Use --from-group or --from-tenant.");
-			}
-			break;
-		}
-		case "group": {
-			if (values["from-tenant"]) {
-				await client.unassignGroupFromTenant({
-					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					groupId: GroupId.assumeExists(id),
-				});
-				logger.success(
-					`Group '${id}' unassigned from tenant '${values["from-tenant"]}'`,
-				);
-			} else {
-				throw new Error("Source required. Use --from-tenant.");
-			}
-			break;
-		}
-		case "mapping-rule": {
-			if (values["from-group"]) {
-				await client.unassignMappingRuleFromGroup({
-					groupId: GroupId.assumeExists(String(values["from-group"])),
-					mappingRuleId: MappingRuleId.assumeExists(id),
-				});
-				logger.success(
-					`Mapping rule '${id}' unassigned from group '${values["from-group"]}'`,
-				);
-			} else if (values["from-tenant"]) {
-				await client.unassignMappingRuleFromTenant({
-					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					mappingRuleId: MappingRuleId.assumeExists(id),
-				});
-				logger.success(
-					`Mapping rule '${id}' unassigned from tenant '${values["from-tenant"]}'`,
-				);
-			} else {
-				throw new Error("Source required. Use --from-group or --from-tenant.");
-			}
-			break;
-		}
-		default:
-			throw new Error(
-				`Cannot unassign resource type: ${resource}. Supported: role, user, group, mapping-rule.`,
-			);
-	}
+	const member = FLAG_MEMBERS[sourceFlag];
+	const sourceValue = String(values[sourceFlag]);
+	const dr = await runAssignment(
+		ctx,
+		"unassign",
+		resource,
+		id,
+		member,
+		sourceValue,
+	);
+	if (dr) return dr;
+	return {
+		kind: "success",
+		message: `${RESOURCE_LABELS[resource]} '${id}' unassigned from ${MEMBER_LABELS[member]} '${sourceValue}'`,
+	};
 }
 
 // ─── Per-resource defineCommand wrappers ─────────────────────────────────
@@ -452,8 +342,9 @@ function requireId(
 	const id = args[0];
 	if (!id) {
 		const targetFlag = verb === "assign" ? "--to-" : "--from-";
-		throw new Error(
+		throw invalidInput(
 			`ID required. Usage: c8 ${verb} ${resource} <id> ${targetFlag}<target>=<targetId>`,
+			"id",
 		);
 	}
 	return id;
@@ -464,16 +355,7 @@ function makeAssignCommand<
 >(resource: R) {
 	return defineCommand("assign", resource, async (ctx, flags) => {
 		const id = requireId("assign", resource, ctx.positionals);
-		await handleAssign(
-			resource,
-			id,
-			{ ...flags },
-			{
-				profile: ctx.profile,
-				isDryRun: ctx.isDryRun,
-			},
-		);
-		return undefined;
+		return handleAssign(ctx, resource, id, { ...flags });
 	});
 }
 
@@ -482,16 +364,7 @@ function makeUnassignCommand<
 >(resource: R) {
 	return defineCommand("unassign", resource, async (ctx, flags) => {
 		const id = requireId("unassign", resource, ctx.positionals);
-		await handleUnassign(
-			resource,
-			id,
-			{ ...flags },
-			{
-				profile: ctx.profile,
-				isDryRun: ctx.isDryRun,
-			},
-		);
-		return undefined;
+		return handleUnassign(ctx, resource, id, { ...flags });
 	});
 }
 
@@ -522,16 +395,7 @@ export const assignFallbackCommand = defineCommand(
 			ctx.resource || "<resource>",
 			ctx.positionals,
 		);
-		await handleAssign(
-			ctx.resource,
-			id,
-			{ ...flags },
-			{
-				profile: ctx.profile,
-				isDryRun: ctx.isDryRun,
-			},
-		);
-		return undefined;
+		return handleAssign(ctx, ctx.resource, id, { ...flags });
 	},
 );
 
@@ -544,15 +408,6 @@ export const unassignFallbackCommand = defineCommand(
 			ctx.resource || "<resource>",
 			ctx.positionals,
 		);
-		await handleUnassign(
-			ctx.resource,
-			id,
-			{ ...flags },
-			{
-				profile: ctx.profile,
-				isDryRun: ctx.isDryRun,
-			},
-		);
-		return undefined;
+		return handleUnassign(ctx, ctx.resource, id, { ...flags });
 	},
 );

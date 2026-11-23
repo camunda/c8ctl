@@ -1,167 +1,113 @@
 /**
- * Identity group commands
+ * Identity group commands — CLI bindings of the group services.
  */
 
-import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
-import { toStringFilter } from "./search.ts";
+import { defineServiceCommand } from "../framework/index.ts";
+import {
+	createGroup,
+	createGroupRequest,
+	deleteGroup,
+	deleteGroupRequest,
+	getGroup,
+	getGroupRequest,
+	listGroups,
+	listGroupsRequest,
+	searchGroups,
+	searchGroupsRequest,
+} from "../services/index.ts";
+
+/** Table row of a group. */
+function row(g: {
+	groupId?: string | null;
+	name?: string | null;
+	description?: string | null;
+}) {
+	return {
+		"Group ID": g.groupId ?? "",
+		Name: g.name ?? "",
+		Description: g.description ?? "",
+	};
+}
 
 /**
  * List all groups
  */
-export const listGroupsCommand = defineCommand("list", "group", async (ctx) => {
-	const { client, profile, limit } = ctx;
-
-	const dr = ctx.dryRun({
-		command: "list groups",
-		method: "POST",
-		endpoint: "/groups/search",
-		profile,
-		body: {},
-	});
-	if (dr) return dr;
-
-	const items = await fetchAllPages(
-		(filter, opts) => client.searchGroups(filter, opts),
-		{},
-		undefined,
-		limit,
-	);
-
-	return {
+export const listGroupsCommand = defineServiceCommand("list", "group", {
+	toInput: (_flags, _args, scope) => ({ limit: scope.limit }),
+	dryRun: { command: "list groups", request: listGroupsRequest },
+	service: listGroups,
+	render: ({ items }) => ({
 		kind: "list",
-		items: items.map((g) => ({
-			"Group ID": g.groupId ?? "",
-			Name: g.name ?? "",
-			Description: g.description ?? "",
-		})),
+		items: items.map(row),
 		emptyMessage: "No groups found",
-	};
+	}),
 });
+
 /**
  * Search groups with filters
  */
-export const searchIdentityGroupsCommand = defineCommand(
+export const searchIdentityGroupsCommand = defineServiceCommand(
 	"search",
 	"group",
-	async (ctx, flags, _args) => {
-		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
-
-		const filter: Record<string, unknown> = {};
-		if (flags.groupId) filter.groupId = toStringFilter(String(flags.groupId));
-		if (flags.name) filter.name = flags.name;
-
-		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
-
-		const dr = ctx.dryRun({
-			command: "search groups",
-			method: "POST",
-			endpoint: "/groups/search",
-			profile,
-			body: searchFilter,
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(f, opts) => client.searchGroups(f, opts),
-			searchFilter,
-			undefined,
-			limit,
-		);
-
-		if (items.length === 0) {
-			logger.info("No groups found", { essential: true });
-			return;
-		}
-
-		let tableData = items.map((g) => ({
-			"Group ID": g.groupId ?? "",
-			Name: g.name ?? "",
-			Description: g.description ?? "",
-		}));
-		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
-		logger.table(tableData);
+	{
+		toInput: (flags, _args, scope) => ({
+			groupId: flags.groupId,
+			name: flags.name,
+			limit: scope.limit,
+		}),
+		dryRun: { command: "search groups", request: searchGroupsRequest },
+		service: searchGroups,
+		render: ({ items }) => ({
+			kind: "list",
+			items: items.map(row),
+			emptyMessage: "No groups found",
+		}),
 	},
 );
 
 /**
  * Get a single group by groupId
  */
-export const getIdentityGroupCommand = defineCommand(
-	"get",
-	"group",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const groupId = args.groupId;
-
-		const dr = ctx.dryRun({
-			command: "get group",
-			method: "GET",
-			endpoint: `/groups/${groupId}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getGroup(
-			{ groupId },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		return { kind: "get", data: result };
-	},
-);
+export const getIdentityGroupCommand = defineServiceCommand("get", "group", {
+	toInput: (_flags, args) => ({ groupId: args.groupId }),
+	dryRun: { command: "get group", request: getGroupRequest },
+	service: getGroup,
+	render: (group) => ({ kind: "get", data: group }),
+});
 
 /**
  * Create a new group
  */
-export const createIdentityGroupCommand = defineCommand(
+export const createIdentityGroupCommand = defineServiceCommand(
 	"create",
 	"group",
-	async (ctx, flags, _args) => {
-		const { client, profile } = ctx;
-
-		if (!flags.groupId) {
-			throw new Error("--groupId is required");
-		}
-		if (!flags.name) {
-			throw new Error("--name is required");
-		}
-
-		const body = { groupId: flags.groupId, name: flags.name };
-
-		const dr = ctx.dryRun({
-			command: "create group",
-			method: "POST",
-			endpoint: "/groups",
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.createGroup(body);
-		return { kind: "success", message: `Group '${flags.name}' created` };
+	{
+		toInput: (flags) => ({
+			groupId: flags.groupId ?? "",
+			name: flags.name ?? "",
+		}),
+		dryRun: { command: "create group", request: createGroupRequest },
+		service: createGroup,
+		render: (_result, input) => ({
+			kind: "success",
+			message: `Group '${input.name}' created`,
+		}),
 	},
 );
 
 /**
  * Delete a group by groupId
  */
-export const deleteIdentityGroupCommand = defineCommand(
+export const deleteIdentityGroupCommand = defineServiceCommand(
 	"delete",
 	"group",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const groupId = args.groupId;
-
-		const dr = ctx.dryRun({
-			command: "delete group",
-			method: "DELETE",
-			endpoint: `/groups/${encodeURIComponent(groupId)}`,
-			profile,
-			body: null,
-		});
-		if (dr) return dr;
-
-		await client.deleteGroup({ groupId });
-		return { kind: "success", message: `Group '${groupId}' deleted` };
+	{
+		toInput: (_flags, args) => ({ groupId: args.groupId }),
+		dryRun: { command: "delete group", request: deleteGroupRequest },
+		service: deleteGroup,
+		render: (_result, input) => ({
+			kind: "success",
+			message: `Group '${input.groupId}' deleted`,
+		}),
 	},
 );

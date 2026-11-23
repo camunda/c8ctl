@@ -1,166 +1,113 @@
 /**
- * Identity role commands
+ * Identity role commands — CLI bindings of the role services.
  */
 
-import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+import { defineServiceCommand } from "../framework/index.ts";
+import {
+	createRole,
+	createRoleRequest,
+	deleteRole,
+	deleteRoleRequest,
+	getRole,
+	getRoleRequest,
+	listRoles,
+	listRolesRequest,
+	searchRoles,
+	searchRolesRequest,
+} from "../services/index.ts";
+
+/** Table row of a role. */
+function row(r: {
+	roleId?: string | null;
+	name?: string | null;
+	description?: string | null;
+}) {
+	return {
+		"Role ID": r.roleId ?? "",
+		Name: r.name ?? "",
+		Description: r.description ?? "",
+	};
+}
 
 /**
  * List all roles
  */
-export const listRolesCommand = defineCommand("list", "role", async (ctx) => {
-	const { client, profile, limit } = ctx;
-
-	const dr = ctx.dryRun({
-		command: "list roles",
-		method: "POST",
-		endpoint: "/roles/search",
-		profile,
-		body: {},
-	});
-	if (dr) return dr;
-
-	const items = await fetchAllPages(
-		(filter, opts) => client.searchRoles(filter, opts),
-		{},
-		undefined,
-		limit,
-	);
-
-	return {
+export const listRolesCommand = defineServiceCommand("list", "role", {
+	toInput: (_flags, _args, scope) => ({ limit: scope.limit }),
+	dryRun: { command: "list roles", request: listRolesRequest },
+	service: listRoles,
+	render: ({ items }) => ({
 		kind: "list",
-		items: items.map((r) => ({
-			"Role ID": r.roleId ?? "",
-			Name: r.name ?? "",
-			Description: r.description ?? "",
-		})),
+		items: items.map(row),
 		emptyMessage: "No roles found",
-	};
+	}),
 });
+
 /**
  * Search roles with filters
  */
-export const searchIdentityRolesCommand = defineCommand(
+export const searchIdentityRolesCommand = defineServiceCommand(
 	"search",
 	"role",
-	async (ctx, flags, _args) => {
-		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
-
-		const filter: Record<string, unknown> = {};
-		if (flags.roleId) filter.roleId = flags.roleId;
-		if (flags.name) filter.name = flags.name;
-
-		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
-
-		const dr = ctx.dryRun({
-			command: "search roles",
-			method: "POST",
-			endpoint: "/roles/search",
-			profile,
-			body: searchFilter,
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(f, opts) => client.searchRoles(f, opts),
-			searchFilter,
-			undefined,
-			limit,
-		);
-
-		if (items.length === 0) {
-			logger.info("No roles found", { essential: true });
-			return;
-		}
-
-		let tableData = items.map((r) => ({
-			"Role ID": r.roleId ?? "",
-			Name: r.name ?? "",
-			Description: r.description ?? "",
-		}));
-		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
-		logger.table(tableData);
+	{
+		toInput: (flags, _args, scope) => ({
+			roleId: flags.roleId,
+			name: flags.name,
+			limit: scope.limit,
+		}),
+		dryRun: { command: "search roles", request: searchRolesRequest },
+		service: searchRoles,
+		render: ({ items }) => ({
+			kind: "list",
+			items: items.map(row),
+			emptyMessage: "No roles found",
+		}),
 	},
 );
 
 /**
  * Get a single role by roleId
  */
-export const getIdentityRoleCommand = defineCommand(
-	"get",
-	"role",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const roleId = args.roleId;
-
-		const dr = ctx.dryRun({
-			command: "get role",
-			method: "GET",
-			endpoint: `/roles/${roleId}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getRole(
-			{ roleId },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		return { kind: "get", data: result };
-	},
-);
+export const getIdentityRoleCommand = defineServiceCommand("get", "role", {
+	toInput: (_flags, args) => ({ roleId: args.roleId }),
+	dryRun: { command: "get role", request: getRoleRequest },
+	service: getRole,
+	render: (role) => ({ kind: "get", data: role }),
+});
 
 /**
  * Create a new role
  */
-export const createIdentityRoleCommand = defineCommand(
+export const createIdentityRoleCommand = defineServiceCommand(
 	"create",
 	"role",
-	async (ctx, flags, _args) => {
-		const { client, profile } = ctx;
-
-		if (!flags.roleId) {
-			throw new Error("--roleId is required");
-		}
-		if (!flags.name) {
-			throw new Error("--name is required");
-		}
-
-		const body = { roleId: flags.roleId, name: flags.name };
-
-		const dr = ctx.dryRun({
-			command: "create role",
-			method: "POST",
-			endpoint: "/roles",
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.createRole(body);
-		return { kind: "success", message: `Role '${flags.name}' created` };
+	{
+		toInput: (flags) => ({
+			roleId: flags.roleId ?? "",
+			name: flags.name ?? "",
+		}),
+		dryRun: { command: "create role", request: createRoleRequest },
+		service: createRole,
+		render: (_result, input) => ({
+			kind: "success",
+			message: `Role '${input.name}' created`,
+		}),
 	},
 );
 
 /**
  * Delete a role by roleId
  */
-export const deleteIdentityRoleCommand = defineCommand(
+export const deleteIdentityRoleCommand = defineServiceCommand(
 	"delete",
 	"role",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const roleId = args.roleId;
-
-		const dr = ctx.dryRun({
-			command: "delete role",
-			method: "DELETE",
-			endpoint: `/roles/${encodeURIComponent(roleId)}`,
-			profile,
-			body: null,
-		});
-		if (dr) return dr;
-
-		await client.deleteRole({ roleId });
-		return { kind: "success", message: `Role '${roleId}' deleted` };
+	{
+		toInput: (_flags, args) => ({ roleId: args.roleId }),
+		dryRun: { command: "delete role", request: deleteRoleRequest },
+		service: deleteRole,
+		render: (_result, input) => ({
+			kind: "success",
+			message: `Role '${input.roleId}' deleted`,
+		}),
 	},
 );

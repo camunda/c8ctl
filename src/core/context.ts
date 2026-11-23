@@ -3,7 +3,10 @@
  * receives besides its input, and how it reports back.
  */
 
-import type { CamundaOptions } from "@camunda8/orchestration-cluster-api";
+import type {
+	CamundaClient,
+	CamundaOptions,
+} from "@camunda8/orchestration-cluster-api";
 import { C8ctlError } from "./c8ctl-error.ts";
 import type { SdkLogLevel } from "./client.ts";
 import type { ClusterConfig, DataDirs } from "./config.ts";
@@ -53,10 +56,15 @@ export interface C8ctlContext extends DataDirs {
 
 /**
  * The cluster a service talks to: a saved profile (c8ctl profile or
- * `modeler:<id>`, credentials stay in c8ctl) or a configuration the host
- * resolved itself, e.g. an unsaved connection.
+ * `modeler:<id>`, credentials stay in c8ctl), a configuration the host
+ * resolved itself (e.g. an unsaved connection), or a client the host
+ * already holds (the CLI passes the client it built from --profile,
+ * session and env).
  */
-export type Target = { profile: string } | { cluster: ClusterConfig };
+export type Target =
+	| { profile: string }
+	| { cluster: ClusterConfig }
+	| { client: CamundaClient };
 
 export function emit(ctx: C8ctlContext, event: C8ctlEvent): void {
 	ctx.onProgress?.(event);
@@ -72,4 +80,11 @@ export function throwIfCancelled(ctx: C8ctlContext): void {
 	if (ctx.signal?.aborted) {
 		throw cancelledError(ctx.signal.reason);
 	}
+}
+
+/** The part of every cluster service's input that the host provides. */
+export interface ClusterInput {
+	target: Target;
+	/** Default: the profile's default tenant, if it has one. */
+	tenantId?: string;
 }

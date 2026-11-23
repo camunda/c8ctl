@@ -1,188 +1,140 @@
 /**
- * Identity mapping rule commands
+ * Identity mapping rule commands — CLI bindings of the mapping rule
+ * services.
  */
 
-import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+import { defineServiceCommand } from "../framework/index.ts";
+import {
+	createMappingRule,
+	createMappingRuleRequest,
+	deleteMappingRule,
+	deleteMappingRuleRequest,
+	getMappingRule,
+	getMappingRuleRequest,
+	listMappingRules,
+	listMappingRulesRequest,
+	searchMappingRules,
+	searchMappingRulesRequest,
+} from "../services/index.ts";
+
+/** Table row of a mapping rule. */
+function row(m: {
+	mappingRuleId?: string | null;
+	name?: string | null;
+	claimName?: string | null;
+	claimValue?: string | null;
+}) {
+	return {
+		"Mapping Rule ID": m.mappingRuleId ?? "",
+		Name: m.name ?? "",
+		"Claim Name": m.claimName ?? "",
+		"Claim Value": m.claimValue ?? "",
+	};
+}
 
 /**
  * List all mapping rules
  */
-export const listMappingRulesCommand = defineCommand(
+export const listMappingRulesCommand = defineServiceCommand(
 	"list",
 	"mapping-rule",
-	async (ctx) => {
-		const { client, profile, limit } = ctx;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, _args, scope) => ({ limit: scope.limit }),
+		dryRun: {
 			command: "list mapping-rules",
-			method: "POST",
-			endpoint: "/mapping-rules/search",
-			profile,
-			body: {},
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(filter, opts) => client.searchMappingRule(filter, opts),
-			{},
-			undefined,
-			limit,
-		);
-
-		return {
+			request: listMappingRulesRequest,
+		},
+		service: listMappingRules,
+		render: ({ items }) => ({
 			kind: "list",
-			items: items.map((m) => ({
-				"Mapping Rule ID": m.mappingRuleId ?? "",
-				Name: m.name ?? "",
-				"Claim Name": m.claimName ?? "",
-				"Claim Value": m.claimValue ?? "",
-			})),
+			items: items.map(row),
 			emptyMessage: "No mapping rules found",
-		};
+		}),
 	},
 );
+
 /**
  * Search mapping rules with filters
  */
-export const searchIdentityMappingRulesCommand = defineCommand(
+export const searchIdentityMappingRulesCommand = defineServiceCommand(
 	"search",
 	"mapping-rule",
-	async (ctx, flags, _args) => {
-		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
-
-		const filter: Record<string, unknown> = {};
-		if (flags.mappingRuleId) filter.mappingRuleId = flags.mappingRuleId;
-		if (flags.name) filter.name = flags.name;
-		if (flags.claimName) filter.claimName = flags.claimName;
-		if (flags.claimValue) filter.claimValue = flags.claimValue;
-
-		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (flags, _args, scope) => ({
+			mappingRuleId: flags.mappingRuleId,
+			name: flags.name,
+			claimName: flags.claimName,
+			claimValue: flags.claimValue,
+			limit: scope.limit,
+		}),
+		dryRun: {
 			command: "search mapping-rules",
-			method: "POST",
-			endpoint: "/mapping-rules/search",
-			profile,
-			body: searchFilter,
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(f, opts) => client.searchMappingRule(f, opts),
-			searchFilter,
-			undefined,
-			limit,
-		);
-
-		if (items.length === 0) {
-			logger.info("No mapping rules found", { essential: true });
-			return;
-		}
-
-		let tableData = items.map((m) => ({
-			"Mapping Rule ID": m.mappingRuleId ?? "",
-			Name: m.name ?? "",
-			"Claim Name": m.claimName ?? "",
-			"Claim Value": m.claimValue ?? "",
-		}));
-		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
-		logger.table(tableData);
+			request: searchMappingRulesRequest,
+		},
+		service: searchMappingRules,
+		render: ({ items }) => ({
+			kind: "list",
+			items: items.map(row),
+			emptyMessage: "No mapping rules found",
+		}),
 	},
 );
 
 /**
  * Get a single mapping rule by mappingRuleId
  */
-export const getIdentityMappingRuleCommand = defineCommand(
+export const getIdentityMappingRuleCommand = defineServiceCommand(
 	"get",
 	"mapping-rule",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const mappingRuleId = args.mappingRuleId;
-
-		const dr = ctx.dryRun({
-			command: "get mapping-rule",
-			method: "GET",
-			endpoint: `/mapping-rules/${mappingRuleId}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getMappingRule(
-			{ mappingRuleId },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		return { kind: "get", data: result };
+	{
+		toInput: (_flags, args) => ({ mappingRuleId: args.mappingRuleId }),
+		dryRun: { command: "get mapping-rule", request: getMappingRuleRequest },
+		service: getMappingRule,
+		render: (mappingRule) => ({ kind: "get", data: mappingRule }),
 	},
 );
 
 /**
  * Create a new mapping rule
  */
-export const createIdentityMappingRuleCommand = defineCommand(
+export const createIdentityMappingRuleCommand = defineServiceCommand(
 	"create",
 	"mapping-rule",
-	async (ctx, flags, _args) => {
-		const { client, profile } = ctx;
-
-		if (!flags.mappingRuleId) {
-			throw new Error("--mappingRuleId is required");
-		}
-		if (!flags.name) {
-			throw new Error("--name is required");
-		}
-		if (!flags.claimName) {
-			throw new Error("--claimName is required");
-		}
-		if (!flags.claimValue) {
-			throw new Error("--claimValue is required");
-		}
-
-		const body = {
-			mappingRuleId: flags.mappingRuleId,
-			name: flags.name,
-			claimName: flags.claimName,
-			claimValue: flags.claimValue,
-		};
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (flags) => ({
+			mappingRuleId: flags.mappingRuleId ?? "",
+			name: flags.name ?? "",
+			claimName: flags.claimName ?? "",
+			claimValue: flags.claimValue ?? "",
+		}),
+		dryRun: {
 			command: "create mapping-rule",
-			method: "POST",
-			endpoint: "/mapping-rules",
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.createMappingRule(body);
-		return { kind: "success", message: `Mapping rule '${flags.name}' created` };
+			request: createMappingRuleRequest,
+		},
+		service: createMappingRule,
+		render: (_result, input) => ({
+			kind: "success",
+			message: `Mapping rule '${input.name}' created`,
+		}),
 	},
 );
 
 /**
  * Delete a mapping rule by mappingRuleId
  */
-export const deleteIdentityMappingRuleCommand = defineCommand(
+export const deleteIdentityMappingRuleCommand = defineServiceCommand(
 	"delete",
 	"mapping-rule",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const mappingRuleId = args.mappingRuleId;
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, args) => ({ mappingRuleId: args.mappingRuleId }),
+		dryRun: {
 			command: "delete mapping-rule",
-			method: "DELETE",
-			endpoint: `/mapping-rules/${encodeURIComponent(mappingRuleId)}`,
-			profile,
-			body: null,
-		});
-		if (dr) return dr;
-
-		await client.deleteMappingRule({ mappingRuleId });
-		return {
+			request: deleteMappingRuleRequest,
+		},
+		service: deleteMappingRule,
+		render: ({ mappingRuleId }) => ({
 			kind: "success",
 			message: `Mapping rule '${mappingRuleId}' deleted`,
-		};
+		}),
 	},
 );
