@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { C8ctlError } from "./c8ctl-error.ts";
 import { resolveEnvBaseUrl, resolveEnvBasicAuth } from "./env-address.ts";
 import type { OutputMode } from "./logger.ts";
 import { getLogger, isRecord } from "./logger.ts";
@@ -1647,17 +1648,21 @@ function warnOnIgnoredSdkEnvVars(fallbackBaseUrl: string): void {
  */
 function requireExplicitProfile(name: string): Profile {
 	if (name.trim() === "") {
-		throw new Error(
+		throw new C8ctlError(
+			"invalid-input",
 			"Profile name must not be empty. Check that the value passed to --profile is set.",
+			{ field: "profile" },
 		);
 	}
 	const profile = getProfileOrModeler(name);
 	if (!profile) {
-		throw new Error(
+		throw new C8ctlError(
+			"profile-not-found",
 			`Profile '${name}' not found. Run 'c8 list profiles' to see available profiles` +
 				(c8ctl.activeProfile === name
 					? ", or 'c8 use profile --none' to clear the active profile."
 					: "."),
+			{ field: "profile", details: { profile: name } },
 		);
 	}
 	return profile;

@@ -4,6 +4,7 @@
 // core symbols through this barrel (`../core/index.ts`), never from deep core
 // files. Intra-core imports use direct sibling paths. This contract is enforced
 // by tests/unit/layering-import-boundary.test.ts (Rules A and B).
+export * from "./c8ctl-error.ts";
 export * from "./client.ts";
 export * from "./config.ts";
 export * from "./env-address.ts";
