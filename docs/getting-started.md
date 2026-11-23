@@ -41,6 +41,45 @@ npm install @camunda8/cli -g
 
 After installation, both `c8ctl` and `c8` are available as commands in your terminal.
 
+## Guided setup
+
+`c8ctl setup` runs a wizard that sets up a complete local development environment in one pass: it starts a local [Camunda 8 Run](/self-managed/quickstart/developer-quickstart/c8run.md) cluster (downloading it on first run), installs [Camunda Desktop Modeler](/components/modeler/desktop-modeler/install-the-modeler.md), scaffolds a starter project from a blueprint, deploys and runs it, and configures AI assistant tooling (MCP connections and Camunda skills). Nothing is installed without your say.
+
+```bash
+c8ctl setup          # interactive wizard
+c8ctl setup --yes    # set up the defaults, without prompting
+```
+
+Each step announces its title and ends in `[SUCCESS]`, `[ERROR]`, or `[SKIPPED]`; a failed step does not stop the rest. The blueprint project and the cluster MCP connection need the local cluster — deselect the cluster and both options are disabled. A browser window opens when the local cluster reports healthy; the docs MCP connection asks you to sign in in a browser on first use.
+
+A run without a selection (piped output, CI) installs nothing unless you pass `--yes`; a non-interactive `--yes` run uses the Rocket Launch blueprint. `--json` prints the plan without executing it, and `--dry-run` previews it. A re-run reuses finished work where possible; the deploy, process start, and skills install repeat by design. The exit code is `0` when every selected setup step succeeded (or nothing was installed for lack of a go-ahead) and `1` when arguments fail validation or a step failed — other eligible steps still ran, while their dependents were skipped.
+
+Use `--modeler` / `--no-modeler` to force or skip the Desktop Modeler step regardless of the selection, and `--docs-mcp` to include the docs MCP connection (off unless selected or flagged).
+
+### Remove what setup installed
+
+`--remove` shows the setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, and the marker-listed blueprint files before removing them:
+
+```bash
+c8ctl setup --remove                        # preview what would be removed
+c8ctl setup --remove --yes                  # remove without prompting
+c8ctl setup --remove --stop-cluster --yes   # also stop the local cluster
+```
+
+Confirm in the interactive prompt or pass `--yes` in non-interactive use; `--json` and `--dry-run` print only the removal preview. Removal delegates to the owning commands — `c8ctl mcp uninstall`, `c8ctl skills remove`, and `c8ctl modeler remove`. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. `--stop-cluster` is available only with `--remove` and stops the local cluster without purging runtime data or deleting downloaded binaries. Removal exits `0` when every requested action succeeds and `1` if any action fails; the other removal actions still run.
+
+## Manage Camunda Desktop Modeler
+
+`c8ctl modeler` installs, updates, and removes [Camunda Desktop Modeler](/components/modeler/desktop-modeler/install-the-modeler.md) on macOS, Windows, and Linux:
+
+```bash
+c8ctl modeler install           # install the latest stable release
+c8ctl modeler update            # update to the latest stable release
+c8ctl modeler remove --dry-run  # preview removal
+```
+
+On macOS, the installer uses Homebrew when available and otherwise downloads the Camunda-signed release into `/Applications` (or `~/Applications` when `/Applications` is not writable). On Windows, it uses winget and registers file types and a Start Menu shortcut. On Linux (x64), it installs into `/usr/bin` as root and registers file types with Modeler's bundled support scripts. `update` reuses the same installation method, and `remove` removes a c8ctl-managed installation.
+
 ## Quick start with a local cluster
 
 `c8ctl` includes a built-in `cluster` command that downloads and manages a local [Camunda 8 Run](/self-managed/quickstart/developer-quickstart/c8run.md) instance. This is the fastest way to get a cluster running for development.
