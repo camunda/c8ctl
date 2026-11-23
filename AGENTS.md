@@ -69,22 +69,23 @@ Key components:
 
 ```
 composition root (src/index.ts, src/command-dispatch.ts)  →  commands  →  framework  →  core
-                                                                          utils (leaf)
+                                                               services  →  utils (leaf)
 ```
 
 | Layer | May import from |
 | --- | --- |
 | `core/` | `core` |
 | `utils/` | `core`, `utils` (leaf: never `framework`/`commands`) |
+| `services/` | `core`, `utils`, `services` (never `framework`/`commands`) |
 | `framework/` | `core`, `utils`, `framework` (never `commands`) |
-| `commands/` | `core`, `utils`, `framework`, `commands` |
+| `commands/` | `core`, `utils`, `services`, `framework`, `commands` |
 | composition root (`src/index.ts`, `src/command-dispatch.ts`) | anything |
 
 This is guarded by [`tests/unit/layering-import-boundary.test.ts`](tests/unit/layering-import-boundary.test.ts). The guard classifies a file by its **first** path segment, so sub-directories (`framework/plugins/`, `framework/ui/`, `utils/shared/`, `utils/command-local/`) inherit their parent layer — sub-grouping is free w.r.t. the guard. The composition root is pinned to an explicit allow-list (`src/index.ts`, `src/command-dispatch.ts`); any *new* top-level `src/*.ts` file fails the guard until it is deliberately classified.
 
 ##### Per-layer barrels (module encapsulation, #424)
 
-The three barreled layers — `core`, `utils`, `framework` — each expose a single public entry point, `<layer>/index.ts` (`export *` over their internal files). The same guard enforces two further rules:
+The four barreled layers — `core`, `utils`, `services`, `framework` — each expose a single public entry point, `<layer>/index.ts` (`export *` over their internal files). The same guard enforces two further rules:
 
 - **Rule A — cross-layer imports go through the barrel.** A file importing *into* a barreled layer must target `../core/index.ts`, never a deep file like `../core/logger.ts`. This holds for `commands/**` and the composition root alike.
 - **Rule B — intra-layer imports stay direct.** A file *within* a barreled layer imports its siblings by direct path (`./logger.ts`), never via its own barrel — this keeps module-eval order obvious and avoids self-referential cycles. (The barrel file re-exporting siblings via `./file.ts` is itself an intra-layer direct import, so it is allowed.)

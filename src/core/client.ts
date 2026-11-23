@@ -8,7 +8,11 @@ import {
 	type CamundaOptions,
 	createCamundaClient,
 } from "@camunda8/orchestration-cluster-api";
-import { resolveClusterConfig, setHeaderCaseInsensitive } from "./config.ts";
+import {
+	type ClusterConfig,
+	resolveClusterConfig,
+	setHeaderCaseInsensitive,
+} from "./config.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
@@ -49,10 +53,17 @@ type FetchFn = NonNullable<CamundaOptions["fetch"]>;
 function normalizeBaseUrl(baseUrl: string): string {
 	const trimmed = baseUrl.trim();
 	try {
-		return new URL(trimmed).toString().replace(/\/+$/, "");
+		return trimTrailingSlashes(new URL(trimmed).toString());
 	} catch {
-		return trimmed.replace(/\/+$/, "");
+		return trimTrailingSlashes(trimmed);
 	}
+}
+
+/** Without a regex, which is quadratic on a long run of slashes. */
+function trimTrailingSlashes(value: string): string {
+	let end = value.length;
+	while (end > 0 && value[end - 1] === "/") end--;
+	return value.slice(0, end);
 }
 
 /**
@@ -173,7 +184,54 @@ export function createClient(
 	additionalSdkConfig: Partial<CamundaOptions> = {},
 ): CamundaClient {
 	const config = resolveClusterConfig(profileFlag);
+	return createClientFromConfig(config, {
+		logLevel: cliSdkLogLevel(),
+		additionalSdkConfig,
+	});
+}
 
+/**
+ * The SDK log level the CLI uses: trace with --verbose, debug when c8ctl
+ * debug logging is enabled, otherwise silent — unless the user set
+ * CAMUNDA_SDK_LOG_LEVEL (then `undefined`, so the SDK reads it).
+ */
+export function cliSdkLogLevel(): SdkLogLevel | undefined {
+	if (c8ctl.verbose) return "trace";
+	if (getLogger().debugEnabled) return "debug";
+	if (!process.env.CAMUNDA_SDK_LOG_LEVEL) return "silent";
+	return undefined;
+}
+
+/** SDK log level, as `CAMUNDA_SDK_LOG_LEVEL` accepts it. */
+export type SdkLogLevel =
+	| "silent"
+	| "error"
+	| "warn"
+	| "info"
+	| "debug"
+	| "trace";
+
+/**
+ * Create a client from an already resolved cluster configuration.
+ *
+ * Reads no runtime state. Embedders pass `env: {}` so the SDK does not pick
+ * up `CAMUNDA_*` variables of the host process, and their own `fetch` for
+ * proxies and certificates.
+ */
+export function createClientFromConfig(
+	config: ClusterConfig,
+	{
+		logLevel,
+		env,
+		fetch: hostFetch,
+		additionalSdkConfig = {},
+	}: {
+		logLevel?: SdkLogLevel;
+		env?: Record<string, string | undefined>;
+		fetch?: FetchFn;
+		additionalSdkConfig?: Partial<CamundaOptions>;
+	} = {},
+): CamundaClient {
 	// Build config object for the SDK
 	const sdkConfig: Partial<CamundaOptions["config"]> = {
 		CAMUNDA_REST_ADDRESS: config.baseUrl,
@@ -211,18 +269,15 @@ export function createClient(
 
 	sdkConfig.CAMUNDA_AUTH_STRATEGY = effectiveAuthStrategy(config);
 
-	// SDK logging: trace with --verbose, debug when c8ctl debug logging is
-	// enabled, otherwise silent unless the user set CAMUNDA_SDK_LOG_LEVEL.
-	if (c8ctl.verbose) {
-		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "trace";
-	} else if (getLogger().debugEnabled) {
-		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "debug";
-	} else if (!process.env.CAMUNDA_SDK_LOG_LEVEL) {
-		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "silent";
+	if (logLevel) {
+		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = logLevel;
 	}
 
+	const delegate = additionalSdkConfig.fetch ?? hostFetch;
 	const options: Partial<CamundaOptions> = {
 		config: sdkConfig,
+		...(env === undefined ? {} : { env }),
+		...(hostFetch === undefined ? {} : { fetch: hostFetch }),
 		...additionalSdkConfig,
 		log: { transport: sdkStderrLogTransport, ...additionalSdkConfig.log },
 	};
@@ -237,7 +292,7 @@ export function createClient(
 			baseUrl: config.baseUrl,
 			headers: config.headers,
 			exactBaseUrl: config.exactBaseUrl,
-			delegate: additionalSdkConfig.fetch,
+			delegate,
 		});
 	}
 
@@ -476,7 +531,7 @@ function mergeHeadersCaseInsensitive(
  */
 function restBaseUrlForProfile(profile?: string): string {
 	const config = resolveClusterConfig(profile);
-	const stripped = config.baseUrl.trim().replace(/\/+$/, "");
+	const stripped = trimTrailingSlashes(config.baseUrl.trim());
 	if (config.exactBaseUrl) return stripped;
 	return /\/v2$/i.test(stripped) ? stripped : `${stripped}/v2`;
 }

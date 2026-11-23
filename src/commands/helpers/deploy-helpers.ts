@@ -1,37 +1,40 @@
 /**
- * Shared deployment helpers — deployment execution and its rendering for
- * the CLI. Which files a deploy sends is resolved by the services layer
- * (`src/utils/shared/deploy-resolution.ts`); the wrappers below print its
- * notices.
+ * CLI adapter for the deploy services (`src/services/`): resolves the
+ * CLI's target (`--profile`, session, env), prints the services' events
+ * and results, and renders deploy errors with actionable hints.
  *
  * Consumed by:
  * - `src/commands/deploy.ts` (the `deployCommand` handler)
  * - `src/commands/watch.ts` (change-triggered re-deploys)
  */
 
-import { basename, extname, relative } from "node:path";
+import { relative } from "node:path";
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-import { TenantId } from "@camunda8/orchestration-cluster-api";
 import {
-	createClient,
+	type C8ctlErrorCode,
+	type C8ctlEvent,
+	cliSdkLogLevel,
 	getLogger,
 	isC8ctlError,
 	isRecord,
 	normalizeToError,
+	resolveClusterConfig,
 	resolveTenantId,
 	SilentError,
 } from "../../core/index.ts";
+import {
+	checkServerSupportsExtensions as checkServerSupportsExtensionsOp,
+	type DeployedResource,
+	type DeployResult,
+	deploy,
+} from "../../services/index.ts";
 import {
 	type CollectResult,
 	collectResourcesForPaths as collectResourcesForPathsOp,
 	DEPLOYABLE_EXTENSIONS,
 	type DeployPathPlan,
-	extractDefinitionId,
-	findDuplicateDefinitionIds,
-	meetsMinExtensionVersion,
 	type ProjectMarkerCache,
 	planDeployPaths as planDeployPathsOp,
-	type ResourceFile,
 } from "../../utils/index.ts";
 
 export {
@@ -39,6 +42,7 @@ export {
 	findProjectRoot,
 	rejectSelectionFlagsForDescriptor,
 } from "../../utils/index.ts";
+
 /**
  * Helper to output messages that respect JSON mode for Unix pipe compatibility
  */
@@ -55,7 +59,9 @@ export function logMessage(message: string): void {
  * Shared between the dry-run preview and the execute path so the
  * message stays consistent. See https://github.com/camunda/c8ctl/issues/350
  */
-export function logSkippedExtensions(skippedExtensions: Set<string>): void {
+export function logSkippedExtensions(
+	skippedExtensions: ReadonlySet<string>,
+): void {
 	if (skippedExtensions.size === 0) return;
 	const exts = [...skippedExtensions].sort().join(", ");
 	logMessage(
@@ -66,38 +72,17 @@ export function logSkippedExtensions(skippedExtensions: Set<string>): void {
 
 /**
  * Check whether the connected Camunda server supports extended file extensions.
- * Returns `true` for 8.10+, `false` for older versions.
- * Falls back to `false` on any error (network, auth, unparseable version)
- * so unsupported resource types are not deployed to older clusters.
+ * Returns `true` for 8.10+, `false` for older versions or on any error.
  */
-export async function checkServerSupportsExtensions(
+export function checkServerSupportsExtensions(
 	client: CamundaClient,
 ): Promise<boolean> {
-	const logger = getLogger();
-	try {
-		const topology = await client.getTopology();
-		const version = String(topology.gatewayVersion ?? "");
-		const result = meetsMinExtensionVersion(version);
-		if (result === null) {
-			logger.warn(
-				`Could not parse server version "${version}" — assuming extended extensions are NOT supported.`,
-			);
-			return false;
-		}
-		return result;
-	} catch {
-		logger.warn(
-			"Could not reach the server to check its version (topology call failed).",
-		);
-		logger.warn(
-			"This can happen with OAuth/SaaS clusters before the first token is fetched, " +
-				"or if the server is not yet ready. Assuming extended extensions are NOT supported.",
-		);
-		return false;
-	}
+	return checkServerSupportsExtensionsOp(client, (message) =>
+		getLogger().warn(message),
+	);
 }
 
-/** `planDeployPaths` of the services layer, announcing on stderr. */
+/** `planDeployPaths` of the deploy services, announcing on stderr. */
 export function planDeployPaths(
 	paths: string[],
 	options: { markerCache?: ProjectMarkerCache; announce?: boolean } = {},
@@ -115,8 +100,8 @@ function logSkippedForNoFiles(error: unknown): void {
 }
 
 /**
- * `collectResourcesForPaths` of the services layer, with its notices and
- * the skipped-extensions hint printed to stderr.
+ * `collectResourcesForPaths` of the deploy services, with its notices
+ * and the skipped-extensions hint printed to stderr.
  */
 export function collectResourcesForPaths(
 	paths: string[],
@@ -140,6 +125,41 @@ export function collectResourcesForPaths(
 	}
 }
 
+/** Errors of the deployment request, rendered by `handleDeploymentError`. */
+const REQUEST_ERROR_CODES: ReadonlySet<C8ctlErrorCode> = new Set([
+	"connection-failed",
+	"unauthorized",
+	"forbidden",
+	"payload-too-large",
+	"deployment-rejected",
+	"unknown",
+]);
+
+/** What the error hints need to know about a file that was sent. */
+interface AttemptedResource {
+	name: string;
+	relativePath?: string;
+	content: { byteLength: number };
+}
+
+const RESOURCE_TYPE_LABELS: Record<DeployedResource["type"], string> = {
+	process: "Process",
+	decision: "Decision",
+	"decision-requirements": "Decision Requirements",
+	form: "Form",
+	resource: "Resource",
+};
+
+/** The display base for relative file paths. */
+function displayBasePath(
+	explicit: string | undefined,
+	resolvedPaths: readonly string[],
+): string {
+	return (
+		explicit ?? (resolvedPaths.length === 1 ? resolvedPaths[0] : process.cwd())
+	);
+}
+
 /**
  * Internal helper: deploy the given paths to the cluster and render the
  * result table. Used by `deployCommand` (the standard CLI entry point)
@@ -161,12 +181,9 @@ export async function deployResources(
 		extensionList?: readonly string[];
 		/**
 		 * Optional cancellation signal. When aborted, an in-flight
-		 * `createDeployment` HTTP request is cancelled via the SDK's
-		 * `CancelablePromise.cancel()`. Cancellation is handled internally:
-		 * if the signal is aborted, `deployResources()` returns early
-		 * without surfacing the cancellation as a deploy failure (no
-		 * "Deployment failed" log, no rejection from the awaited promise).
-		 * Callers do not need their own try/catch to suppress aborts.
+		 * `createDeployment` HTTP request is cancelled. Cancellation is
+		 * handled internally: `deployResources()` then returns early
+		 * without surfacing the cancellation as a deploy failure.
 		 */
 		signal?: AbortSignal;
 		/** When true, skip the skipped-extensions log (caller already handled it). */
@@ -182,358 +199,103 @@ export async function deployResources(
 		/** Plan resolved earlier in the same invocation (see
 		 *  `collectResourcesForPaths`); descriptors are then not re-read. */
 		plan?: DeployPathPlan[];
-		/** Explicit tenant, bypassing session/env resolution. `c8ctl setup`
-		 *  uses it to pin the local cluster's default tenant. */
+		/** Explicit tenant, bypassing session/env resolution. */
 		tenantId?: string;
 		/** When true, suppress success-path progress output (the "Deploying…"
 		 *  line, the success confirmation and the deployed-resources table).
-		 *  `c8ctl setup` uses it: the step report is the signal. Failures
-		 *  still render in full. */
+		 *  Failures still render in full. */
 		quiet?: boolean;
-		/** Logger override — defaults to the shared singleton. `c8ctl setup`
-		 *  passes its buffered step logger so failure diagnostics close the
-		 *  step's title line before printing instead of colliding with it. */
+		/** Logger override — defaults to the shared singleton. */
 		logger?: ReturnType<typeof getLogger>;
 	},
 ): Promise<void> {
 	const logger = options.logger ?? getLogger();
 	const tenantId = options.tenantId ?? resolveTenantId(options.profile);
+	// The CLI host resolves its target from --profile, the session and the
+	// environment; the service only receives the result.
+	const cluster = resolveClusterConfig(options.profile);
+	const plan = options.plan ?? planDeployPaths(paths);
 
-	// ─── Pre-API-call validation and preparation ────────────────────────
-	// These steps run OUTSIDE any try/catch so validation errors bubble
-	// straight to the framework's `handleCommandError`. Only the actual
-	// HTTP deploy call (further down) is wrapped in a catch that routes
-	// through `handleDeploymentError` for rich Problem-Detail rendering.
-
-	const { resources, skippedExtensions, effectivePaths } =
-		collectResourcesForPaths(
-			paths,
-			options.force,
-			options.extensionList ?? DEPLOYABLE_EXTENSIONS,
-			options.loadDeployAlways ?? true,
-			options.plan,
-		);
-
-	if (!options.suppressSkippedLog) {
-		logSkippedExtensions(skippedExtensions);
-	}
-
-	// Use the effective paths (which may have been expanded to a PA root)
-	// for relative path calculation so display paths make sense.
-	const basePaths = effectivePaths;
-
-	const client = createClient(options.profile);
-
-	// Calculate relative paths for display
-	const basePath =
-		options.basePath ?? (basePaths.length === 1 ? basePaths[0] : process.cwd());
-	resources.forEach((r) => {
-		r.relativePath = relative(basePath, r.path) || r.name;
-	});
-
-	// Sort: group resources by their group, with building blocks first, then process applications, then standalone
-	resources.sort((a, b) => {
-		// Building blocks have highest priority
-		if (a.isBuildingBlock && !b.isBuildingBlock) return -1;
-		if (!a.isBuildingBlock && b.isBuildingBlock) return 1;
-
-		// Within building blocks, group by groupPath
-		if (a.isBuildingBlock && b.isBuildingBlock) {
-			if (a.groupPath && b.groupPath) {
-				const groupCompare = a.groupPath.localeCompare(b.groupPath);
-				if (groupCompare !== 0) return groupCompare;
+	const onProgress = (event: C8ctlEvent): void => {
+		if (event.type === "notice") {
+			logMessage(event.message);
+		} else if (event.type === "warning") {
+			logger.warn(event.message);
+		} else if (event.phase === "resolved") {
+			const skipped = event.data?.skipped;
+			if (!options.suppressSkippedLog && isSkipped(skipped)) {
+				logSkippedExtensions(new Set(skipped.extensions));
 			}
-			return a.path.localeCompare(b.path);
+		} else if (event.phase === "deploy" && !options.quiet) {
+			logger.info(`Deploying ${event.total} resource(s)...`);
 		}
-
-		// Process applications come next
-		if (a.isProcessApplication && !b.isProcessApplication) return -1;
-		if (!a.isProcessApplication && b.isProcessApplication) return 1;
-
-		// Within process applications, group by groupPath
-		if (a.isProcessApplication && b.isProcessApplication) {
-			if (a.groupPath && b.groupPath) {
-				const groupCompare = a.groupPath.localeCompare(b.groupPath);
-				if (groupCompare !== 0) return groupCompare;
-			}
-			return a.path.localeCompare(b.path);
-		}
-
-		// Finally, standalone resources sorted by path
-		return a.path.localeCompare(b.path);
-	});
-
-	// Validate for duplicate process/decision IDs
-	const duplicates = findDuplicateDefinitionIds(resources);
-	if (duplicates.size > 0) {
-		// Single source of truth for both the user-visible logger.error and
-		// the SilentError message — keeps stderr and `--verbose` rethrow
-		// stack message aligned even if the wording is later edited.
-		const duplicateIdsMessage =
-			"Cannot deploy: Multiple files with the same process/decision ID in one deployment";
-		// Pre-render the rich detail (per-id file list + guidance) so the
-		// user sees actionable context, then throw a SilentError so the
-		// framework records the failure without re-rendering a duplicate
-		// summary line.
-		logger.error(duplicateIdsMessage);
-		duplicates.forEach((dupPaths, id) => {
-			logMessage(
-				`  Process/Decision ID "${id}" found in: ${dupPaths.join(", ")}`,
-			);
-		});
-		logMessage(
-			"\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.",
-		);
-		logMessage(
-			"Please deploy these files separately or ensure each process/decision has a unique ID.",
-		);
-		throw new SilentError(duplicateIdsMessage);
-	}
-
-	if (!options.quiet) {
-		logger.info(`Deploying ${resources.length} resource(s)...`);
-	}
-
-	// Create a mapping from definition ID to resource file for later reference
-	const definitionIdToResource = new Map<string, ResourceFile>();
-	const formNameToResource = new Map<string, ResourceFile>();
-	// Map basename → ResourceFile[]: multiple files can share a basename
-	// across directories (e.g. sub-a/model.dmn, sub-b/model.dmn). When
-	// the API returns a resourceName, we pop the first matching entry so
-	// each response record resolves to a distinct local file.
-	const resourcesByName = new Map<string, ResourceFile[]>();
-
-	resources.forEach((r) => {
-		const existing = resourcesByName.get(r.name);
-		if (existing) {
-			existing.push(r);
-		} else {
-			resourcesByName.set(r.name, [r]);
-		}
-
-		const ext = extname(r.path);
-		if (ext === ".bpmn" || ext === ".dmn") {
-			const defId = extractDefinitionId(r.content, ext);
-			if (defId) {
-				definitionIdToResource.set(defId, r);
-			}
-		} else if (ext === ".form") {
-			// Forms are matched by their internal ID from the JSON content.
-			// Fall back to filename (without extension) if the ID can't be parsed.
-			let formId = basename(r.name, ".form");
-			try {
-				const parsed: unknown = JSON.parse(r.content.toString("utf-8"));
-				if (isRecord(parsed) && typeof parsed.id === "string") {
-					formId = parsed.id;
-				}
-			} catch {
-				// Not valid JSON — use filename
-			}
-			formNameToResource.set(formId, r);
-		}
-	});
-
-	/** Pop the first resource with a matching basename, or return undefined. */
-	function popResourceByName(name: string): ResourceFile | undefined {
-		const bucket = resourcesByName.get(name);
-		if (!bucket || bucket.length === 0) return undefined;
-		return bucket.shift();
-	}
-
-	// ─── API call ────────────────────────────────────────────────────────
-	// Only this section is wrapped in a catch that routes through
-	// `handleDeploymentError`. Pre-API errors above bubble to the
-	// framework directly.
-
-	// Create deployment request - convert buffers to File objects with proper MIME types
-	const pendingDeploy = client.createDeployment({
-		tenantId: TenantId.assumeExists(tenantId),
-		resources: resources.map((r) => {
-			// Determine MIME type based on extension
-			const ext = r.name.split(".").pop()?.toLowerCase();
-			const mimeType =
-				ext === "bpmn"
-					? "application/xml"
-					: ext === "dmn"
-						? "application/xml"
-						: ext === "form"
-							? "application/json"
-							: "application/octet-stream";
-			// Convert Buffer to Uint8Array for File constructor
-			return new File([new Uint8Array(r.content)], r.name, {
-				type: mimeType,
-			});
-		}),
-	});
-
-	// Wire optional cancellation: when the caller's AbortSignal fires,
-	// cancel the underlying CancelablePromise so the in-flight HTTP
-	// request is aborted promptly. Used by `watch` so SIGINT mid-deploy
-	// shuts down within ~one event-loop tick rather than blocking on
-	// the network round-trip.
-	const onAbort = (): void => {
-		pendingDeploy.cancel();
 	};
-	if (options.signal) {
-		if (options.signal.aborted) {
-			onAbort();
-		} else {
-			options.signal.addEventListener("abort", onAbort, { once: true });
-		}
-	}
 
-	let result: Awaited<typeof pendingDeploy>;
+	let result: DeployResult;
 	try {
-		result = await pendingDeploy;
+		result = await deploy(
+			{
+				target: { cluster },
+				paths,
+				tenantId,
+				extensions: [...(options.extensionList ?? DEPLOYABLE_EXTENSIONS)],
+				force: options.force,
+			},
+			{
+				signal: options.signal,
+				onProgress,
+				env: process.env,
+				sdkLogLevel: cliSdkLogLevel(),
+			},
+			{
+				plan,
+				serverSupportsExtensions: options.loadDeployAlways ?? true,
+			},
+		);
 	} catch (error) {
-		options.signal?.removeEventListener("abort", onAbort);
-		// Caller-initiated cancellation (e.g. SIGINT in `watch`): the
-		// CancelablePromise rejects with a "Cancelled" error after we
-		// invoked `pendingDeploy.cancel()` from the abort listener. The
-		// caller already knows the request was aborted — do not surface
-		// it as a user-visible deploy failure or exit non-zero.
-		if (options.signal?.aborted) {
+		logSkippedForNoFiles(error);
+		if (!isC8ctlError(error)) throw error;
+		// Caller-initiated cancellation (e.g. SIGINT in `watch`) is not a
+		// deploy failure.
+		if (error.code === "cancelled") return;
+		if (error.code === "duplicate-definition-ids") {
+			renderDuplicateIds(error.message, error.details?.duplicates, logger);
+			// Rendered above; the SilentError exits non-zero without a
+			// duplicate summary line.
+			throw new SilentError(error.message);
+		}
+		if (REQUEST_ERROR_CODES.has(error.code)) {
+			handleDeploymentError(
+				error.cause ?? error,
+				attemptedResources(error.details, options.basePath),
+				logger,
+				options.continueOnError,
+				options.continueOnUserError,
+				options.verbose === true,
+			);
 			return;
 		}
-		handleDeploymentError(
-			error,
-			resources,
-			logger,
-			options.continueOnError,
-			options.continueOnUserError,
-			options.verbose === true,
-		);
-		// `handleDeploymentError` either throws (terminal) or returns
-		// (continue-on-error). On the continue path, skip the success
-		// render below — there's no result to render.
-		return;
+		throw error;
 	}
-	options.signal?.removeEventListener("abort", onAbort);
 
 	if (!options.quiet) {
-		logger.success("Deployment successful", result.deploymentKey.toString());
+		logger.success("Deployment successful", result.deploymentKey);
 	}
 
-	// Group resources by their directory (building block or process application)
-	type ResourceRow = {
-		File: string;
-		Type: string;
-		ID: string;
-		Version: string | number;
-		Key: string;
-		sortKey: string;
-	};
-
-	// Normalize all deployed resources into a common structure
-	const knownResources = new Set<ResourceFile>();
-	const allResources = [
-		...result.processes.map((proc) => {
-			const resource = definitionIdToResource.get(proc.processDefinitionId);
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Process" as const,
-				id: proc.processDefinitionId,
-				version: proc.processDefinitionVersion,
-				key: proc.processDefinitionKey.toString(),
-				resource,
-			};
-		}),
-		...result.decisions.map((dec) => {
-			const resource = definitionIdToResource.get(
-				dec.decisionDefinitionId || "",
-			);
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Decision" as const,
-				id: dec.decisionDefinitionId || "-",
-				version: dec.version ?? "-",
-				key: dec.decisionDefinitionKey?.toString() || "-",
-				resource,
-			};
-		}),
-		...result.decisionRequirements.map((dr) => {
-			const resource = popResourceByName(dr.resourceName || "");
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Decision Requirements" as const,
-				id: dr.decisionRequirementsId || "-",
-				version: dr.version ?? "-",
-				key: dr.decisionRequirementsKey?.toString() || "-",
-				resource,
-			};
-		}),
-		...result.forms.map((form) => {
-			const resource = formNameToResource.get(form.formId || "");
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Form" as const,
-				id: form.formId || "-",
-				version: form.version ?? "-",
-				key: form.formKey?.toString() || "-",
-				resource,
-			};
-		}),
-		// Generic resources (not processes, decisions, or forms)
-		// are returned in the `resources` array by 8.10+.
-		...result.resources.map((res) => {
-			const resource = popResourceByName(res.resourceName || "");
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Resource" as const,
-				id: res.resourceId || "-",
-				version: res.version ?? "-",
-				key: res.resourceKey?.toString() || "-",
-				resource,
-			};
-		}),
-		// Supplementary resources not returned in any response array.
-		// Show them in the table so the user knows they were deployed.
-		...resources
-			.filter((r) => !knownResources.has(r))
-			.map((r) => ({
-				type: "Resource" as const,
-				id: "-",
-				version: "-" as const,
-				key: "-",
-				resource: r,
-			})),
-	];
-
-	const tableData: ResourceRow[] = allResources.map(
-		({ type, id, version, key, resource }) => {
-			const fileDisplay = resource
-				? `${resource.isBuildingBlock ? "🧱 " : ""}${resource.isProcessApplication ? "📦 " : ""}${resource.relativePath || resource.name}`
-				: "-";
-
-			// Extract directory path for grouping (e.g., "bla/_bb-building-block" or "pa")
-			const sortKey = resource?.relativePath
-				? resource.relativePath.substring(
-						0,
-						resource.relativePath.lastIndexOf("/") + 1,
-					) || resource.relativePath
-				: "zzz"; // Resources without paths go last
-
-			return {
-				File: fileDisplay,
-				Type: type,
-				ID: id,
-				Version: version,
-				Key: key,
-				sortKey,
-			};
-		},
+	const basePath = displayBasePath(options.basePath, result.resolvedPaths);
+	const rows = result.resources.map((resource) =>
+		toTableRow(resource, basePath),
 	);
 
 	// Sort by directory path (grouping), then by file name
-	tableData.sort((a, b) => {
+	rows.sort((a, b) => {
 		if (a.sortKey !== b.sortKey) {
 			return a.sortKey.localeCompare(b.sortKey);
 		}
 		return a.File.localeCompare(b.File);
 	});
 
-	// Remove sortKey before displaying
-	const displayData = tableData.map(({ File, Type, ID, Version, Key }) => ({
+	const displayData = rows.map(({ File, Type, ID, Version, Key }) => ({
 		File,
 		Type,
 		ID,
@@ -546,12 +308,100 @@ export async function deployResources(
 	}
 }
 
+function isSkipped(
+	value: unknown,
+): value is { files: string[]; extensions: string[] } {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"extensions" in value &&
+		Array.isArray(value.extensions)
+	);
+}
+
+function renderDuplicateIds(
+	message: string,
+	duplicates: unknown,
+	logger: ReturnType<typeof getLogger>,
+): void {
+	logger.error(message);
+	if (typeof duplicates === "object" && duplicates !== null) {
+		for (const [id, dupPaths] of Object.entries(duplicates)) {
+			const list = Array.isArray(dupPaths) ? dupPaths.join(", ") : "";
+			logMessage(`  Process/Decision ID "${id}" found in: ${list}`);
+		}
+	}
+	logMessage(
+		"\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.",
+	);
+	logMessage(
+		"Please deploy these files separately or ensure each process/decision has a unique ID.",
+	);
+}
+
+/** The files a failed request sent, from the error's `details.attempted`. */
+function attemptedResources(
+	details: Record<string, unknown> | undefined,
+	explicitBasePath: string | undefined,
+): AttemptedResource[] {
+	const resolvedPaths = Array.isArray(details?.resolvedPaths)
+		? details.resolvedPaths.map(String)
+		: [];
+	const basePath = displayBasePath(explicitBasePath, resolvedPaths);
+	const attempted = Array.isArray(details?.attempted) ? details.attempted : [];
+	return attempted.flatMap((entry: unknown) => {
+		if (!isRecord(entry)) return [];
+		const { path, name, bytes } = entry;
+		if (typeof path !== "string" || typeof name !== "string") return [];
+		return [
+			{
+				name,
+				relativePath: relative(basePath, path) || name,
+				content: { byteLength: typeof bytes === "number" ? bytes : 0 },
+			},
+		];
+	});
+}
+
+interface ResourceRow {
+	File: string;
+	Type: string;
+	ID: string;
+	Version: string | number;
+	Key: string;
+	sortKey: string;
+}
+
+function toTableRow(resource: DeployedResource, basePath: string): ResourceRow {
+	const file = resource.file;
+	const relativePath = file ? relative(basePath, file.path) || file.name : "";
+	const fileDisplay = file
+		? `${file.group?.kind === "building-block" ? "🧱 " : ""}${file.group?.kind === "project" ? "📦 " : ""}${relativePath}`
+		: "-";
+
+	// Directory path for grouping (e.g. "bla/_bb-building-block" or "pa");
+	// resources without a file go last.
+	const sortKey = relativePath
+		? relativePath.substring(0, relativePath.lastIndexOf("/") + 1) ||
+			relativePath
+		: "zzz";
+
+	return {
+		File: fileDisplay,
+		Type: RESOURCE_TYPE_LABELS[resource.type],
+		ID: resource.id ?? "-",
+		Version: resource.version ?? "-",
+		Key: resource.key ?? "-",
+		sortKey,
+	};
+}
+
 /**
  * Format and display deployment errors with actionable guidance
  */
 function handleDeploymentError(
 	error: unknown,
-	resources: ResourceFile[],
+	resources: AttemptedResource[],
 	logger: ReturnType<typeof getLogger>,
 	continueOnError?: boolean,
 	continueOnUserError?: boolean,
@@ -718,7 +568,7 @@ function printDeploymentHints(
 	title: string,
 	detail: string | undefined,
 	status: number | undefined,
-	resources: ResourceFile[],
+	resources: AttemptedResource[],
 ): void {
 	const hints: string[] = [];
 

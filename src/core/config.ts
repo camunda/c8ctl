@@ -344,12 +344,22 @@ function getSessionStatePath(): string {
 	return join(ensureUserDataDir(), "session.json");
 }
 
-function getProfilesPath(): string {
-	return join(ensureUserDataDir(), "profiles.json");
+function getProfilesPath(dataDir?: string): string {
+	return join(dataDir ?? ensureUserDataDir(), "profiles.json");
 }
 
-function getModelerSettingsPath(): string {
-	return join(getModelerDataDir(), "settings.json");
+function getModelerSettingsPath(modelerDir?: string): string {
+	return join(modelerDir ?? getModelerDataDir(), "settings.json");
+}
+
+/**
+ * Data directories passed explicitly by a host (a service's context).
+ * A missing entry falls back to the platform default; reading through an
+ * explicit directory never creates it.
+ */
+export interface DataDirs {
+	dataDir?: string;
+	modelerDir?: string;
 }
 
 // ============================================================================
@@ -728,8 +738,8 @@ function throwCorruptProfiles(
  * preserving the original bytes in a content-addressed backup), so no caller can
  * mistake corruption for emptiness and clobber the user's profiles.
  */
-export function loadProfiles(): Profile[] {
-	const profilesPath = getProfilesPath();
+export function loadProfiles(dataDir?: string): Profile[] {
+	const profilesPath = getProfilesPath(dataDir);
 
 	let data: Buffer;
 	let fd: number | undefined;
@@ -912,8 +922,11 @@ export function saveProfiles(profiles: Profile[]): void {
 /**
  * Get a c8ctl profile by name
  */
-export function getProfile(name: string): Profile | undefined {
-	const profiles = loadProfiles();
+export function getProfile(
+	name: string,
+	dataDir?: string,
+): Profile | undefined {
+	const profiles = loadProfiles(dataDir);
 	return profiles.find((p) => p.name === name);
 }
 
@@ -971,8 +984,8 @@ interface ModelerSettingsFile {
  * Load connections from Modeler's settings.json (read-only)
  * These are NOT modified by c8ctl
  */
-export function loadModelerConnections(): Connection[] {
-	const settingsPath = getModelerSettingsPath();
+export function loadModelerConnections(modelerDir?: string): Connection[] {
+	const settingsPath = getModelerSettingsPath(modelerDir);
 
 	if (!existsSync(settingsPath)) {
 		return [];
@@ -1017,9 +1030,12 @@ export function getAllProfiles(): Profile[] {
  * Get a profile by name, checking both c8ctl and Modeler sources
  * For Modeler profiles, accepts name with or without "modeler:" prefix
  */
-export function getProfileOrModeler(name: string): Profile | undefined {
+export function getProfileOrModeler(
+	name: string,
+	dirs: DataDirs = {},
+): Profile | undefined {
 	// Try c8ctl profiles first
-	const c8ctlProfile = getProfile(name);
+	const c8ctlProfile = getProfile(name, dirs.dataDir);
 	if (c8ctlProfile) {
 		return c8ctlProfile;
 	}
@@ -1028,7 +1044,7 @@ export function getProfileOrModeler(name: string): Profile | undefined {
 	const modelerName = name.startsWith(MODELER_PREFIX)
 		? name.slice(MODELER_PREFIX.length)
 		: name;
-	const modelerConnections = loadModelerConnections();
+	const modelerConnections = loadModelerConnections(dirs.modelerDir);
 	const modelerConnection = modelerConnections.find(
 		(c) => c.name === modelerName || c.id === modelerName,
 	);
