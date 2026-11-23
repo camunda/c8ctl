@@ -2,14 +2,14 @@
 id: development-workflows
 title: "Development workflows"
 sidebar_label: "Development workflows"
-description: "Use c8ctl to deploy resources, auto-redeploy on file changes, manage profiles, and bridge MCP connections for AI assistants."
+description: "Use the Camunda 8 CLI (c8ctl) to deploy resources, auto-redeploy on file changes, manage profiles, and bridge MCP connections for AI assistants."
 ---
 
 <!-- This page is maintained in the c8ctl repository (https://github.com/camunda/c8ctl, in docs/) and
      is synced to camunda-docs automatically. Do not edit it in camunda-docs — changes will be
      overwritten. Edit the source in the c8ctl repo instead. -->
 
-`c8ctl` includes commands that support local development and deployment workflows. You can deploy resources, run processes, watch for changes, manage profiles and sessions, and bridge MCP connections for AI assistants.
+The Camunda 8 CLI (`c8ctl`) includes commands that support local development and deployment workflows. You can deploy resources, run processes, watch for changes, manage profiles and sessions, and bridge MCP connections for AI assistants.
 
 :::tip
 Use the `--profile` flag with any command to run it against a specific cluster without changing the active session.
@@ -27,20 +27,20 @@ c8 watch --profile=local
 Install and manage the official Camunda skills from [`camunda/skills`](https://github.com/camunda/skills) in AI coding harnesses:
 
 ```bash
-c8ctl skills install
-c8ctl skills install --harness claude-code
-c8ctl skills install --harness github-copilot
-c8ctl skills install --harness cursor
-c8ctl skills list
-c8ctl skills remove --dry-run
-c8ctl skills remove --harness claude-code --yes
+c8 skills install
+c8 skills install --harness claude-code
+c8 skills install --harness github-copilot
+c8 skills install --harness cursor
+c8 skills list
+c8 skills remove --dry-run
+c8 skills remove --harness claude-code --yes
 ```
 
-Without `--harness`, c8ctl detects Claude Code (`claude` or `~/.claude`) and GitHub Copilot CLI (`copilot` or `~/.copilot`) for install, list, and remove. Explicit harness values are GitHub CLI agent IDs; use `gh skill install --help` for the supported list. c8ctl passes the selected ID and user scope to GitHub CLI, which resolves the host-specific skill directory for the current OS. `c8ctl skills list` shows Camunda skills installed in the selected or detected harnesses.
+Without `--harness`, the Camunda 8 CLI detects Claude Code (`claude` or `~/.claude`) and GitHub Copilot CLI (`copilot` or `~/.copilot`) for install, list, and remove. Explicit harness values are GitHub CLI agent IDs; use `gh skill install --help` for the supported list. The Camunda 8 CLI passes the selected ID and user scope to GitHub CLI, which resolves the host-specific skill directory for the current OS. `c8 skills list` shows Camunda skills installed in the selected or detected harnesses.
 
-GitHub CLI 2.90 or later is required; its skill commands are currently in preview. GitHub CLI resolves the latest tagged version of `camunda/skills`, or the default branch's current commit when the repository has no release tags. Re-running checks for upstream updates and updates the same skill directories without duplicates. If a skill is already up to date, c8ctl leaves it in place, so local edits are preserved. An upstream update may replace edited files.
+GitHub CLI 2.90 or later is required; its skill commands are currently in preview. GitHub CLI resolves the latest tagged version of `camunda/skills`, or the default branch's current commit when the repository has no release tags. Re-running checks for upstream updates and updates the same skill directories without duplicates. If a skill is already up to date, the Camunda 8 CLI leaves it in place, so local edits are preserved. An upstream update may replace edited files.
 
-`c8ctl skills remove` previews the Camunda skill directories before deleting them. In an interactive terminal, confirm the prompt; in non-interactive or JSON mode, pass `--yes` to remove them. `--dry-run` prints a JSON preview without deleting. Removal deletes the full listed directories, including local edits, and leaves other skills untouched.
+`c8 skills remove` previews the Camunda skill directories before deleting them. In an interactive terminal, confirm the prompt; in non-interactive or JSON mode, pass `--yes` to remove them. `--dry-run` prints a JSON preview without deleting. Removal deletes the full listed directories, including local edits, and leaves other skills untouched.
 
 To deliberately restore one skill to upstream content, first find its name and installed path with `gh skill list --scope user --agent <agent-id>`, then run:
 
@@ -50,16 +50,16 @@ gh skill update --force --dir <skills-root> <skill-name>
 
 `<skills-root>` is the parent directory containing installed skill directories (for example, `~/.claude/skills`), not the individual skill directory reported by `gh skill list`. The `--force` option replaces edited skill files even when upstream has not changed; it does not remove extra local files.
 
-The harness adapter contract is a GitHub CLI agent ID: c8ctl passes it to `gh skill install --agent` and uses user scope, while GitHub CLI resolves the OS-specific skill directory and records source metadata. Auto-detection currently covers Claude Code and GitHub Copilot CLI. To add automatic detection for another harness, add its executable and user config directory to the detector table in `skills-install-helpers.ts`; other agent IDs supported by GitHub CLI can already be selected explicitly with `--harness`.
+The harness adapter contract is a GitHub CLI agent ID: the Camunda 8 CLI passes it to `gh skill install --agent` and uses user scope, while GitHub CLI resolves the OS-specific skill directory and records source metadata. Auto-detection currently covers Claude Code and GitHub Copilot CLI. To add automatic detection for another harness, add its executable and user config directory to the detector table in `skills-install-helpers.ts`; other agent IDs supported by GitHub CLI can already be selected explicitly with `--harness`.
 
-To review installed skill paths, use `c8ctl skills list` or `gh skill list --scope user --agent <agent-id>`. To remove skills manually, remove only the Camunda skill directories from that output.
+To review installed skill paths, use `c8 skills list` or `gh skill list --scope user --agent <agent-id>`. To remove skills manually, remove only the Camunda skill directories from that output.
 
 ## Deploy
 
 Deploy resources to the active cluster.
 
 :::note
-When more than one profile is configured and you don't pass `--profile`, `c8ctl` prompts you to confirm which cluster to deploy to — a safety check against deploying to the wrong environment. Pass `--yes` (or `-y`) to skip the prompt in scripts and CI.
+When more than one profile is configured and you don't pass `--profile`, the CLI prompts you to confirm which cluster to deploy to. This is a safety check against deploying to the wrong environment. Pass `--yes` (or `-y`) to skip the prompt in scripts and CI.
 :::
 
 ### Deploy a single file
@@ -86,7 +86,7 @@ c8 deploy
 c8 deploy ./my-project
 ```
 
-When scanning directories, `c8ctl` includes files with the following extensions by default:
+When scanning directories, the CLI includes files with the following extensions by default:
 
 `.bpmn`, `.dmn`, `.form`
 
@@ -118,7 +118,7 @@ When a project's `camunda.json` defines [`deployResources`](camunda-json.md#depl
 
 ### Building blocks and projects
 
-`c8ctl` recognizes two special folder conventions during deployment:
+The CLI recognizes two special folder conventions during deployment:
 
 - Building blocks — folders containing `_bb-` in their name. These are deployed first.
 - Projects — folders containing a `camunda.json` file (or, during the transition, the legacy `.process-application` marker file). See [camunda.json](camunda-json.md) and [migrate from process applications](/components/concepts/projects.md#migrate-from-process-applications).
@@ -158,7 +158,7 @@ Building block resources are listed first, followed by project resources, then s
 
 ### Duplicate process ID detection
 
-Camunda does not allow deploying multiple resources with the same process or decision ID in a single deployment. `c8ctl` detects duplicate IDs before sending the request and shows a clear error message indicating which files conflict.
+Camunda does not allow deploying multiple resources with the same process or decision ID in a single deployment. The CLI detects duplicate IDs before sending the request and shows a clear error message indicating which files conflict.
 
 If you have files that share the same ID, deploy them separately:
 
@@ -222,7 +222,7 @@ How the descriptor interacts with the rest of `c8 deploy`:
 
 - `--extensions`, `--all-extensions`, and `--force` are rejected while the descriptor selects the resources. Change the patterns instead.
 - Explicitly named files are always deployed, whether or not the patterns select them, for example `c8 deploy ./my-project/notes/standalone.md`. Naming a file this way doesn't add it to the project's selection.
-- The selected set doesn't depend on the target cluster version. `c8ctl` doesn't check the server version or fall back to the default extensions on clusters older than 8.10. It submits the selected set unchanged, and the server rejects resource types it doesn't support.
+- The selected set doesn't depend on the target cluster version. The CLI doesn't check the server version or fall back to the default extensions on clusters older than 8.10. It submits the selected set unchanged, and the server rejects resource types it doesn't support.
 - An invalid `deployResources` value or an empty selection fails before anything is deployed.
 
 ## Run
@@ -260,7 +260,7 @@ c8 watch --extensions=.bpmn,.dmn,.form
 c8 watch --force
 ```
 
-By default, `c8ctl` monitors the same extensions used by `deploy`. Use `--extensions` to override. Use `--force` to continue watching after deployment errors.
+By default, the CLI monitors the same extensions used by `deploy`. Use `--extensions` to override. Use `--force` to continue watching after deployment errors.
 
 When watching inside a project (a folder tree containing a `camunda.json` marker file), use `--project` to watch and redeploy the entire project on each change. The legacy flags `--process-application` and `--pa` remain as deprecated aliases:
 
@@ -271,13 +271,13 @@ c8 watch ./my-app --project
 When the project defines [`deployResources`](#select-resources-with-deployresources), `--project` watches the selected set instead of an extension list:
 
 - Creating, changing, deleting, or renaming a selected file redeploys the re-resolved set.
-- Editing `camunda.json` re-resolves the selection and redeploys only if the set changed. This includes editors that save by replacing the file. If `camunda.json` is briefly missing during a save, `c8ctl` waits for the new file instead of falling back to the default scan.
-- An invalid `deployResources` value or an empty selection is reported and stops watching. With `--force`, `c8ctl` reports it and keeps watching, so you can fix the descriptor.
+- Editing `camunda.json` re-resolves the selection and redeploys only if the set changed. This includes editors that save by replacing the file. If `camunda.json` is briefly missing during a save, the CLI waits for the new file instead of falling back to the default scan.
+- An invalid `deployResources` value or an empty selection is reported and stops watching. With `--force`, the CLI reports it and keeps watching, so you can fix the descriptor.
 - `--extensions` and `--all-extensions` are rejected. `--force` keeps its usual meaning of continuing after errors.
 
 ### Continue watching after deployment errors
 
-By default, `c8ctl` stops watching when a deployment fails with an error. Use `--force` to continue watching and redeploy on subsequent file changes, even after errors:
+By default, the CLI stops watching when a deployment fails with an error. Use `--force` to continue watching and redeploy on subsequent file changes, even after errors:
 
 ```bash
 c8 watch --force
@@ -319,7 +319,7 @@ This is useful when you are working against a local development cluster but need
 
 ### Camunda Modeler integration
 
-`c8ctl` automatically discovers and imports profiles from Camunda Modeler. These profiles are read-only, always prefixed with `modeler:`, and loaded dynamically on each command execution.
+The CLI automatically discovers and imports profiles from Camunda Modeler. These profiles are read-only, always prefixed with `modeler:`, and loaded dynamically on each command execution.
 
 ```bash
 # Set a Modeler profile as the active session profile
@@ -363,17 +363,17 @@ c8 output         # show current output mode
 Install Camunda MCP connections into your AI tools without editing their configuration files:
 
 ```bash
-c8ctl mcp install
-c8ctl mcp install --docs
-c8ctl mcp install claude-code cursor --docs --orchestration
-c8ctl mcp install github-copilot --profile staging --alias camunda-staging
-c8ctl mcp install vscode --docs --dry-run
-c8ctl mcp uninstall claude-code --docs
+c8 mcp install
+c8 mcp install --docs
+c8 mcp install claude-code cursor --docs --orchestration
+c8 mcp install github-copilot --profile staging --alias camunda-staging
+c8 mcp install vscode --docs --dry-run
+c8 mcp uninstall claude-code --docs
 ```
 
 With no target flag, `install` and `uninstall` select **orchestration**. `--docs` selects **only documentation**; combine `--docs --orchestration` to select both. The entries are independent: removing docs does not remove orchestration.
 
-Without harness names, c8ctl targets every supported harness detected through its executable on `PATH` or its user configuration. Specify one or more names to target only those harnesses, even if they have no configuration file yet. `claude`, `copilot`, and `code` are aliases for `claude-code`, `github-copilot`, and `vscode`.
+Without harness names, the CLI targets every supported harness detected through its executable on `PATH` or its user configuration. Specify one or more names to target only those harnesses, even if they have no configuration file yet. `claude`, `copilot`, and `code` are aliases for `claude-code`, `github-copilot`, and `vscode`.
 
 | Harness | User configuration | Server key |
 | --- | --- | --- |
@@ -387,11 +387,11 @@ The application-data directory is `~/Library/Application Support` on macOS, `%AP
 
 ### Orchestration
 
-The `camunda` entry launches the existing `mcp-proxy` with the Node.js and c8ctl installation running the installer. It references the profile selected by `--profile`, then the active saved profile, then the default `local` profile. The profile name and data-directory path are recorded, **not the credentials**. Later profile switches do not retarget this connection; credential updates to the saved profile take effect when the proxy next starts.
+The `camunda` entry launches the existing `mcp-proxy` with the Node.js and CLI installation running the installer. It references the profile selected by `--profile`, then the active saved profile, then the default `local` profile. The profile name and data-directory path are recorded, **not the credentials**. Later profile switches do not retarget this connection; credential updates to the saved profile take effect when the proxy next starts.
 
-If you connect using environment variables without a saved profile, save them with `c8ctl add profile <name> --from-env` and install with `--profile <name>`. Use `--alias <name>` to configure another cluster alongside an existing entry. `--alias` applies only to orchestration; `camunda-docs` is reserved for documentation.
+If you connect using environment variables without a saved profile, save them with `c8 add profile <name> --from-env` and install with `--profile <name>`. Use `--alias <name>` to configure another cluster alongside an existing entry. `--alias` applies only to orchestration; `camunda-docs` is reserved for documentation.
 
-The installer does not start or contact the cluster. The cluster must expose `/mcp/cluster` when the harness starts the proxy. If you move or remove the recorded Node.js or c8ctl installation, uninstall and reinstall the entry. Profile names and recorded paths must not contain `${...}` placeholders, which harnesses could expand and redirect to another connection.
+The installer does not start or contact the cluster. The cluster must expose `/mcp/cluster` when the harness starts the proxy. If you move or remove the recorded Node.js or CLI installation, uninstall and reinstall the entry. Profile names and recorded paths must not contain `${...}` placeholders, which harnesses could expand and redirect to another connection.
 
 ### Documentation
 
@@ -401,7 +401,7 @@ Restart or reload your harness after installation. Complete the docs server's Go
 
 ### Safe updates and removal
 
-Existing unrelated entries and settings are preserved, including VS Code JSONC comments and client-added tool restrictions. Matching installations and removal of already-absent entries are no-ops. A cluster entry c8ctl installed earlier is updated in place when its connection drifted (for example after moving the install or switching Node versions), keeping any restrictions you added. A foreign entry under the same name or a malformed configuration produces an error instead of being overwritten. Uninstall removes only the selected recognized Camunda entry and does not require the profile to still exist.
+Existing unrelated entries and settings are preserved, including VS Code JSONC comments and client-added tool restrictions. Matching installations and removal of already-absent entries are no-ops. A cluster entry the CLI installed earlier is updated in place when its connection drifted (for example after moving the install or switching Node versions), keeping any restrictions you added. A foreign entry under the same name or a malformed configuration produces an error instead of being overwritten. Uninstall removes only the selected recognized Camunda entry and does not require the profile to still exist.
 
 `--dry-run` previews the selected entries without writing configuration or displaying unrelated configuration values. Writes use a private temporary file and atomic replacement per configuration file; a multi-harness operation is not a transaction across all files. If a write fails, earlier successful files are reported and remain updated.
 
@@ -450,7 +450,7 @@ When you [create API client credentials](/components/saas/clusters/manage-api-cl
 
 ### Use a profile with MCP proxy
 
-Instead of passing environment variables, use a `c8ctl` profile to supply credentials:
+Instead of passing environment variables, use a CLI profile to supply credentials:
 
 ```json
 {
@@ -489,13 +489,13 @@ This example demonstrates an end-to-end development workflow — auto-deploying 
 
 ### 1. Start watch mode
 
-In a terminal, start `c8ctl` in watch mode to auto-deploy resources whenever you save changes:
+In a terminal, start the CLI in watch mode to auto-deploy resources whenever you save changes:
 
 ```bash
 c8 watch
 ```
 
-Now edit your `.bpmn`, `.dmn`, or `.form` files in your editor. Every time you save, `c8ctl` redeploys automatically.
+Now edit your `.bpmn`, `.dmn`, or `.form` files in your editor. Every time you save, the CLI redeploys automatically.
 
 ### 2. Prepare process variables
 
@@ -528,7 +528,7 @@ The JSON output returns the process instance key, for example `2251799813685260`
 In a **separate terminal**, use `watch` (the Unix utility) to poll the process instance status every second:
 
 ```bash
-watch -n 1 c8ctl search pi --key=2251799813685260
+watch -n 1 c8 search pi --key=2251799813685260
 ```
 
 This continuously refreshes until the process instance reaches the `COMPLETED` state.
@@ -577,7 +577,7 @@ c8 open operate --profile=prod
 
 ## AI agents and scripting
 
-c8ctl includes flags and output modes designed for AI agents and scripts. These also appear in their own labeled section in `c8ctl help`.
+The CLI includes flags and output modes designed for AI agents and scripts. These also appear in their own labeled section in `c8 help`.
 
 ### Filter output with `--fields`
 
@@ -631,7 +631,7 @@ c8 search pi --state ACTIVE --between 2024-01-01..2024-12-31 --dry-run
 
 ### Machine-readable help
 
-In JSON output mode, `c8ctl help` emits structured JSON describing the full command tree, flags (with types), and agent flags:
+In JSON output mode, `c8 help` emits structured JSON describing the full command tree, flags (with types), and agent flags:
 
 ```bash
 c8 output json

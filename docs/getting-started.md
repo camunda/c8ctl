@@ -1,7 +1,7 @@
 ---
 id: getting-started
-title: "c8ctl CLI"
-description: "Use the c8ctl CLI to inspect your Camunda 8 clusters, deploy resources, and manage process automation from the terminal."
+title: "Camunda 8 CLI"
+description: "Use the Camunda 8 CLI (c8ctl) to inspect your Camunda 8 clusters, deploy resources, and manage process automation from the terminal."
 ---
 
 import Tabs from "@theme/Tabs";
@@ -16,11 +16,11 @@ import PageDescription from '@site/src/components/PageDescription';
 
 ## About
 
-`c8ctl` is a minimal-dependency CLI for Camunda 8. It is built on top of the [`@camunda8/orchestration-cluster-api`](https://www.npmjs.com/package/@camunda8/orchestration-cluster-api) TypeScript SDK and provides two equivalent bin aliases: `c8ctl` and `c8`.
+The Camunda 8 CLI (`c8ctl`) is a minimal-dependency command-line tool for Camunda 8. It is built on top of the [`@camunda8/orchestration-cluster-api`](https://www.npmjs.com/package/@camunda8/orchestration-cluster-api) TypeScript SDK and provides two equivalent bin aliases: `c8ctl` and `c8`.
 
-`c8ctl` is designed for developers who need fast, scriptable access to a Camunda 8 cluster during development and testing. It supports both Camunda 8 SaaS and Self-Managed environments.
+The CLI is designed for developers who need fast, scriptable access to a Camunda 8 cluster during development and testing. It supports both Camunda 8 SaaS and Self-Managed environments.
 
-Use `c8ctl` to:
+Use the CLI to:
 
 - Inspect running clusters — list process instances, user tasks, incidents, and jobs.
 - Deploy BPMN, DMN, and form resources, optionally watching for file changes.
@@ -33,17 +33,17 @@ Use `c8ctl` to:
 
 ## Install
 
-Install `c8ctl` globally from npm:
+Install the CLI globally from npm:
 
 ```bash
 npm install @camunda8/cli -g
 ```
 
-After installation, both `c8ctl` and `c8` are available as commands in your terminal.
+After installation, both `c8ctl` and `c8` are available as commands in your terminal. The two commands are equivalent, and the examples in these docs use `c8`. If another `c8` command takes precedence in your `PATH`, such as the `c8` code coverage tool, use `c8ctl` instead.
 
 ## Quick start with a local cluster
 
-`c8ctl` includes a built-in `cluster` command that downloads and manages a local [Camunda 8 Run](/self-managed/quickstart/developer-quickstart/c8run.md) instance. This is the fastest way to get a cluster running for development.
+The CLI includes a built-in `cluster` command that downloads and manages a local [Camunda 8 Run](/self-managed/quickstart/developer-quickstart/c8run.md) instance. This is the fastest way to get a cluster running for development.
 
 ### Start a cluster
 
@@ -62,7 +62,7 @@ c8 cluster start alpha
 c8 cluster start 8.8
 ```
 
-`c8ctl` automatically downloads the correct binary for your platform, caches it locally, launches the cluster in the background, and waits for it to become healthy.
+The CLI automatically downloads the correct binary for your platform, caches it locally, launches the cluster in the background, and waits for it to become healthy.
 
 ### Stop the cluster
 
@@ -88,7 +88,7 @@ This includes readiness timeouts after c8run itself exits successfully, which
 make `cluster start` exit 1. A retry while processes survive without an active
 marker also exits 1; stop those processes before starting again.
 
-**`running (untracked)`** means processes are alive without an active c8ctl
+**`running (untracked)`** means processes are alive without an active CLI
 marker and the startup outcome is unknown. Use `c8 cluster stop` to recover,
 including when an installation directory was replaced or deleted while running.
 JSON status (`c8 cluster status --json`) includes the same `status` and `recovery`
@@ -126,7 +126,7 @@ c8 cluster stop --purge
 
 ### Manage secrets
 
-`c8 cluster secrets` forwards to the `secrets` command of the c8run binary c8ctl already downloads and manages. c8ctl adds no storage of its own and never sees a secret value: `set` prompts for the value without echoing it (or reads exactly one value from stdin with `--stdin`), and the store is c8run's, shared across versions and projects for the current OS user.
+`c8 cluster secrets` forwards to the `secrets` command of the c8run binary that the CLI already downloads and manages. The CLI adds no storage of its own and never sees a secret value: `set` prompts for the value without echoing it (or reads exactly one value from stdin with `--stdin`), and the store is c8run's, shared across versions and projects for the current OS user.
 
 ```bash
 # Store a secret — prompts, no-echo
@@ -145,7 +145,7 @@ c8 cluster secrets delete OPENAI_API_KEY --yes
 c8 cluster secrets --c8-version 8.10 list
 ```
 
-Everything after `secrets` is passed to c8run unchanged, so any verb or flag c8run supports works here too, including ones added after this was written — run `c8 cluster secrets help` for c8run's own help (`--help` on the `c8ctl` command itself belongs to c8ctl). This requires a c8run build that includes the `secrets` command; older cached versions print a hint if it is missing. Until then, or as an ephemeral alternative for a single run, pass secrets as environment variables when starting instead:
+Everything after `secrets` is passed to c8run unchanged, so any verb or flag c8run supports works here too, including ones added after this was written. Run `c8 cluster secrets help` for c8run's own help. The CLI handles `--help` itself, so `--help` does not show c8run's help. This requires a c8run build that includes the `secrets` command; older cached versions print a hint if it is missing. Until then, or as an ephemeral alternative for a single run, pass secrets as environment variables when starting instead:
 
 ```bash
 SECRET_OPENAI_API_KEY=sk-... c8 cluster start
@@ -190,9 +190,9 @@ Selecting saved physical tenants preserves their dedicated credentials and `--no
 
 `c8 cluster physical-tenants list` shows effective startup settings for active physical tenants and saved settings for stopped or pending physical tenants. Active IDs absent from the saved configuration appear as `active (not saved)`. Login and Connectors settings are `unknown` if legacy startup metadata doesn't record them.
 
-Management commands select an explicit leading `--c8-version`, otherwise the running cluster's version, otherwise the highest locally installed version. They never download a distribution automatically. Keep the same version selected when configuring and starting a cluster. Both secrets and physical-tenant commands preserve c8run's output and exit status; `--json` does not convert that output to JSON. Use the `help` subcommand for c8run help, because `--help` belongs to c8ctl. `--dry-run` previews these delegated calls and cluster starts without launching c8run or reading stdin.
+Management commands select an explicit leading `--c8-version`, otherwise the running cluster's version, otherwise the highest locally installed version. They never download a distribution automatically. Keep the same version selected when configuring and starting a cluster. Both secrets and physical-tenant commands preserve c8run's output and exit status; `--json` does not convert that output to JSON. Use the `help` subcommand for c8run help, because `--help` belongs to the CLI. `--dry-run` previews these delegated calls and cluster starts without launching c8run or reading stdin.
 
-`C8RUN_TENANTS_FILE` selects the saved physical tenants file; `C8RUN_SECRETS_DIR` selects the default secrets directory. Relative values and secret import filenames are resolved against the caller's working directory, including on startup. Without overrides, c8run's per-OS-user defaults apply. Each physical tenant's secret directory is a sibling under `tenant-secrets/<id>`. Both `--physical-tenant <id>` and `--physical-tenant=<id>` are supported. c8ctl adds no physical tenant or secret store of its own.
+`C8RUN_TENANTS_FILE` selects the saved physical tenants file; `C8RUN_SECRETS_DIR` selects the default secrets directory. Relative values and secret import filenames are resolved against the caller's working directory, including on startup. Without overrides, c8run's per-OS-user defaults apply. Each physical tenant's secret directory is a sibling under `tenant-secrets/<id>`. Both `--physical-tenant <id>` and `--physical-tenant=<id>` are supported. The CLI adds no physical tenant or secret store of its own.
 
 Physical tenant IDs contain lowercase letters and digits. With the bundled H2 or other RDBMS storage, IDs are limited to eight characters. Removing and re-adding an ID restores its data, including its existing users. Each enabled physical tenant's Connectors runtime uses another JVM and port. See the [physical-tenant documentation](/self-managed/concepts/physical-tenants/index.md) for prerequisites and limitations.
 
@@ -259,14 +259,14 @@ The c8run archive is several hundred MB. If the connection drops, `c8 cluster st
 
 ## Credential resolution
 
-`c8ctl` resolves credentials in the following order:
+The CLI resolves credentials in the following order:
 
 1. **`--profile` flag** — one-off override for a single command.
 2. **Active profile** — set with `c8 use profile <name>`.
 3. **Environment variables** — standard `CAMUNDA_*` variables (take precedence over the default profile).
 4. **Default `local` profile** — `http://localhost:8080/v2`.
 
-When no profile has been explicitly set, `c8ctl` defaults to a built-in `local` profile that points to `http://localhost:8080/v2`. This means you can start a local cluster with `c8 cluster start` and immediately run commands without any configuration. If the connection fails, `c8ctl` shows a hint with the URL it tried to connect to.
+When no profile has been explicitly set, the CLI defaults to a built-in `local` profile that points to `http://localhost:8080/v2`. This means you can start a local cluster with `c8 cluster start` and immediately run commands without any configuration. If the connection fails, the CLI shows a hint with the URL it tried to connect to.
 
 ### Use environment variables
 
@@ -285,7 +285,7 @@ export CAMUNDA_AUTH_STRATEGY=NONE
 c8 get topology
 ```
 
-When credential variables are set without a cluster address variable, `c8ctl` falls back to the default `local` profile and warns which variables are being ignored.
+When credential variables are set without a cluster address variable, the CLI falls back to the default `local` profile and warns which variables are being ignored.
 
 ### Use a profile
 
@@ -309,7 +309,7 @@ c8 deploy ./process.bpmn --profile=prod
 c8 search ut --assignee=jane --profile=dev
 ```
 
-The `--profile` flag works with both `c8ctl` profiles and Camunda Modeler profiles (prefixed with `modeler:`):
+The `--profile` flag works with both CLI profiles and Camunda Modeler profiles (prefixed with `modeler:`):
 
 ```bash
 c8 list pi --profile=modeler:Cloud Cluster
@@ -332,10 +332,10 @@ c8 list pi   # uses my-tenant-id
 
 ## Profile management
 
-`c8ctl` supports two types of profiles:
+The CLI supports two types of profiles:
 
-1. `c8ctl` profiles — managed directly with `c8ctl` commands.
-2. Camunda Modeler profiles — automatically imported from Camunda Modeler (read-only, prefixed with `modeler:`).
+1. CLI profiles, managed directly with CLI commands.
+2. Camunda Modeler profiles, automatically imported from Camunda Modeler (read-only, prefixed with `modeler:`).
 
 ### Add a profile
 
@@ -375,7 +375,7 @@ c8 add profile prod --from-env
 
 ### Gateway-fronted clusters
 
-For a cluster reached through an API gateway or reverse proxy, a profile can attach a custom header to every request and target `--baseUrl` exactly, without `c8ctl`'s automatic `/v2` suffixing:
+For a cluster reached through an API gateway or reverse proxy, a profile can attach a custom header to every request and target `--baseUrl` exactly, without the CLI's automatic `/v2` suffixing:
 
 ```bash
 # Attach a header (e.g. an API key) to every REST request made under this profile.
@@ -400,7 +400,7 @@ Both flags are optional and independent of each other. A profile that sets neith
 c8 list profiles
 ```
 
-Lists both `c8ctl` and Modeler profiles. Modeler profiles appear with a `modeler:` prefix.
+Lists both CLI and Modeler profiles. Modeler profiles appear with a `modeler:` prefix.
 
 ### Switch the active profile
 
@@ -425,16 +425,16 @@ c8 rm profile prod   # alias
 ```
 
 :::note
-Modeler profiles are read-only. They cannot be modified or removed through `c8ctl` — manage them in Camunda Modeler.
+Modeler profiles are read-only. They cannot be modified or removed through the CLI. Manage them in Camunda Modeler.
 :::
 
 ### Camunda Modeler integration
 
-`c8ctl` automatically reads profiles from Camunda Modeler's `profiles.json` file. These profiles are:
+The CLI automatically reads profiles from Camunda Modeler's `profiles.json` file. These profiles are:
 
-- **Read-only** — cannot be modified or deleted via `c8ctl`.
-- **Prefixed** — always displayed with a `modeler:` prefix (for example, `modeler:Local Dev`).
-- **Dynamic** — loaded fresh on each command execution.
+- **Read-only**: cannot be modified or deleted via the CLI.
+- **Prefixed**: always displayed with a `modeler:` prefix (for example, `modeler:Local Dev`).
+- **Dynamic**: loaded fresh on each command execution.
 
 Platform-specific locations:
 
@@ -455,11 +455,11 @@ c8 list pi --profile=modeler:Cloud Cluster
 ## Get help
 
 ```bash
-c8ctl help                # general help
-c8ctl help list           # help for the list command
-c8ctl help deploy         # help for the deploy command
-c8ctl help profiles       # help for profile management
-c8ctl --version           # print version
+c8 help                   # general help
+c8 help list              # help for the list command
+c8 help deploy            # help for the deploy command
+c8 help profiles          # help for profile management
+c8 --version              # print version
 ```
 
 Run any verb without a resource to see what resources are available:
@@ -479,7 +479,7 @@ Opens the GitHub issues page in your browser to report bugs or request features.
 
 ## Update notifications
 
-`c8ctl` checks for newer versions at most once an hour, in a detached background process, so an unreachable or blocked npm registry never delays a command. When that check finds an update, the next command displays a one-time notification. The check is suppressed in CI environments and development versions; the notification is also suppressed in JSON output mode.
+The CLI checks for newer versions at most once an hour, in a detached background process, so an unreachable or blocked npm registry never delays a command. When that check finds an update, the next command displays a one-time notification. The check is suppressed in CI environments and development versions; the notification is also suppressed in JSON output mode.
 
 ## Shell completion
 
@@ -503,7 +503,7 @@ Alternatively, generate the completion script manually:
   <TabItem value="bash" label="Bash">
 
 ```bash
-c8ctl completion bash > ~/.c8ctl-completion.bash
+c8 completion bash > ~/.c8ctl-completion.bash
 echo 'source ~/.c8ctl-completion.bash' >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -513,7 +513,7 @@ source ~/.bashrc
 <TabItem value="zsh" label="Zsh">
 
 ```bash
-c8ctl completion zsh > ~/.c8ctl-completion.zsh
+c8 completion zsh > ~/.c8ctl-completion.zsh
 echo 'source ~/.c8ctl-completion.zsh' >> ~/.zshrc
 source ~/.zshrc
 ```
@@ -523,7 +523,7 @@ source ~/.zshrc
 <TabItem value="fish" label="Fish">
 
 ```bash
-c8ctl completion fish > ~/.config/fish/completions/c8ctl.fish
+c8 completion fish > ~/.config/fish/completions/c8ctl.fish
 ```
 
 Fish loads the completion automatically on the next shell start.
@@ -546,7 +546,7 @@ For scripts that invoke multiple commands, set `C8CTL_OUTPUT_MODE=json` in their
 
 ### Version output
 
-`c8ctl --version` (or `c8ctl -v`) always writes its result to stdout and exits `0`:
+`c8 --version` (or `c8 -v`) always writes its result to stdout and exits `0`:
 
 | Effective output mode | stdout |
 | :-------------------- | :----- |
@@ -587,6 +587,6 @@ Debug output is written to stderr and does not interfere with normal command out
 
 ## Next steps
 
-- [Cluster inspection and process management](cluster-inspection.md) — list, search, and manage process instances, user tasks, incidents, and jobs.
-- [Development workflows](development-workflows.md) — deploy, run, watch, and configure profiles and MCP proxy.
-- [Extend `c8ctl` with plugins](plugins.md) — scaffold, install, and manage custom CLI plugins.
+- [Cluster inspection and process management](cluster-inspection.md): list, search, and manage process instances, user tasks, incidents, and jobs.
+- [Development workflows](development-workflows.md): deploy, run, watch, and configure profiles and MCP proxy.
+- [Extend the CLI with plugins](plugins.md): scaffold, install, and manage custom CLI plugins.

@@ -2,14 +2,14 @@
 id: identity-management
 title: "Identity management"
 sidebar_label: "Identity management"
-description: "Use c8ctl to manage users, roles, groups, tenants, authorizations, and mapping rules in a Camunda 8 cluster."
+description: "Use the Camunda 8 CLI (c8ctl) to manage users, roles, groups, tenants, authorizations, and mapping rules in a Camunda 8 cluster."
 ---
 
 <!-- This page is maintained in the c8ctl repository (https://github.com/camunda/c8ctl, in docs/) and
      is synced to camunda-docs automatically. Do not edit it in camunda-docs — changes will be
      overwritten. Edit the source in the c8ctl repo instead. -->
 
-`c8ctl` provides commands to manage identity resources through the Orchestration Cluster API. You can list, search, get, create, and delete users, roles, groups, tenants, authorizations, and mapping rules. Membership management is handled with the `assign` and `unassign` verbs.
+The Camunda 8 CLI (`c8ctl`) provides commands to manage identity resources through the Orchestration Cluster API. You can list, search, get, create, and delete users, roles, groups, tenants, authorizations, and mapping rules. Membership management is handled with the `assign` and `unassign` verbs.
 
 | Resource           | Alias  | Available verbs                             |
 | :----------------- | :----- | :------------------------------------------ |
