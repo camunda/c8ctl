@@ -547,15 +547,27 @@ describe("c8ctl setup", () => {
 				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
 			);
 			// The box is actionable: setup already started an instance, and
-			// the box says so and names the command that shows it.
-			assert.match(out, /A Rocket Launch instance is already running/);
-			// Tenant and profile are pinned: a saved session tenant or a
-			// remote active profile must not redirect the suggestion. Two
-			// separate lines — && is a syntax error in Windows
-			// PowerShell 5.1.
-			assert.match(out, /See it:/);
-			assert.match(out, /c8ctl use tenant "<default>"/);
-			assert.match(out, /c8ctl search process-instance --profile local/);
+			// the box deeplinks it in Operate (naming the local credentials)
+			// and gives the CLI commands that inspect it and start another.
+			assert.match(out, /Process instance is running on the local cluster\./);
+			assert.match(
+				out,
+				/Watch it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
+			);
+			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
+			// The CLI suggestions pin the local profile: the session's active
+			// profile may point at a remote cluster. The run path is quoted —
+			// the working directory may contain spaces. One command per line:
+			// && is a syntax error in Windows PowerShell 5.1.
+			assert.match(
+				out,
+				/Inspect it:\s+c8ctl get process-instance 2251799813686751 --profile local/,
+			);
+			assert.match(
+				out,
+				/Run again:\s+c8ctl run ".*rocket-launch[/\\]rocket-launch\.bpmn" --profile local/,
+			);
+			assert.match(out, /deploys and starts the process; no Tasklist needed/);
 			assert.doesNotMatch(out, /&&/);
 			assert.match(out, /Setup finished\./);
 			// The project was scaffolded into the working directory.
@@ -2020,17 +2032,46 @@ describe("c8ctl setup", () => {
 				),
 				"service-worker blueprint was not scaffolded",
 			);
-			// The instance stalls at its service task until a worker connects —
-			// the closing box must say so and hand over the commands.
-			assert.match(out, /The order process waits for a worker/);
-			// Quoted, so a working directory with spaces stays usable;
+			// The instance stalls at its service task until a worker
+			// connects — the closing box says so, deeplinks it in Operate
+			// (naming the local credentials), and hands over one worker
+			// block per shipped language.
+			assert.match(out, /Process instance is running on the local cluster\./);
+			assert.match(
+				out,
+				/waits at the first service task until a worker connects/,
+			);
+			assert.match(
+				out,
+				/Open it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
+			);
+			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
+			assert.match(out, /Start a worker in your language:/);
+			// Paths are quoted (the working directory may contain spaces);
 			// either path separator, so the Windows matrix sees its own.
-			assert.match(out, /cd ".*service-worker[/\\]nodejs"/);
-			// Separate lines: && is a syntax error in Windows
-			// PowerShell 5.1.
-			assert.match(out, /npm install/);
-			assert.match(out, /npm start/);
-			assert.doesNotMatch(out, /npm install && npm start/);
+			// --prefix/--project/-f stand in for cd, so every command is
+			// copy-pasteable from any directory.
+			assert.match(
+				out,
+				/Node\.js:\s+npm --prefix ".*service-worker[/\\]nodejs" install/,
+			);
+			assert.match(out, /npm --prefix ".*service-worker[/\\]nodejs" start/);
+			assert.match(
+				out,
+				/Python:\s+pip install -r ".*service-worker[/\\]python[/\\]requirements\.txt"/,
+			);
+			assert.match(out, /python ".*service-worker[/\\]python[/\\]main\.py"/);
+			assert.match(
+				out,
+				/Java:\s+mvn -f ".*service-worker[/\\]java" spring-boot:run/,
+			);
+			assert.match(
+				out,
+				/C#:\s+dotnet run --project ".*service-worker[/\\]csharp"/,
+			);
+			// Install and start stay on separate lines: && is a syntax
+			// error in Windows PowerShell 5.1.
+			assert.doesNotMatch(out, /&&/);
 			assert.match(
 				out,
 				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,

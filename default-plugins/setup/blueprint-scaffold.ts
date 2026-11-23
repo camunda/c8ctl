@@ -58,11 +58,15 @@ export interface SetupBlueprint {
 	readonly startVariables?: Record<string, unknown>;
 	/**
 	 * Actionable closing lines for the setup "What's next" box, given the
-	 * scaffolded project directory. Rendered ahead of the generic
-	 * Project / Guide / Operate lines, so each blueprint can say what the
-	 * run left behind and what to do with it.
+	 * scaffolded project directory and the key of the process instance
+	 * setup started. Rendered ahead of the generic Project / Guide /
+	 * Operate lines, so each blueprint can say what the run left behind
+	 * and what to do with it.
 	 */
-	readonly nextSteps: (projectDir: string) => readonly string[];
+	readonly nextSteps: (context: {
+		readonly projectDir: string;
+		readonly processInstanceKey: string;
+	}) => readonly string[];
 }
 
 export const SETUP_BLUEPRINTS = [
@@ -83,15 +87,19 @@ export const SETUP_BLUEPRINTS = [
 		// "full send" launch.
 		startVariables: { missionName: "Apollo", fuelLevel: 80 },
 		// Fully automated: setup already deployed and launched an
-		// instance, so the next step is looking at it. The suggestion pins
-		// the local profile and its <default> tenant — the session's
-		// active profile and tenant may point elsewhere. Two lines: && is
-		// a syntax error in Windows PowerShell 5.1.
-		nextSteps: () => [
-			"A Rocket Launch instance is already running on the local cluster.",
-			"See it:",
-			'  c8ctl use tenant "<default>"',
-			"  c8ctl search process-instance --profile local",
+		// instance, so the next step is looking at it. The deeplink opens
+		// the started instance in Operate directly — no filter clearing.
+		// The CLI lines pin the local profile (the session's active
+		// profile may point elsewhere), and the run path is quoted: the
+		// working directory may contain spaces. All lines stay printable
+		// ASCII so the box keeps its borders.
+		nextSteps: ({ projectDir, processInstanceKey }) => [
+			"Process instance is running on the local cluster.",
+			`Watch it:   http://localhost:8080/operate/processes/${processInstanceKey}`,
+			"            (login using demo / demo as username / password)",
+			`Inspect it: c8ctl get process-instance ${processInstanceKey} --profile local`,
+			`Run again:  c8ctl run "${join(projectDir, "rocket-launch.bpmn")}" --profile local`,
+			"            (deploys and starts the process; no Tasklist needed)",
 		],
 	},
 	{
@@ -111,15 +119,25 @@ export const SETUP_BLUEPRINTS = [
 		processFile: "bpmn/order-process.bpmn",
 		// The started instance stalls at its first service task until a
 		// worker connects — starting one is the whole point of the box.
-		// The path is quoted: the working directory may contain spaces.
-		// npm install and npm start are separate lines: && is a syntax
-		// error in Windows PowerShell 5.1.
-		nextSteps: (projectDir) => [
-			"The order process waits for a worker. Start one:",
-			`  cd "${join(projectDir, "nodejs")}"`,
-			"  npm install",
-			"  npm start",
-			"Then watch the instance complete in Operate.",
+		// One block per shipped worker language, kept to copy-pasteable
+		// commands that work from any directory: --prefix, --project and
+		// -f stand in for cd, and paths are quoted (the working directory
+		// may contain spaces). npm and pip keep their install step on a
+		// separate line: && is a syntax error in Windows PowerShell 5.1.
+		// All lines stay printable ASCII so the box keeps its borders.
+		nextSteps: ({ projectDir, processInstanceKey }) => [
+			"Process instance is running on the local cluster.",
+			"It waits at the first service task until a worker connects.",
+			`Open it:  http://localhost:8080/operate/processes/${processInstanceKey}`,
+			"          (login using demo / demo as username / password)",
+			"",
+			"Start a worker in your language:",
+			`  Node.js:  npm --prefix "${join(projectDir, "nodejs")}" install`,
+			`            npm --prefix "${join(projectDir, "nodejs")}" start`,
+			`  Python:   pip install -r "${join(projectDir, "python", "requirements.txt")}"`,
+			`            python "${join(projectDir, "python", "main.py")}"`,
+			`  Java:     mvn -f "${join(projectDir, "java")}" spring-boot:run`,
+			`  C#:       dotnet run --project "${join(projectDir, "csharp")}"`,
 		],
 	},
 ] as const satisfies readonly SetupBlueprint[];
