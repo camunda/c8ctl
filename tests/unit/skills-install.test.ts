@@ -335,18 +335,20 @@ test("fails when available Camunda skills cannot be listed", async () => {
 	);
 });
 
-test("reports an outdated GitHub CLI when gh skill rejects a flag", async () => {
-	await assert.rejects(
-		runSkillInstall("claude-code", () =>
-			Promise.resolve({
-				status: 1,
-				stdout: "",
-				stderr: "unknown flag: --agent\n\nUsage:  gh skill <command> [flags]",
-			}),
-		),
-		/requires GitHub CLI 2\.95 or later/,
-	);
-});
+for (const [missing, stderr] of [
+	["the skill command", 'unknown command "skill" for "gh"'],
+	["a skill subcommand", 'unknown command "list" for "gh skill"'],
+	["a flag", "unknown flag: --agent\n\nUsage:  gh skill <command> [flags]"],
+]) {
+	test(`reports an outdated GitHub CLI when gh lacks ${missing}`, async () => {
+		await assert.rejects(
+			runSkillInstall("claude-code", () =>
+				Promise.resolve({ status: 1, stdout: "", stderr }),
+			),
+			/requires GitHub CLI 2\.95 or later/,
+		);
+	});
+}
 
 test("surfaces GitHub CLI skill install failures", async () => {
 	let install = false;

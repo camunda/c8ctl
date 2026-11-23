@@ -637,8 +637,8 @@ function requireSuccessfulSkillCommand(
 		.join("\n");
 	// `gh skill list` (2.94), `install --all` (2.94) and non-interactive
 	// discovery (2.95) are missing from older releases and fail as unknown
-	// commands or flags.
-	if (/unknown (command\s+["']?skill\b|flag:)/i.test(details)) {
+	// commands, subcommands or flags.
+	if (/unknown (command\s+["']?(skill|list)\b|flag:)/i.test(details)) {
 		throw new Error(
 			"`gh skill` requires GitHub CLI 2.95 or later. Upgrade GitHub CLI from https://cli.github.com/.",
 		);
