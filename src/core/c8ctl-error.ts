@@ -32,7 +32,8 @@ export const C8CTL_ERROR_CODES = {
 	"no-deployable-files": "The given paths contain no deployable files.",
 	"duplicate-definition-ids":
 		"Several resources in one deployment share a process or decision ID.",
-	"profile-not-found": "The target profile does not exist.",
+	"profile-not-found": "The profile does not exist (see `field`).",
+	"profile-exists": "A profile with this name already exists.",
 	"invalid-connection":
 		"The cluster configuration is incomplete or invalid, e.g. BASIC auth without a password (see details.issues).",
 	"connection-failed": "The cluster cannot be reached.",

@@ -866,8 +866,9 @@ export function loadProfiles(dataDir?: string): Profile[] {
  * file and `rename`-ing over the target makes the swap atomic: a reader sees
  * either the whole old file or the whole new one, never a partial one.
  */
-export function saveProfiles(profiles: Profile[]): void {
-	const profilesPath = getProfilesPath();
+export function saveProfiles(profiles: Profile[], dataDir?: string): void {
+	if (dataDir !== undefined) mkdirSync(dataDir, { recursive: true });
+	const profilesPath = getProfilesPath(dataDir);
 	const profilesFile: ProfilesFile = { profiles };
 	// Randomise the temp name and open it EXCLUSIVE + no-follow (O_EXCL |
 	// O_NOFOLLOW) below. The old `<pid>.<ms>.tmp` name was predictable, so in a
@@ -931,10 +932,10 @@ export function getProfile(
 }
 
 /**
- * Add a c8ctl profile
+ * Add a c8ctl profile, replacing one with the same name
  */
-export function addProfile(profile: Profile): void {
-	const profiles = loadProfiles();
+export function addProfile(profile: Profile, dataDir?: string): void {
+	const profiles = loadProfiles(dataDir);
 
 	// Check if profile already exists
 	const existingIndex = profiles.findIndex((p) => p.name === profile.name);
@@ -944,25 +945,38 @@ export function addProfile(profile: Profile): void {
 		profiles.push(profile);
 	}
 
-	saveProfiles(profiles);
+	saveProfiles(profiles, dataDir);
 }
 
 /**
- * Remove a c8ctl profile by name
+ * Remove a c8ctl profile by name from profiles.json only; the CLI session
+ * is left as is.
  */
-export function removeProfile(name: string): boolean {
-	const profiles = loadProfiles();
+export function removeStoredProfile(name: string, dataDir?: string): boolean {
+	const profiles = loadProfiles(dataDir);
 	const filtered = profiles.filter((p) => p.name !== name);
 
 	if (filtered.length === profiles.length) {
 		return false;
 	}
 
-	saveProfiles(filtered);
+	saveProfiles(filtered, dataDir);
+	return true;
+}
+
+/**
+ * Remove a c8ctl profile by name, and clear the CLI session's active
+ * profile when it was this one. With an explicit `dataDir`, the session
+ * (which lives in the default data dir) is left as is.
+ */
+export function removeProfile(name: string, dataDir?: string): boolean {
+	if (!removeStoredProfile(name, dataDir)) {
+		return false;
+	}
 
 	// If the removed profile was the active session profile, clear it
 	// so `which profile` doesn't report a ghost profile.
-	if (c8ctl.activeProfile === name) {
+	if (dataDir === undefined && c8ctl.activeProfile === name) {
 		clearActiveProfile();
 	}
 

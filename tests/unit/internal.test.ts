@@ -10,7 +10,13 @@
  */
 
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -200,6 +206,71 @@ function createModelerDir(baseUrl: string): string {
 	return dir;
 }
 
+const SECRETS = [
+	"secret-client-secret",
+	"secret-password",
+	"secret-header-value",
+	"secret-modeler-password",
+	"secret-cloud-secret",
+];
+
+/** Profiles and Modeler connections with every kind of secret. */
+function createProfileDirs(baseUrl: string): {
+	dataDir: string;
+	modelerDir: string;
+} {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-internal-data-"));
+	writeFileSync(
+		join(dataDir, "profiles.json"),
+		JSON.stringify({
+			profiles: [
+				{
+					name: "basic",
+					baseUrl,
+					username: "demo",
+					password: "secret-password",
+					defaultTenantId: "tenant-a",
+					headers: { "X-Api-Key": "secret-header-value" },
+				},
+				{
+					name: "oauth",
+					baseUrl: "https://cluster.example/v2",
+					clientId: "client",
+					clientSecret: "secret-client-secret",
+					oAuthUrl: "https://login.example/oauth/token",
+					audience: "zeebe",
+				},
+			],
+		}),
+	);
+	const modelerDir = mkdtempSync(join(tmpdir(), "c8ctl-internal-modeler-"));
+	writeFileSync(
+		join(modelerDir, "settings.json"),
+		JSON.stringify({
+			"connectionManagerPlugin.c8connections": [
+				{
+					id: "connection-basic",
+					name: "Local",
+					targetType: "selfHosted",
+					contactPoint: baseUrl,
+					authType: "basic",
+					basicAuthUsername: "modeler-user",
+					basicAuthPassword: "secret-modeler-password",
+				},
+				{
+					id: "connection-cloud",
+					name: "SaaS",
+					targetType: "camundaCloud",
+					camundaCloudClusterUrl: "https://bru-2.zeebe.example/abc",
+					camundaCloudClientId: "cloud-client",
+					camundaCloudClientSecret: "secret-cloud-secret",
+				},
+			],
+		}),
+	);
+	return { dataDir, modelerDir };
+}
+
 /**
  * Make every read of the CLI runtime throw. The runtime module is shared
  * with the internal entry point, so a service that reads session or
@@ -246,6 +317,7 @@ describe("@camunda8/cli/internal", () => {
 			"C8CTL_ERROR_CODES",
 			"C8ctlError",
 			"activateJobs",
+			"addProfile",
 			"assignGroup",
 			"assignMappingRule",
 			"assignRole",
@@ -277,6 +349,7 @@ describe("@camunda8/cli/internal", () => {
 			"getProcessDefinitionForm",
 			"getProcessDefinitionXml",
 			"getProcessInstance",
+			"getProfile",
 			"getRole",
 			"getTenant",
 			"getTopology",
@@ -290,6 +363,7 @@ describe("@camunda8/cli/internal", () => {
 			"listMappingRules",
 			"listProcessDefinitions",
 			"listProcessInstances",
+			"listProfiles",
 			"listRoles",
 			"listTenants",
 			"listUserTasks",
@@ -299,6 +373,7 @@ describe("@camunda8/cli/internal", () => {
 			"modifyProcessInstance",
 			"modifyProcessInstances",
 			"publishMessage",
+			"removeProfile",
 			"resolveDeployment",
 			"resolveIncident",
 			"resumeProcessInstance",
@@ -505,6 +580,229 @@ describe("@camunda8/cli/internal", () => {
 			JSON.stringify(incomplete.details?.issues),
 			/CAMUNDA_BASIC_AUTH_PASSWORD/,
 		);
+	});
+
+	test("listProfiles returns profiles and Modeler connections without secrets", async () => {
+		const dirs = createProfileDirs(cluster.baseUrl);
+
+		const result = await api.listProfiles({}, dirs);
+
+		assert.deepStrictEqual(result.items, [
+			{
+				name: "basic",
+				ref: "basic",
+				source: "c8ctl",
+				baseUrl: cluster.baseUrl,
+				authStrategy: "BASIC",
+				tenantId: "tenant-a",
+				username: "demo",
+			},
+			{
+				name: "oauth",
+				ref: "oauth",
+				source: "c8ctl",
+				baseUrl: "https://cluster.example/v2",
+				authStrategy: "OAUTH",
+				clientId: "client",
+				oAuthUrl: "https://login.example/oauth/token",
+				audience: "zeebe",
+			},
+			{
+				name: "modeler:Local",
+				ref: "modeler:connection-basic",
+				source: "modeler",
+				baseUrl: cluster.baseUrl,
+				authStrategy: "BASIC",
+				username: "modeler-user",
+			},
+			{
+				name: "modeler:SaaS",
+				ref: "modeler:connection-cloud",
+				source: "modeler",
+				baseUrl: "https://bru-2.zeebe.example/abc",
+				authStrategy: "OAUTH",
+				clientId: "cloud-client",
+				oAuthUrl: "https://login.cloud.camunda.io/oauth/token",
+			},
+		]);
+		const serialized = JSON.stringify(result);
+		for (const secret of SECRETS) {
+			assert.ok(!serialized.includes(secret), `leaked ${secret}`);
+		}
+	});
+
+	test("listProfiles refs are targets for cluster services", async () => {
+		const dirs = createProfileDirs(cluster.baseUrl);
+		const { items } = await api.listProfiles({}, dirs);
+		const local = items.filter((item) => item.baseUrl === cluster.baseUrl);
+
+		for (const { ref } of local) {
+			const topology = await api.getTopology(
+				{ target: { profile: ref } },
+				dirs,
+			);
+			assert.strictEqual(topology.gatewayVersion, "8.10.0");
+		}
+		const deployed = await api.deploy(
+			{
+				target: { profile: "modeler:connection-basic" },
+				paths: [createProject()],
+			},
+			dirs,
+		);
+
+		assert.deepStrictEqual(
+			local.map((item) => item.ref),
+			["basic", "modeler:connection-basic"],
+		);
+		assert.strictEqual(deployed.deploymentKey, "2251799813685249");
+	});
+
+	test("getProfile resolves a profile or reports `profile-not-found`", async () => {
+		const dirs = createProfileDirs(cluster.baseUrl);
+		const missingDir = join(dirs.dataDir, "missing");
+
+		const byRef = await api.getProfile(
+			{ name: "modeler:connection-cloud" },
+			dirs,
+		);
+		const missing = api.getProfile({ name: "nope" }, { dataDir: missingDir });
+
+		assert.strictEqual(byRef.name, "modeler:SaaS");
+		await assert.rejects(missing, (error: unknown) => {
+			assert.ok(api.isC8ctlError(error));
+			assert.strictEqual(error.code, "profile-not-found");
+			assert.strictEqual(error.field, "name");
+			return true;
+		});
+		assert.ok(!existsSync(missingDir), "a read created the data dir");
+	});
+
+	test("addProfile saves a profile and replaces one only when asked", async () => {
+		const dataDir = join(
+			mkdtempSync(join(tmpdir(), "c8ctl-internal-data-")),
+			"new",
+		);
+		const profile = {
+			name: "added",
+			baseUrl: cluster.baseUrl,
+			username: "demo",
+			password: "secret-password",
+		};
+
+		const added = await api.addProfile({ profile }, { dataDir });
+		const exists = api.addProfile({ profile }, { dataDir });
+		await assert.rejects(exists, (error: unknown) => {
+			assert.ok(api.isC8ctlError(error));
+			assert.strictEqual(error.code, "profile-exists");
+			assert.strictEqual(error.field, "profile.name");
+			return true;
+		});
+		await api.addProfile(
+			{
+				profile: { name: "added", baseUrl: "http://other/v2", tenantId: "t" },
+				replace: true,
+			},
+			{ dataDir },
+		);
+
+		assert.deepStrictEqual(added, { name: "added" });
+		assert.deepStrictEqual(
+			JSON.parse(readFileSync(join(dataDir, "profiles.json"), "utf-8")),
+			{
+				profiles: [
+					{ name: "added", baseUrl: "http://other/v2", defaultTenantId: "t" },
+				],
+			},
+		);
+	});
+
+	test("addProfile rejects reserved names and malformed fields", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-internal-data-"));
+		const codeAndField = (promise: Promise<unknown>) =>
+			promise.then(
+				() => assert.fail("expected the service to fail"),
+				(error: unknown) => {
+					assert.ok(api.isC8ctlError(error), String(error));
+					return [error.code, error.field];
+				},
+			);
+
+		const reserved = await codeAndField(
+			api.addProfile(
+				{ profile: { name: "modeler:x", baseUrl: "http://x/v2" } },
+				{ dataDir },
+			),
+		);
+		const malformed = await codeAndField(
+			api.addProfile(
+				{
+					profile: {
+						name: "x",
+						baseUrl: "http://x/v2",
+						headers: JSON.parse('{ "X-Count": 1 }'),
+					},
+				},
+				{ dataDir },
+			),
+		);
+
+		assert.deepStrictEqual(reserved, ["invalid-input", "profile.name"]);
+		assert.deepStrictEqual(malformed, ["invalid-input", "profile.headers"]);
+		assert.ok(!existsSync(join(dataDir, "profiles.json")));
+	});
+
+	test("removeProfile removes c8ctl profiles only", async () => {
+		const dirs = createProfileDirs(cluster.baseUrl);
+		const codeOf = (promise: Promise<unknown>) =>
+			promise.then(
+				() => assert.fail("expected the service to fail"),
+				(error: unknown) => {
+					assert.ok(api.isC8ctlError(error), String(error));
+					return error.code;
+				},
+			);
+
+		const removed = await api.removeProfile({ name: "basic" }, dirs);
+		const again = await codeOf(api.removeProfile({ name: "basic" }, dirs));
+		const modeler = await codeOf(
+			api.removeProfile({ name: "modeler:Local" }, dirs),
+		);
+
+		assert.deepStrictEqual(removed, { name: "basic" });
+		assert.strictEqual(again, "profile-not-found");
+		assert.strictEqual(modeler, "invalid-input");
+		assert.deepStrictEqual(
+			(await api.listProfiles({}, dirs)).items.map((item) => item.ref),
+			["oauth", "modeler:connection-basic", "modeler:connection-cloud"],
+		);
+	});
+
+	test("profile changes do nothing after the host aborted", async () => {
+		// given
+		const dirs = createProfileDirs(cluster.baseUrl);
+		const signal = AbortSignal.abort();
+		const before = (await api.listProfiles({}, dirs)).items;
+
+		// when
+		const results = await Promise.allSettled([
+			api.addProfile(
+				{ profile: { name: "new", baseUrl: "http://localhost:8080/v2" } },
+				{ ...dirs, signal },
+			),
+			api.removeProfile({ name: "basic" }, { ...dirs, signal }),
+		]);
+
+		// then
+		assert.deepStrictEqual(
+			results.map((result) =>
+				result.status === "rejected" && api.isC8ctlError(result.reason)
+					? result.reason.code
+					: result.status,
+			),
+			["cancelled", "cancelled"],
+		);
+		assert.deepStrictEqual((await api.listProfiles({}, dirs)).items, before);
 	});
 
 	test("deploy rejects with `cancelled` when the host aborts during progress", async () => {

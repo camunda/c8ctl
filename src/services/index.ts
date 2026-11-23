@@ -16,6 +16,7 @@ export * from "./jobs.ts";
 export * from "./messages.ts";
 export * from "./process-definitions.ts";
 export * from "./process-instances.ts";
+export * from "./profiles.ts";
 export * from "./search.ts";
 export * from "./topology.ts";
 export * from "./user-tasks.ts";
