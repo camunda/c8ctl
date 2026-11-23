@@ -3291,12 +3291,15 @@ function readRange(file, start, end) {
  * Byte offset at which the last `count` lines of `file` start. Scans back
  * from the end until enough newlines are found, so a single entry longer
  * than any fixed window is still shown in full. The offset is always at a
- * line start, so decoding from it never splits a UTF-8 character.
+ * line start, so decoding from it never splits a UTF-8 character. Also
+ * returns the identity of the scanned file, to detect a later replacement.
  */
 function tailStart(file, count) {
   const fd = openSync(file, 'r');
   try {
-    const size = fstatSync(fd).size;
+    const stats = fstatSync(fd, { bigint: true });
+    const id = fileIdentity(stats);
+    const size = Number(stats.size);
     const buffer = Buffer.alloc(TAIL_BLOCK_BYTES);
     let newlines = 0;
     for (let end = size; end > 0;) {
@@ -3305,17 +3308,19 @@ function tailStart(file, count) {
       for (let i = bytesRead - 1; i >= 0; i--) {
         // A trailing newline ends the last line rather than starting a new one.
         if (buffer[i] !== NEWLINE || start + i === size - 1) continue;
-        if (++newlines === count) return start + i + 1;
+        if (++newlines === count) return { offset: start + i + 1, id };
       }
       end = start;
     }
-    return 0;
+    return { offset: 0, id };
   } finally {
     closeSync(fd);
   }
 }
 
 const isMissingFile = error => error?.code === 'ENOENT';
+
+const fileIdentity = stats => `${stats.dev}:${stats.ino}`;
 
 /**
  * Follow log files without `tail`, which Windows does not ship. Prints the
@@ -3345,7 +3350,7 @@ export async function followLogFiles(files, {
     try {
       const stats = statSync(file, { bigint: true });
       const size = Number(stats.size);
-      const id = `${stats.dev}:${stats.ino}`;
+      const id = fileIdentity(stats);
       // A replaced file can be as large as the one it rotated out.
       const replaced = entry.id !== undefined && entry.id !== id;
       entry.id = id;
@@ -3365,13 +3370,13 @@ export async function followLogFiles(files, {
 
   const state = new Map();
   for (const file of files) {
-    let offset = 0;
+    let start = { offset: 0, id: undefined };
     try {
-      offset = tailStart(file, FOLLOW_INITIAL_LINES);
+      start = tailStart(file, FOLLOW_INITIAL_LINES);
     } catch (error) {
       if (!isMissingFile(error)) throw error;
     }
-    const entry = { offset, decoder: new StringDecoder('utf8') };
+    const entry = { ...start, decoder: new StringDecoder('utf8') };
     state.set(file, entry);
     // Emitted even when empty, so every file gets its header up front.
     emit(file, readAppended(file, entry));
