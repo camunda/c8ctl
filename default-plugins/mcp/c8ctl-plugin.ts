@@ -46,6 +46,7 @@ Orchestration references --profile, the active saved profile, or the default loc
 Docs uses camunda-docs, needs no cluster profile, and requires sign-in on first use.
 Claude Desktop docs uses npx mcp-remote; other harnesses connect over HTTP.
 VS Code's editor-managed config uses servers. For the newer Copilot harness, select github-copilot.
+On uninstall, --preserve-conflicts leaves entries that no longer match the c8ctl-managed shape untouched instead of failing.
 --dry-run previews selected entries without writing or exposing unrelated config values.`,
 			subcommands: [
 				{
@@ -263,6 +264,7 @@ async function mcpHandler(
 			requested: args.slice(1),
 			operation,
 			...selected,
+			preserveConflicts: flags?.["preserve-conflicts"] === true,
 			connection:
 				operation === "install" && selected.orchestration
 					? buildMcpConnection(ctx.profile)
@@ -294,6 +296,11 @@ export const commands: PluginCommands = {
 				type: "string",
 				rejectEmpty: true,
 				description: "Orchestration server entry name (default: camunda)",
+			},
+			"preserve-conflicts": {
+				type: "boolean",
+				description:
+					"On uninstall, leave conflicting foreign entries untouched instead of failing",
 			},
 		},
 		handler: mcpHandler,

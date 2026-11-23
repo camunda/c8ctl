@@ -23,7 +23,9 @@
  * Child processes: the `c8ctl cluster start` and `stop` self-invocations
  * are faked (a successful `start` flips the health endpoint to UP), `gh`
  * skill installs report success, and browser openers exit quietly. The
- * modeler and skills children run their real plugin code under this
+ * `modeler remove` self-invocation is faked too — running it for real
+ * could uninstall a developer's actual Desktop Modeler. The modeler
+ * install and skills children run their real plugin code under this
  * stub. `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process
  * exit 1 so failure handling is exercised. Everything else passes
  * through.
@@ -40,11 +42,31 @@
  *                                   written to this file as JSON.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "stop-cluster",
- *                                   "install-skills", "list-skills").
+ *                                   "install-skills", "list-skills",
+ *                                   "remove-modeler", "probe-modeler").
+ *   C8CTL_SETUP_STUB_MODELER=absent — the faked `modeler remove --dry-run`
+ *                                   probe reports no managed installation,
+ *                                   so removal previews omit Modeler.
+ *   C8CTL_SETUP_STUB_MODELER=malformed — the probe omits `wouldChange` to
+ *                                   simulate an invalid response.
+ *   C8CTL_SETUP_STUB_MODELER=malformed-target — the probe says removal
+ *                                   would change state but omits its target.
+ *   C8CTL_SETUP_STUB_MODELER=homebrew — preview a Homebrew-managed app.
  *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
  *                                   warning on stderr while succeeding.
  *   C8CTL_SETUP_STUB_SKILL_PATH=path — report a listed skill at this
  *                                   path, for removal safety tests.
+ *   C8CTL_SETUP_STUB_SKILL_SECOND_PATH=path — report a second path for each
+ *                                   installed skill.
+ *   C8CTL_SETUP_STUB_SKILL_APPEAR_AFTER_FIRST_LIST=path and
+ *   C8CTL_SETUP_STUB_SKILL_APPEAR_STATE=file — report an extra path only
+ *                                   after the first `gh skill list`.
+ *   C8CTL_SETUP_STUB_SKILL_NAME_AFTER_FIRST_LIST=name and
+ *   C8CTL_SETUP_STUB_SKILL_NAME_STATE=file — report a changed skill identity
+ *                                   after the first `gh skill list`.
+ *   C8CTL_SETUP_STUB_MCP_CONFLICT_PATH=file — replace the orchestration
+ *                                   entry with a foreign one before the
+ *                                   first `mcp uninstall` child.
  */
 
 import childProcess from "node:child_process";
@@ -169,11 +191,16 @@ function json(body: unknown, status = 200): Response {
 const clusterUpAtBoot = process.env.C8CTL_SETUP_STUB_CLUSTER === "up";
 const failStep = process.env.C8CTL_SETUP_STUB_FAIL;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * Flipped by a successful fake `cluster start`; the health endpoint
  * follows it, so the setup flow observes a cluster that actually came up.
  */
 let clusterRunning = clusterUpAtBoot;
+let mcpConflictInjected = false;
 
 // ── Child processes ────────────────────────────────────────────────
 
@@ -256,6 +283,44 @@ function fakeGh(commandArgs: string[]): {
 				stderr: 'unknown command "skill" for "gh"',
 			};
 		}
+		const appearAfterFirstPath =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_APPEAR_AFTER_FIRST_LIST
+				: undefined;
+		const appearState =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_APPEAR_STATE
+				: undefined;
+		const nameAfterFirstList =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_NAME_AFTER_FIRST_LIST
+				: undefined;
+		const nameState =
+			commandArgs[3] === "claude-code"
+				? process.env.C8CTL_SETUP_STUB_SKILL_NAME_STATE
+				: undefined;
+		const includeAppearingPath =
+			appearAfterFirstPath !== undefined &&
+			appearState !== undefined &&
+			fs.existsSync(appearState);
+		const includeChangedName =
+			nameAfterFirstList !== undefined &&
+			nameState !== undefined &&
+			fs.existsSync(nameState);
+		if (
+			appearAfterFirstPath !== undefined &&
+			appearState !== undefined &&
+			!includeAppearingPath
+		) {
+			fs.writeFileSync(appearState, "listed");
+		}
+		if (
+			nameAfterFirstList !== undefined &&
+			nameState !== undefined &&
+			!includeChangedName
+		) {
+			fs.writeFileSync(nameState, "listed");
+		}
 		// C8CTL_SETUP_STUB_SKILL_UNLIST_AFTER_FIRST=<state file>: the first
 		// list reports installed skills, later lists report none — simulating
 		// an inventory that changed between preview and deletion.
@@ -270,18 +335,31 @@ function fakeGh(commandArgs: string[]): {
 			status: 0,
 			stdout: JSON.stringify(
 				installedSkillNames.flatMap((skillName) => {
-					const path =
+					const paths = [
 						process.env.C8CTL_SETUP_STUB_SKILL_PATH ??
-						join(skillRoot, skillName);
-					return fs.existsSync(path)
-						? [
-								{
-									skillName,
-									sourceURL: "https://github.com/camunda/skills",
-									path,
-								},
-							]
-						: [];
+							join(skillRoot, skillName),
+						...(commandArgs[3] === "claude-code" &&
+						process.env.C8CTL_SETUP_STUB_SKILL_SECOND_PATH
+							? [process.env.C8CTL_SETUP_STUB_SKILL_SECOND_PATH]
+							: []),
+						...(includeAppearingPath &&
+						appearAfterFirstPath !== undefined &&
+						basename(appearAfterFirstPath) === skillName
+							? [appearAfterFirstPath]
+							: []),
+					];
+					return paths
+						.filter(
+							(path) => basename(path) === skillName && fs.existsSync(path),
+						)
+						.map((path) => ({
+							skillName:
+								includeChangedName && nameAfterFirstList !== undefined
+									? nameAfterFirstList
+									: skillName,
+							sourceURL: "https://github.com/camunda/skills",
+							path,
+						}));
 				}),
 			),
 			stderr: "",
@@ -328,6 +406,25 @@ Object.defineProperty(childProcess, "spawn", {
 		const argv = [command, ...(Array.isArray(rest[0]) ? rest[0] : [])].map(
 			String,
 		);
+		const mcpConflictPath = process.env.C8CTL_SETUP_STUB_MCP_CONFLICT_PATH;
+		if (
+			!mcpConflictInjected &&
+			mcpConflictPath &&
+			argv.includes("mcp") &&
+			argv.includes("uninstall")
+		) {
+			const config: unknown = JSON.parse(
+				fs.readFileSync(mcpConflictPath, "utf-8"),
+			);
+			if (!isRecord(config) || !isRecord(config.mcpServers)) {
+				throw new Error("setup-stub: expected an MCP server config");
+			}
+			config.mcpServers.camunda = {
+				url: "https://foreign.example.invalid/mcp",
+			};
+			fs.writeFileSync(mcpConflictPath, JSON.stringify(config));
+			mcpConflictInjected = true;
+		}
 		// setup self-invokes the cluster plugin to start the cluster.
 		if (argv.includes("cluster")) {
 			if (argv.includes("start")) {
@@ -358,6 +455,85 @@ Object.defineProperty(childProcess, "spawn", {
 				});
 			}
 			return fakeChild(1);
+		}
+		// `modeler remove` would uninstall a real Modeler — fake it like the
+		// cluster children. The dry-run probe answers a JSON payload; the
+		// actual removal pretends an app-bundle removal. `modeler install`
+		// keeps running its real plugin code under this stub.
+		if (argv.includes("modeler") && argv.includes("remove")) {
+			const modelerMode = process.env.C8CTL_SETUP_STUB_MODELER;
+			const modelerTarget =
+				modelerMode === "homebrew"
+					? {
+							method: "homebrew-cask",
+							path: "/opt/homebrew/Caskroom/camunda-modeler/5.52.0/Camunda Modeler.app",
+						}
+					: {
+							method: "macos-app-bundle",
+							path: "/Applications/Camunda Modeler.app",
+						};
+			if (argv.includes("--dry-run")) {
+				if (failStep === "probe-modeler") {
+					return fakeChild(1, { stderr: "stubbed modeler probe failure\n" });
+				}
+				if (modelerMode === "malformed") {
+					return fakeChild(0, {
+						stdout: `${JSON.stringify({
+							dryRun: true,
+							command: "modeler remove",
+							message: "Unexpected probe response",
+						})}\n`,
+					});
+				}
+				if (modelerMode === "malformed-target") {
+					return fakeChild(0, {
+						stdout: `${JSON.stringify({
+							dryRun: true,
+							command: "modeler remove",
+							message: "Unexpected probe response",
+							wouldChange: true,
+						})}\n`,
+					});
+				}
+				const absent = modelerMode === "absent";
+				return fakeChild(0, {
+					stdout: `${JSON.stringify({
+						dryRun: true,
+						command: "modeler remove",
+						message: absent
+							? "Camunda Modeler is not installed; run `c8ctl modeler install` first."
+							: modelerMode === "homebrew"
+								? "Dry run: would remove Camunda Modeler with `brew uninstall --cask camunda-modeler`."
+								: "Dry run: would remove the Camunda Modeler app bundle at /Applications/Camunda Modeler.app.",
+						wouldChange: !absent,
+						...(!absent ? { removalTarget: modelerTarget } : {}),
+					})}\n`,
+				});
+			}
+			const spawnOptions = args[2];
+			const childEnv =
+				isRecord(spawnOptions) && isRecord(spawnOptions.env)
+					? spawnOptions.env
+					: undefined;
+			if (
+				childEnv?.C8CTL_SETUP_MODELER_REMOVAL_TARGET !==
+				JSON.stringify(modelerTarget)
+			) {
+				return fakeChild(1, {
+					stderr: "stubbed Modeler target did not match the preview\n",
+				});
+			}
+			if (failStep === "remove-modeler") {
+				return fakeChild(1, {
+					stderr: "stubbed modeler remove failure diagnostics\n",
+				});
+			}
+			return fakeChild(0, {
+				stdout:
+					modelerMode === "homebrew"
+						? "Removed Camunda Modeler with Homebrew.\n"
+						: "Removed Camunda Modeler from /Applications/Camunda Modeler.app.\n",
+			});
 		}
 		// Skill discovery, installation, and updates use the GitHub CLI.
 		if (basename(String(command)) === "gh") {

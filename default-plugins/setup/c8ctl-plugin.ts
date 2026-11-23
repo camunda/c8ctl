@@ -61,15 +61,11 @@ import type {
 	PluginCtx,
 	PluginMetadata,
 } from "../../src/framework/plugins/plugin-loader.ts";
-import {
-	detectMcpHarnesses,
-	writeMcpConfig,
-} from "../../src/utils/command-local/mcp-install-helpers.ts";
+import { detectMcpHarnesses } from "../../src/utils/command-local/mcp-install-helpers.ts";
 import { extractProcessId } from "../../src/utils/command-local/process-instance-helpers.ts";
 import {
 	CAMUNDA_SKILLS_REPOSITORY,
 	detectInstalledHarnesses,
-	removeCamundaSkill,
 } from "../../src/utils/command-local/skills-install-helpers.ts";
 import {
 	removeSetupBlueprint,
@@ -98,6 +94,7 @@ import {
 import { checkPrerequisites, MANUAL_SETUP_LINKS } from "./prerequisites.ts";
 import {
 	inspectSetupRemovalInventory,
+	type SetupModelerRemoval,
 	type SetupRemovalInventory,
 } from "./removal.ts";
 
@@ -298,6 +295,101 @@ function spawnClusterStop(ctx: PluginCtx): Promise<void> {
 	});
 }
 
+/**
+ * Run a c8ctl command as a silent child and parse its JSON stdout. Used
+ * for read-only probes (`modeler remove --dry-run`) where spawnC8ctl's
+ * line forwarding would leak the payload into the removal output. As in
+ * spawnC8ctl, process.execArgv carries test preloads into the child.
+ */
+function captureC8ctlJson(argv: string[]): Promise<unknown> {
+	const label = `c8ctl ${argv.join(" ")}`;
+	return new Promise((resolvePromise, rejectPromise) => {
+		const child = spawn(
+			process.execPath,
+			[...process.execArgv, CLI_ENTRY, ...argv],
+			{
+				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, C8CTL_OUTPUT_MODE: "json" },
+			},
+		);
+		let stdout = "";
+		let stderr = "";
+		child.stdout?.setEncoding("utf-8");
+		child.stderr?.setEncoding("utf-8");
+		child.stdout?.on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.stderr?.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		child.on("error", (error) =>
+			rejectPromise(new Error(`Could not run ${label}: ${error.message}`)),
+		);
+		child.on("close", (code) => {
+			if (code !== 0) {
+				const detail = stderr.trim();
+				rejectPromise(
+					new Error(
+						`${label} failed (exit code ${code}).${detail ? ` ${detail}` : ""}`,
+					),
+				);
+				return;
+			}
+			try {
+				resolvePromise(JSON.parse(stdout));
+			} catch {
+				rejectPromise(
+					new Error(`${label} did not print a JSON payload: ${stdout.trim()}`),
+				);
+			}
+		});
+	});
+}
+
+/**
+ * Probe the modeler plugin's own dry run: it decides whether a managed
+ * Modeler installation exists and describes the removal in its own words,
+ * so setup never duplicates platform-specific detection. A false
+ * `wouldChange` value means there is nothing to remove.
+ */
+async function detectModelerRemoval(): Promise<
+	SetupModelerRemoval | undefined
+> {
+	const payload: unknown = await captureC8ctlJson([
+		"modeler",
+		"remove",
+		"--dry-run",
+	]);
+	if (!isRecord(payload) || typeof payload.wouldChange !== "boolean") {
+		throw new Error(
+			'modeler remove --dry-run returned an invalid response: expected a boolean "wouldChange" field.',
+		);
+	}
+	if (!payload.wouldChange) return undefined;
+	const removalTarget = payload.removalTarget;
+	if (
+		!isRecord(removalTarget) ||
+		typeof removalTarget.method !== "string" ||
+		removalTarget.method.length === 0 ||
+		typeof removalTarget.path !== "string" ||
+		removalTarget.path.length === 0
+	) {
+		throw new Error(
+			'modeler remove --dry-run returned an invalid response: expected a "removalTarget" object with nonempty "method" and "path".',
+		);
+	}
+	return {
+		message:
+			typeof payload.message === "string"
+				? payload.message
+				: "remove Camunda Desktop Modeler",
+		target: {
+			method: removalTarget.method,
+			path: removalTarget.path,
+		},
+	};
+}
+
 /** c8run's launcher exits before the services report healthy — poll for it. */
 const CLUSTER_HEALTH_TIMEOUT_MS = 120_000;
 const CLUSTER_HEALTH_POLL_MS = 2_000;
@@ -482,7 +574,7 @@ async function runSkillsInstall(ctx: PluginCtx): Promise<void> {
 }
 
 /**
- * The core `mcp install` command owns MCP configuration; setup runs it as
+ * The `mcp install` command (mcp plugin) owns MCP configuration; setup runs it as
  * a child process pinned to the local profile (the docs server needs no
  * profile). The child's "MCP configuration: …" lines are the step's
  * takeaway, so they are promoted to essential output while its remaining
@@ -756,6 +848,17 @@ async function executePlan(
 	return { failures, run };
 }
 
+/**
+ * Turn the modeler plugin's dry-run message ("Dry run: would remove …")
+ * into a preview line. The plugin owns the wording; setup only rephrases
+ * the tense. An unrecognized shape is quoted instead of rewritten.
+ */
+function modelerRemovalLine(message: string): string {
+	const match = /^Dry run: would remove (.+)$/.exec(message);
+	if (match) return `Remove ${match[1]}`;
+	return `Remove Camunda Desktop Modeler with \`c8ctl modeler remove\` (${message})`;
+}
+
 function setupRemovalPreview(
 	inventory: SetupRemovalInventory,
 	stopCluster: boolean,
@@ -804,6 +907,12 @@ function setupRemovalPreview(
 		lines.push(`  Warning: ${warning}`);
 	}
 
+	if (inventory.modelerInspectionFailure) {
+		const warning = `Could not inspect the Camunda Desktop Modeler installation: ${inventory.modelerInspectionFailure.message}. Modeler was left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
+	}
+
 	for (const failure of inventory.blueprintPlanningFailures) {
 		const warning = `Could not inspect setup blueprint marker in ${failure.directory}: ${failure.message}. That project was left untouched.`;
 		warnings.push(warning);
@@ -820,6 +929,15 @@ function setupRemovalPreview(
 		lines.push(
 			`  Remove Camunda skill "${skill.name}" for ${skill.harness} (${skill.path}; all contents will be removed)`,
 		);
+	}
+
+	if (inventory.modeler) {
+		items.push({
+			type: "modeler",
+			action: "remove",
+			message: inventory.modeler.message,
+		});
+		lines.push(`  ${modelerRemovalLine(inventory.modeler.message)}`);
 	}
 
 	for (const blueprint of inventory.blueprints) {
@@ -847,7 +965,7 @@ function setupRemovalPreview(
 	if (items.length === 0)
 		lines.push("  No setup-managed components were found.");
 	lines.push(
-		"  Listed skill directories and blueprint files may contain local edits; those contents will be removed. Untracked blueprint files and Desktop Modeler are not removed.",
+		"  Listed skill directories and blueprint files may contain local edits; those contents will be removed. Untracked blueprint files are kept.",
 	);
 	lines.push("Nothing was removed.");
 
@@ -877,7 +995,8 @@ async function applySetupRemoval(
 	let failures =
 		inventory.mcpPlanningFailures.length +
 		inventory.skillDiscoveryFailures.length +
-		inventory.blueprintPlanningFailures.length;
+		inventory.blueprintPlanningFailures.length +
+		(inventory.modelerInspectionFailure ? 1 : 0);
 	for (const failure of inventory.mcpPlanningFailures) {
 		logger.error(
 			`Could not inspect MCP configuration for ${failure.harness}: ${failure.message}. That configuration was left untouched.`,
@@ -891,6 +1010,11 @@ async function applySetupRemoval(
 	for (const failure of inventory.blueprintPlanningFailures) {
 		logger.error(
 			`Could not inspect setup blueprint marker in ${failure.directory}: ${failure.message}. That project was left untouched.`,
+		);
+	}
+	if (inventory.modelerInspectionFailure) {
+		logger.error(
+			`Could not inspect the Camunda Desktop Modeler installation: ${inventory.modelerInspectionFailure.message}. Modeler was left untouched.`,
 		);
 	}
 
@@ -907,9 +1031,31 @@ async function applySetupRemoval(
 		}
 	}
 
+	// The mcp plugin owns MCP teardown. One child per harness keeps a
+	// single unreadable config from blocking the other harnesses; the
+	// child's own output is redundant next to the per-server lines below,
+	// which mirror the previewed inventory. The child is scoped to the
+	// previewed targets: a managed entry added while the confirmation was
+	// open belongs to a target the user never confirmed, so --docs or
+	// --orchestration is omitted accordingly. A selected entry that becomes
+	// foreign after the preview makes the child fail instead of being
+	// preserved silently and reported as removed.
 	for (const { plan, servers } of inventory.mcp) {
+		if (servers.length === 0) continue; // preserved-only: nothing to remove
+		const targets = [
+			servers.includes("camunda-docs") ? "--docs" : undefined,
+			servers.some((server) => server !== "camunda-docs")
+				? "--orchestration"
+				: undefined,
+		].filter((flag) => flag !== undefined);
 		try {
-			writeMcpConfig(plan);
+			await spawnC8ctl(
+				ctx,
+				["mcp", "uninstall", plan.harness, ...targets],
+				// stderr stays visible: a failing child's diagnostics are
+				// otherwise suppressed with the rest of the quiet output.
+				{ skipStdoutLine: () => true, stderrPassthrough: true },
+			);
 			for (const server of servers) {
 				logger.info(
 					`Removed MCP server "${server}" for ${plan.harness} from ${plan.path}.`,
@@ -926,20 +1072,65 @@ async function applySetupRemoval(
 		}
 	}
 
-	for (const skill of inventory.skills) {
+	// The skills plugin owns skill removal — including its
+	// revalidation-before-delete check. One child per harness, mirroring
+	// the install step's failure granularity. Pass every confirmed
+	// name/path pair: a same-named skill installed while confirmation was
+	// open is outside the preview and must remain untouched.
+	for (const harness of new Set(
+		inventory.skills.map((skill) => skill.harness),
+	)) {
+		const skills = inventory.skills.filter(
+			(skill) => skill.harness === harness,
+		);
+		const names = skills.map((skill) => skill.name);
+		const skillPaths = skills.flatMap((skill) => ["--skill-path", skill.path]);
 		try {
-			removeCamundaSkill(skill);
-			logger.info(
-				`Removed Camunda skill "${skill.name}" for ${skill.harness} (${skill.path}).`,
-				{ essential: true },
+			await spawnC8ctl(
+				ctx,
+				[
+					"skills",
+					"remove",
+					...names,
+					"--harness",
+					harness,
+					...skillPaths,
+					"--yes",
+				],
+				{
+					skipStdoutLine: (line) =>
+						line === "Skills removal preview:" ||
+						line.startsWith("  Remove Camunda skill") ||
+						line === "Skills removal finished.",
+					promoteStdoutLine: (line) => line.startsWith("Removed Camunda skill"),
+					stderrPassthrough: true,
+				},
 			);
 		} catch (error) {
 			failures += 1;
-			removalFailure(
-				ctx,
-				`remove Camunda skill "${skill.name}" for ${skill.harness}`,
-				error,
-			);
+			removalFailure(ctx, `remove Camunda skills for ${harness}`, error);
+		}
+	}
+
+	// The modeler plugin owns Modeler teardown. The inventory probe ran
+	// its dry run, so a child that now finds nothing reports a no-op
+	// instead of failing.
+	if (inventory.modeler) {
+		try {
+			await spawnC8ctl(ctx, ["modeler", "remove"], {
+				promoteStdoutLine: (line) => line.includes("Modeler"),
+				// Registration-cleanup warnings and failure diagnostics ride
+				// stderr — keep them visible in quiet removal runs.
+				stderrPassthrough: true,
+				extraEnv: {
+					C8CTL_SETUP_MODELER_REMOVAL_TARGET: JSON.stringify(
+						inventory.modeler.target,
+					),
+				},
+			});
+		} catch (error) {
+			failures += 1;
+			removalFailure(ctx, "remove Camunda Desktop Modeler", error);
 		}
 	}
 
@@ -987,7 +1178,9 @@ async function runSetupRemoval(
 	stopCluster: boolean,
 ): Promise<void> {
 	const { logger } = ctx;
-	const inventory = await inspectSetupRemovalInventory();
+	const inventory = await inspectSetupRemovalInventory({
+		detectModeler: detectModelerRemoval,
+	});
 	const preview = setupRemovalPreview(inventory, stopCluster);
 	const jsonMode = logger.mode === "json";
 
@@ -1004,7 +1197,8 @@ async function runSetupRemoval(
 		if (
 			inventory.mcpPlanningFailures.length > 0 ||
 			inventory.skillDiscoveryFailures.length > 0 ||
-			inventory.blueprintPlanningFailures.length > 0
+			inventory.blueprintPlanningFailures.length > 0 ||
+			inventory.modelerInspectionFailure
 		) {
 			process.exitCode = 1;
 		}
@@ -1243,7 +1437,7 @@ A run without a selection (piped output, CI) installs nothing unless you pass --
 
 Exit code 0: every selected setup step succeeded, or nothing was installed for lack of a go-ahead (wizard cancelled with Escape; a piped, --quiet or JSON-mode run without --yes; --json or --dry-run printing the plan). Ctrl+C ends the wizard by signal (130 on POSIX shells). A re-run reuses finished work where possible; the deploy, process start and skills install repeat by design. Exit code 1: arguments failed validation, or a step failed — other eligible steps still ran, while dependents (and the deploy finale after any failure) were skipped.
 
---remove shows setup-managed MCP entries, Camunda skills, and marker-listed blueprint files before removing them. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. Desktop Modeler is not removed. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
+--remove shows setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, and marker-listed blueprint files before removing them. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Removal runs the owning commands: mcp uninstall, skills remove, and modeler remove. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
 
 --stop-cluster is available only with --remove. It stops the local cluster without purging runtime data or deleting downloaded binaries.
 
@@ -1301,7 +1495,7 @@ export const commands: PluginCommands = {
 			remove: {
 				type: "boolean",
 				description:
-					"Preview and remove setup-managed MCP entries, skills, and blueprint files",
+					"Preview and remove setup-managed MCP entries, skills, Modeler, and blueprint files",
 			},
 			"stop-cluster": {
 				type: "boolean",

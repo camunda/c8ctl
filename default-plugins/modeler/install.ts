@@ -38,6 +38,12 @@ export interface ModelerInstallContext {
 	isDryRun: boolean;
 	logger: Logger;
 	quiet: boolean;
+	expectedRemovalTarget?: ModelerRemovalTarget;
+}
+
+export interface ModelerRemovalTarget {
+	readonly method: string;
+	readonly path: string;
 }
 
 /**
@@ -1213,13 +1219,39 @@ function noModelerInstalled(): ModelerInstallResult {
 	};
 }
 
+function verifyExpectedRemovalTarget(
+	ctx: ModelerInstallContext,
+	target: ModelerRemovalTarget | undefined,
+): void {
+	const expected = ctx.expectedRemovalTarget;
+	if (
+		expected !== undefined &&
+		(target === undefined ||
+			target.method !== expected.method ||
+			target.path !== expected.path)
+	) {
+		throw new Error(
+			"Camunda Modeler installation changed after the setup preview; refusing to remove a different target. Run `c8ctl setup --remove` again to review the current installation.",
+		);
+	}
+}
+
 function dryRunResult(
 	command: "modeler update" | "modeler remove",
 	message: string,
+	removalTarget?: ModelerRemovalTarget,
 ): ModelerInstallResult {
 	return {
 		kind: "dryRun",
-		info: { dryRun: true, command, message },
+		// `wouldChange` lets automation (c8ctl setup --remove) tell a real
+		// preview apart from a normalized "nothing to do" info result.
+		info: {
+			dryRun: true,
+			command,
+			message,
+			wouldChange: true,
+			...(removalTarget === undefined ? {} : { removalTarget }),
+		},
 	};
 }
 
@@ -1551,6 +1583,7 @@ function removeWindowsModeler(
 				`winget is not available, so c8ctl cannot safely remove the Modeler installation at ${installDir}.`,
 			);
 		}
+		verifyExpectedRemovalTarget(ctx, undefined);
 		return noModelerInstalled();
 	}
 	if (
@@ -1566,12 +1599,16 @@ function removeWindowsModeler(
 				`Camunda Modeler at ${installDir} is not installed with winget; refusing to remove it.`,
 			);
 		}
+		verifyExpectedRemovalTarget(ctx, undefined);
 		return noModelerInstalled();
 	}
+	const removalTarget = { method: "winget-package", path: installDir };
+	verifyExpectedRemovalTarget(ctx, removalTarget);
 	if (ctx.isDryRun) {
 		return dryRunResult(
 			"modeler remove",
 			"Dry run: would remove Camunda Modeler with `winget uninstall --id Camunda.Modeler --exact --source winget`.",
+			removalTarget,
 		);
 	}
 
@@ -1822,11 +1859,20 @@ async function updateLinuxModeler(
 
 function removeLinuxModeler(ctx: ModelerInstallContext): ModelerInstallResult {
 	const installation = linuxModelerForAction("remove");
-	if (!installation) return noModelerInstalled();
+	if (!installation) {
+		verifyExpectedRemovalTarget(ctx, undefined);
+		return noModelerInstalled();
+	}
+	const removalTarget = {
+		method: "linux-managed-install",
+		path: installation.installDir,
+	};
+	verifyExpectedRemovalTarget(ctx, removalTarget);
 	if (ctx.isDryRun) {
 		return dryRunResult(
 			"modeler remove",
 			`Dry run: would remove Camunda Modeler ${installation.version} from ${installation.installDir} and unregister its file types.`,
+			removalTarget,
 		);
 	}
 
@@ -1867,21 +1913,35 @@ async function removeMacModeler(
 	ctx: ModelerInstallContext,
 ): Promise<ModelerInstallResult> {
 	if (hasPackageManager("brew", "Homebrew") && homebrewModelerInstalled()) {
-		if (ctx.isDryRun) {
-			return dryRunResult(
-				"modeler remove",
-				"Dry run: would remove Camunda Modeler with `brew uninstall --cask camunda-modeler`.",
-			);
-		}
-
 		let appPath: string | undefined;
 		try {
 			appPath = resolveHomebrewModelerPath();
 		} catch (error) {
+			if (ctx.isDryRun || ctx.expectedRemovalTarget !== undefined) {
+				throw error;
+			}
 			ctx.logger.warn(
 				`Could not locate the Homebrew Modeler bundle before uninstalling it: ${errorMessage(error)}`,
 			);
 		}
+		const removalTarget =
+			appPath === undefined
+				? undefined
+				: { method: "homebrew-cask", path: appPath };
+		verifyExpectedRemovalTarget(ctx, removalTarget);
+		if (ctx.isDryRun) {
+			if (removalTarget === undefined) {
+				throw new Error(
+					"Could not identify the Homebrew Modeler target for the removal preview.",
+				);
+			}
+			return dryRunResult(
+				"modeler remove",
+				"Dry run: would remove Camunda Modeler with `brew uninstall --cask camunda-modeler`.",
+				removalTarget,
+			);
+		}
+
 		reportProgress(ctx, "Removing Camunda Modeler with Homebrew...");
 		runCommand("brew", ["uninstall", "--cask", "camunda-modeler"], {
 			failureMessage: "Homebrew could not remove Camunda Modeler",
@@ -1895,7 +1955,12 @@ async function removeMacModeler(
 	}
 
 	const appPath = findInstalledModeler();
-	if (!appPath) return noModelerInstalled();
+	if (!appPath) {
+		verifyExpectedRemovalTarget(ctx, undefined);
+		return noModelerInstalled();
+	}
+	const removalTarget = { method: "macos-app-bundle", path: appPath };
+	verifyExpectedRemovalTarget(ctx, removalTarget);
 	if (isHomebrewCaskPath(appPath)) {
 		throw new Error(
 			"Camunda Modeler appears to be Homebrew-managed, but its cask was not found; refusing to remove the app bundle directly.",
@@ -1906,6 +1971,7 @@ async function removeMacModeler(
 		return dryRunResult(
 			"modeler remove",
 			`Dry run: would remove the Camunda Modeler app bundle at ${appPath}.`,
+			removalTarget,
 		);
 	}
 	reportProgress(ctx, `Removing Camunda Modeler from ${appPath}...`);

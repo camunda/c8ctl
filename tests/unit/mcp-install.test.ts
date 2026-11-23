@@ -566,6 +566,52 @@ test("concurrent writers serialize on a per-target lock", async (t) => {
 	assert.equal(existsSync(`${targetPath}.lock`), false);
 });
 
+test("uninstall --preserve-conflicts keeps a foreign entry instead of failing", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	const installed = await s.run(
+		"mcp",
+		"install",
+		"claude-code",
+		"--docs",
+		"--orchestration",
+	);
+	assert.equal(installed.status, 0, installed.stderr);
+
+	// Replace the orchestration entry with a foreign one under the same
+	// name; the docs entry stays c8ctl-managed.
+	const config = configAt(s.paths["claude-code"]);
+	assert.ok(isRecord(config.mcpServers));
+	config.mcpServers.camunda = { url: "https://foreign.example.invalid/mcp" };
+	s.write("claude-code", JSON.stringify(config));
+
+	const conflict = await s.run(
+		"mcp",
+		"uninstall",
+		"claude-code",
+		"--docs",
+		"--orchestration",
+	);
+	assert.equal(conflict.status, 1, conflict.stderr);
+	assert.match(conflict.stderr, /conflicts/);
+
+	const preserved = await s.run(
+		"mcp",
+		"uninstall",
+		"claude-code",
+		"--docs",
+		"--orchestration",
+		"--preserve-conflicts",
+	);
+	assert.equal(preserved.status, 0, preserved.stderr);
+	const servers = serversAt(s.paths["claude-code"], "claude-code");
+	assert.deepEqual(servers.camunda, {
+		url: "https://foreign.example.invalid/mcp",
+	});
+	assert.equal(servers["camunda-docs"], undefined);
+});
+
 test("MCP help and shell completions expose target selection and uninstall", async () => {
 	const help = await c8WithOptions(
 		{ env: { C8CTL_OUTPUT_MODE: "text" } },
@@ -575,12 +621,17 @@ test("MCP help and shell completions expose target selection and uninstall", asy
 	assert.equal(help.status, 0, help.stderr);
 	assert.match(help.stdout, /--orchestration/);
 	assert.match(help.stdout, /--docs/);
+	assert.match(help.stdout, /--preserve-conflicts/);
 	assert.match(help.stdout, /uninstall/);
 	for (const shell of ["bash", "zsh", "fish"]) {
 		const completion = await c8("completion", shell);
 		assert.equal(completion.status, 0, completion.stderr);
 		assert.match(completion.stdout, /orchestration/);
 		assert.match(completion.stdout, /docs/);
+		assert.match(
+			completion.stdout,
+			shell === "fish" ? /-l preserve-conflicts/ : /--preserve-conflicts/,
+		);
 	}
 });
 

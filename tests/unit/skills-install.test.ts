@@ -355,7 +355,7 @@ test("surfaces GitHub CLI skill install failures", async () => {
 	assert.equal(install, true);
 });
 
-test("skills help documents the lifecycle actions and harness selector", async () => {
+test("skills help documents lifecycle actions and removal selectors", async () => {
 	const result = await c8("help", "skills");
 
 	assert.equal(result.status, 0, result.stderr);
@@ -365,7 +365,15 @@ test("skills help documents the lifecycle actions and harness selector", async (
 	assert.match(result.stdout, /"name":"list"/);
 	assert.match(result.stdout, /"name":"remove"/);
 	assert.match(result.stdout, /--harness/i);
+	assert.match(result.stdout, /--skill-path/i);
 	assert.match(result.stdout, /--dry-run/i);
+});
+
+test("skills completion includes the exact path removal selector", async () => {
+	const result = await c8("completion", "bash");
+
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /--skill-path/);
 });
 
 test("skills help explains local-edit preservation and explicit restoration", async () => {
@@ -661,18 +669,14 @@ test("skills remove leaves installations untouched when discovery fails", async 
 	}
 });
 
-test("skills remove rejects extra positionals before discovery", async () => {
+test("skills remove rejects unknown skill names, deleting nothing", async () => {
 	const fixture = createSkillFixture();
 	try {
-		for (const positional of ["cursor", "camunda-c8ctl"]) {
+		// "cursor" is a harness id, not an installed skill — a likely slip
+		// for `--harness cursor`; "bogus" names nothing at all.
+		for (const positional of ["cursor", "bogus"]) {
 			const result = await c8WithOptions(
-				{
-					...fixture.options,
-					env: {
-						...fixture.options.env,
-						C8CTL_SETUP_STUB_FAIL: "list-skills",
-					},
-				},
+				fixture.options,
 				"skills",
 				"remove",
 				positional,
@@ -682,8 +686,138 @@ test("skills remove rejects extra positionals before discovery", async () => {
 			assert.equal(result.status, 1);
 			assert.match(
 				result.stderr,
-				/skills remove does not accept positional arguments.*--harness/,
+				new RegExp(`Unknown Camunda skill "${positional}"`),
 			);
+			assert.match(result.stderr, /nothing was removed/);
+			assert.ok(existsSync(fixture.skillDirectory));
+		}
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills remove constrains deletion to the named skills", async () => {
+	const fixture = createSkillFixture();
+	const otherSkillDirectory = join(fixture.skillRoot, "camunda-bpmn");
+	mkdirSync(otherSkillDirectory);
+	writeFileSync(join(otherSkillDirectory, "SKILL.md"), "# Camunda BPMN\n");
+	writeFileSync(
+		join(fixture.skillRoot, ".c8ctl-installed"),
+		"camunda-c8ctl\ncamunda-bpmn\n",
+	);
+	try {
+		const preview = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"camunda-bpmn",
+			"--dry-run",
+		);
+		assert.equal(preview.status, 0, preview.stderr);
+		const payload = JSON.parse(preview.stdout);
+		assert.deepEqual(
+			payload.items.map((item: { name: string }) => item.name),
+			["camunda-bpmn"],
+		);
+
+		const removed = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"camunda-bpmn",
+			"--yes",
+		);
+		assert.equal(removed.status, 0, removed.stderr);
+		assert.match(removed.stdout, /Removed Camunda skill "camunda-bpmn"/);
+		assert.doesNotMatch(removed.stdout, /camunda-c8ctl/);
+		assert.ok(!existsSync(otherSkillDirectory));
+		assert.ok(existsSync(fixture.skillDirectory));
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills remove validates each requested name and exact path pair", async () => {
+	const fixture = createSkillFixture();
+	try {
+		const unlistedPath = join(
+			fixture.home,
+			".claude-alt",
+			"skills",
+			"camunda-c8ctl",
+		);
+		const rejected = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"camunda-c8ctl",
+			"--skill-path",
+			unlistedPath,
+			"--yes",
+		);
+		assert.equal(rejected.status, 1);
+		assert.match(rejected.stderr, /not installed/);
+		assert.ok(existsSync(fixture.skillDirectory));
+
+		const removed = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"camunda-c8ctl",
+			"--skill-path",
+			fixture.skillDirectory,
+			"--yes",
+		);
+		assert.equal(removed.status, 0, removed.stderr);
+		assert.ok(!existsSync(fixture.skillDirectory));
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills remove refuses to delete a path whose skill identity changed", async () => {
+	const fixture = createSkillFixture();
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_SKILL_NAME_AFTER_FIRST_LIST: "camunda-bpmn",
+					C8CTL_SETUP_STUB_SKILL_NAME_STATE: join(
+						fixture.root,
+						"name-change-state",
+					),
+				},
+			},
+			"skills",
+			"remove",
+			"camunda-c8ctl",
+			"--skill-path",
+			fixture.skillDirectory,
+			"--yes",
+		);
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /inventory changed/);
+		assert.ok(existsSync(fixture.skillDirectory));
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills path selector is rejected by non-removal subcommands", async () => {
+	const fixture = createSkillFixture();
+	try {
+		for (const subcommand of ["install", "list"]) {
+			const result = await c8WithOptions(
+				fixture.options,
+				"skills",
+				subcommand,
+				"--skill-path",
+				fixture.skillDirectory,
+			);
+			assert.equal(result.status, 1);
+			assert.match(result.stderr, /--skill-path can only be used/);
 			assert.ok(existsSync(fixture.skillDirectory));
 		}
 	} finally {

@@ -885,8 +885,13 @@ describe("CLI behavioural: modeler install", () => {
 		try {
 			const dryRun = await sandbox.remove({}, "--dry-run", "--json");
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
-			assert.strictEqual(parseJson(dryRun).command, "modeler remove");
-			assert.match(String(parseJson(dryRun).message), /would remove/);
+			const preview = parseJson(dryRun);
+			assert.strictEqual(preview.command, "modeler remove");
+			assert.deepStrictEqual(preview.removalTarget, {
+				method: "macos-app-bundle",
+				path: "/Applications/Camunda Modeler.app",
+			});
+			assert.match(String(preview.message), /would remove/);
 			assert.ok(existsSync(appPath));
 
 			sandbox.resetToolCalls();
@@ -935,6 +940,7 @@ describe("CLI behavioural: modeler install", () => {
 		const sandbox = createSandbox();
 		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
 		mkdirSync(appPath);
+		const homebrewEnv = { BREW_APP_PATH: appPath };
 		sandbox.fakeTool(
 			"brew",
 			[
@@ -949,9 +955,14 @@ describe("CLI behavioural: modeler install", () => {
 		);
 
 		try {
-			const dryRun = await sandbox.remove({}, "--dry-run", "--json");
+			const dryRun = await sandbox.remove(homebrewEnv, "--dry-run", "--json");
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
-			assert.match(String(parseJson(dryRun).message), /brew uninstall --cask/);
+			const preview = parseJson(dryRun);
+			assert.deepStrictEqual(preview.removalTarget, {
+				method: "homebrew-cask",
+				path: realpathSync(appPath),
+			});
+			assert.match(String(preview.message), /brew uninstall --cask/);
 			assert.ok(
 				!sandbox
 					.toolCalls()
@@ -959,7 +970,7 @@ describe("CLI behavioural: modeler install", () => {
 			);
 
 			sandbox.resetToolCalls();
-			const removed = await sandbox.remove({ BREW_APP_PATH: appPath });
+			const removed = await sandbox.remove(homebrewEnv);
 			assert.strictEqual(removed.status, 0, removed.stderr);
 			assert.match(removed.stdout, /Removed Camunda Modeler with Homebrew/);
 			assert.deepStrictEqual(sandbox.toolCalls(), [
@@ -969,6 +980,69 @@ describe("CLI behavioural: modeler install", () => {
 				"brew uninstall --cask camunda-modeler",
 				`lsregister -u -f ${realpathSync(appPath)}`,
 			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("refuses to fall back to a direct app after a Homebrew removal preview", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+		writeMacApp(appPath, "5.52.0");
+		sandbox.fakeTool(
+			"brew",
+			[
+				'case "$*" in',
+				'  "--version") exit 0 ;;',
+				'  "list --cask --versions camunda-modeler") exit 1 ;;',
+				"  *) exit 1 ;;",
+				"esac",
+			].join("\n"),
+		);
+
+		try {
+			const removed = await sandbox.remove({
+				C8CTL_SETUP_MODELER_REMOVAL_TARGET: JSON.stringify({
+					method: "homebrew-cask",
+					path: "/opt/homebrew/Caskroom/camunda-modeler/5.52.0/Camunda Modeler.app",
+				}),
+			});
+			const output = `${removed.stdout}\n${removed.stderr}`;
+			assert.strictEqual(removed.status, 1, output);
+			assert.match(output, /installation changed after the setup preview/);
+			assert.ok(existsSync(appPath));
+			assert.ok(
+				!sandbox
+					.toolCalls()
+					.some((call) => call === "brew uninstall --cask camunda-modeler"),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("refuses to remove a direct app at a different path than the preview", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		const appPath = join(sandbox.home, "Applications", MODELER_BUNDLE);
+		writeMacApp(appPath, "5.52.0");
+
+		try {
+			const removed = await sandbox.remove({
+				C8CTL_SETUP_MODELER_REMOVAL_TARGET: JSON.stringify({
+					method: "macos-app-bundle",
+					path: "/Applications/Camunda Modeler.app",
+				}),
+			});
+			const output = `${removed.stdout}\n${removed.stderr}`;
+			assert.strictEqual(removed.status, 1, output);
+			assert.match(output, /installation changed after the setup preview/);
+			assert.ok(existsSync(appPath));
 		} finally {
 			sandbox.cleanup();
 		}
@@ -1473,8 +1547,13 @@ describe("CLI behavioural: modeler install", () => {
 				"--json",
 			);
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
-			assert.strictEqual(parseJson(dryRun).command, "modeler remove");
-			assert.match(String(parseJson(dryRun).message), /winget uninstall/);
+			const preview = parseJson(dryRun);
+			assert.strictEqual(preview.command, "modeler remove");
+			assert.deepStrictEqual(preview.removalTarget, {
+				method: "winget-package",
+				path: sandbox.installDir,
+			});
+			assert.match(String(preview.message), /winget uninstall/);
 			assert.ok(existsSync(executable));
 			assert.ok(existsSync(sandbox.shortcut));
 
@@ -2024,8 +2103,13 @@ describe("CLI behavioural: modeler install", () => {
 				"--json",
 			);
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
-			assert.strictEqual(parseJson(dryRun).command, "modeler remove");
-			assert.match(String(parseJson(dryRun).message), /would remove/);
+			const preview = parseJson(dryRun);
+			assert.strictEqual(preview.command, "modeler remove");
+			assert.deepStrictEqual(preview.removalTarget, {
+				method: "linux-managed-install",
+				path: "/usr/bin/camunda-modeler-5.52.0-linux-x64",
+			});
+			assert.match(String(preview.message), /would remove/);
 			assert.ok(existsSync(installed.installDir));
 			assert.ok(existsSync(installed.launcher));
 			assert.deepStrictEqual(sandbox.toolCalls(), []);
