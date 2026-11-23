@@ -142,7 +142,7 @@ export const SETUP_BLUEPRINTS = [
 			"            npm start",
 			`  Python:   cd "${join(projectDir, "python")}"`,
 			"            python -m venv .venv",
-			"            source .venv/bin/activate   (Windows: .venv\\Scripts\\activate)",
+			"            source .venv/bin/activate   # Windows: .venv\\Scripts\\activate",
 			"            pip install -r requirements.txt",
 			"            python main.py",
 			`  Java:     mvn -f "${join(projectDir, "java")}" spring-boot:run`,

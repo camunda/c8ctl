@@ -2062,7 +2062,7 @@ describe("c8ctl setup", () => {
 			assert.match(out, /python -m venv \.venv/);
 			assert.match(
 				out,
-				/source \.venv\/bin\/activate\s+\(Windows: \.venv\\Scripts\\activate\)/,
+				/source \.venv\/bin\/activate\s+# Windows: \.venv\\Scripts\\activate/,
 			);
 			assert.match(out, /pip install -r requirements\.txt/);
 			assert.match(out, /python main\.py/);
