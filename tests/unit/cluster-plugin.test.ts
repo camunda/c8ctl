@@ -2671,6 +2671,44 @@ describe("Cluster Plugin – followLogFiles", () => {
 
 		assert.strictEqual(output, "old line one\nold line two\nnew\n");
 	});
+
+	test("prints the last lines in full however long they are", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		// Longer than any fixed read-back window, e.g. a large stack trace.
+		const longLine = "é".repeat(100_000);
+		writeFileSync(camunda, `before\nlast but one\n${longLine}\n`);
+
+		const output = await follow([camunda], () => {});
+
+		const expected = `before\nlast but one\n${longLine}\n`;
+		// Keep a failure readable rather than diffing 100,000 characters.
+		assert.ok(
+			output === expected,
+			`expected all ${expected.length} characters, got ${output.length}: ${JSON.stringify(output.slice(0, 40))}`,
+		);
+	});
+
+	test("keeps an unterminated last line as-is so appends continue it", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "one\ntwo");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "one\ntwo more\n");
+		});
+
+		assert.strictEqual(output, "one\ntwo more\n");
+	});
+
+	test("keeps following while a file is briefly missing", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			rmSync(camunda);
+		});
+
+		assert.strictEqual(output, "first\n");
+	});
 });
 
 // ---------------------------------------------------------------------------

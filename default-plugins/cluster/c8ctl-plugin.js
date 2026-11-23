@@ -13,6 +13,7 @@ import {
   closeSync,
   createWriteStream,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   writeFileSync,
@@ -3271,8 +3272,9 @@ const LOG_FILES = ['camunda.log', 'connectors.log'];
 
 // Like `tail -f`: show the last lines of each file, then follow appends.
 const FOLLOW_INITIAL_LINES = 10;
-// Only the end of a log is needed for the initial lines; logs can be large.
-const FOLLOW_INITIAL_BYTES = 64 * 1024;
+// Logs can be large, so the initial lines are found by scanning back in blocks.
+const TAIL_BLOCK_BYTES = 64 * 1024;
+const NEWLINE = 0x0a;
 
 function readRange(file, start, end) {
   const fd = openSync(file, 'r');
@@ -3285,12 +3287,35 @@ function readRange(file, start, end) {
   }
 }
 
-function lastLines(text, count, startsMidLine) {
-  const lines = text.split('\n');
-  if (startsMidLine) lines.shift();
-  if (lines.at(-1) === '') lines.pop();
-  return lines.slice(-count).map(line => `${line}\n`).join('');
+/**
+ * Byte offset at which the last `count` lines of `file` start. Scans back
+ * from the end until enough newlines are found, so a single entry longer
+ * than any fixed window is still shown in full. The offset is always at a
+ * line start, so decoding from it never splits a UTF-8 character.
+ */
+function tailStart(file, count) {
+  const fd = openSync(file, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const buffer = Buffer.alloc(TAIL_BLOCK_BYTES);
+    let newlines = 0;
+    for (let end = size; end > 0;) {
+      const start = Math.max(0, end - buffer.length);
+      const bytesRead = readSync(fd, buffer, 0, end - start, start);
+      for (let i = bytesRead - 1; i >= 0; i--) {
+        // A trailing newline ends the last line rather than starting a new one.
+        if (buffer[i] !== NEWLINE || start + i === size - 1) continue;
+        if (++newlines === count) return start + i + 1;
+      }
+      end = start;
+    }
+    return 0;
+  } finally {
+    closeSync(fd);
+  }
 }
+
+const isMissingFile = error => error?.code === 'ENOENT';
 
 /**
  * Follow log files without `tail`, which Windows does not ship. Prints the
@@ -3313,44 +3338,69 @@ export async function followLogFiles(files, {
     if (text) write(text);
   };
 
-  const state = new Map();
-  for (const file of files) {
-    const size = statSync(file).size;
-    const start = Math.max(0, size - FOLLOW_INITIAL_BYTES);
-    const initial = readRange(file, start, size);
-    state.set(file, { offset: start + initial.length, decoder: new StringDecoder('utf8') });
-    emit(file, lastLines(initial.toString('utf-8'), FOLLOW_INITIAL_LINES, start > 0));
-  }
-
-  const poll = () => {
-    for (const file of files) {
-      const entry = state.get(file);
-      let size;
-      try {
-        size = statSync(file).size;
-      } catch {
-        // Briefly missing while being rotated; pick it up on a later poll.
-        continue;
-      }
+  // Reads whatever was appended since the last read. A file can vanish at
+  // any point while it is rotated, so a missing file just yields nothing
+  // and is picked up again on a later poll.
+  const readAppended = (file, entry) => {
+    try {
+      const size = statSync(file).size;
       if (size < entry.offset) {
         entry.offset = 0;
         entry.decoder = new StringDecoder('utf8');
       }
-      if (size === entry.offset) continue;
+      if (size === entry.offset) return '';
       const chunk = readRange(file, entry.offset, size);
       entry.offset += chunk.length;
-      const text = entry.decoder.write(chunk);
+      return entry.decoder.write(chunk);
+    } catch (error) {
+      if (isMissingFile(error)) return '';
+      throw error;
+    }
+  };
+
+  const state = new Map();
+  for (const file of files) {
+    let offset = 0;
+    try {
+      offset = tailStart(file, FOLLOW_INITIAL_LINES);
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    const entry = { offset, decoder: new StringDecoder('utf8') };
+    state.set(file, entry);
+    // Emitted even when empty, so every file gets its header up front.
+    emit(file, readAppended(file, entry));
+  }
+
+  const poll = () => {
+    for (const file of files) {
+      const text = readAppended(file, state.get(file));
       if (text) emit(file, text);
     }
   };
 
-  await new Promise(resolve => {
-    const timer = setInterval(poll, intervalMs);
-    const stop = () => {
+  await new Promise((resolve, reject) => {
+    let timer;
+    const settle = error => {
       clearInterval(timer);
-      poll();
-      resolve();
+      signal?.removeEventListener('abort', stop);
+      if (error) reject(error);
+      else resolve();
     };
+    // An unexpected read error ends following instead of escaping the timer.
+    const tick = () => {
+      try {
+        poll();
+        return true;
+      } catch (error) {
+        settle(error);
+        return false;
+      }
+    };
+    function stop() {
+      if (tick()) settle();
+    }
+    timer = setInterval(tick, intervalMs);
     if (signal?.aborted) stop();
     else signal?.addEventListener('abort', stop, { once: true });
   });
