@@ -2592,6 +2592,88 @@ describe("Cluster Plugin – streamLogs", () => {
 });
 
 // ---------------------------------------------------------------------------
+// followLogFiles — the in-process `tail -f` used on Windows
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – followLogFiles", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-follow-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	/**
+	 * Start following, run `act` while following, then stop. Stopping polls
+	 * once more before resolving, so whatever `act` wrote is always read; the
+	 * long interval keeps the timer out of it, making the output deterministic.
+	 */
+	async function follow(files: string[], act: () => void): Promise<string> {
+		const chunks: string[] = [];
+		const controller = new AbortController();
+		const done = plugin.followLogFiles(files, {
+			signal: controller.signal,
+			write: (chunk: string) => chunks.push(chunk),
+			intervalMs: 60_000,
+		});
+		act();
+		controller.abort();
+		await done;
+		return chunks.join("");
+	}
+
+	test("prints the last 10 lines of each file with headers, then appended lines", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const connectors = join(tempDir, "connectors.log");
+		writeFileSync(
+			camunda,
+			`${Array.from({ length: 15 }, (_, i) => `c${i + 1}`).join("\n")}\n`,
+		);
+		writeFileSync(connectors, "k1\n");
+
+		const output = await follow([camunda, connectors], () => {
+			writeFileSync(connectors, "k1\nk2\n");
+		});
+
+		const expectedInitial = Array.from(
+			{ length: 10 },
+			(_, i) => `c${i + 6}\n`,
+		).join("");
+		assert.strictEqual(
+			output,
+			`==> ${camunda} <==\n${expectedInitial}` +
+				`\n==> ${connectors} <==\nk1\n` +
+				"k2\n",
+		);
+	});
+
+	test("omits headers when following a single file", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "first\nsecond\n");
+		});
+
+		assert.strictEqual(output, "first\nsecond\n");
+	});
+
+	test("re-reads a truncated file from the start", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "old line one\nold line two\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "new\n");
+		});
+
+		assert.strictEqual(output, "old line one\nold line two\nnew\n");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // new subcommands via commands export
 // ---------------------------------------------------------------------------
 
