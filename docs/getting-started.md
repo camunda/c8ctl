@@ -66,19 +66,19 @@ c8ctl setup --remove --yes                  # remove without prompting
 c8ctl setup --remove --stop-cluster --yes   # also stop the local cluster
 ```
 
-Confirm in the interactive prompt or pass `--yes` in non-interactive use; `--json` and `--dry-run` print only the removal preview. Removal delegates to the owning commands — `c8ctl mcp uninstall`, `c8ctl skills remove`, and `c8ctl modeler remove`. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. `--stop-cluster` is available only with `--remove` and stops the local cluster without purging runtime data or deleting downloaded binaries. Removal exits `0` when every requested action succeeds and `1` if any action fails; the other removal actions still run.
+Confirm in the interactive prompt or pass `--yes` in non-interactive use; `--json` and `--dry-run` print only the removal preview. Removal delegates to the owning commands — `c8ctl mcp uninstall`, `c8ctl skills uninstall`, and `c8ctl modeler uninstall`. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. `--stop-cluster` is available only with `--remove` and stops the local cluster without purging runtime data or deleting downloaded binaries. Removal exits `0` when every requested action succeeds and `1` if any action fails; the other removal actions still run.
 
 ## Manage Camunda Desktop Modeler
 
 `c8ctl modeler` installs, updates, and removes [Camunda Desktop Modeler](/components/modeler/desktop-modeler/install-the-modeler.md) on macOS, Windows, and Linux:
 
 ```bash
-c8ctl modeler install           # install the latest stable release
-c8ctl modeler update            # update to the latest stable release
-c8ctl modeler remove --dry-run  # preview removal
+c8ctl modeler install             # install the latest stable release
+c8ctl modeler update              # update to the latest stable release
+c8ctl modeler uninstall --dry-run # preview removal
 ```
 
-On macOS, the installer uses Homebrew when available and otherwise downloads the Camunda-signed release into `/Applications` (or `~/Applications` when `/Applications` is not writable). On Windows, it uses winget and registers file types and a Start Menu shortcut. On Linux (x64), it installs into `/usr/bin` as root and registers file types with Modeler's bundled support scripts. `update` reuses the same installation method, and `remove` removes a c8ctl-managed installation.
+On macOS, the installer uses Homebrew when available and otherwise downloads the Camunda-signed release into `/Applications` (or `~/Applications` when `/Applications` is not writable). On Windows, it uses winget and registers file types and a Start Menu shortcut. On Linux (x64), it installs into `/usr/bin` as root and registers file types with Modeler's bundled support scripts. `update` reuses the same installation method, and `uninstall` removes a c8ctl-managed installation (`modeler remove` remains a compatibility alias).
 
 ## Quick start with a local cluster
 

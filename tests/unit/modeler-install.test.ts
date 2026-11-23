@@ -384,8 +384,13 @@ ${body}
 			runModeler("install", env, ...args),
 		update: (env: Record<string, string> = {}, ...args: string[]) =>
 			runModeler("update", env, ...args),
-		remove: (env: Record<string, string> = {}, ...args: string[]) =>
-			runModeler("remove", env, ...args),
+		uninstall: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler("uninstall", env, ...args),
+		runAction: (
+			action: string,
+			env: Record<string, string> = {},
+			...args: string[]
+		) => runModeler(action, env, ...args),
 		cleanup(): void {
 			rmSync(home, { recursive: true, force: true });
 		},
@@ -456,8 +461,8 @@ function createWindowsSandbox() {
 			runModeler("install", env, ...args),
 		update: (env: Record<string, string> = {}, ...args: string[]) =>
 			runModeler("update", env, ...args),
-		remove: (env: Record<string, string> = {}, ...args: string[]) =>
-			runModeler("remove", env, ...args),
+		uninstall: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler("uninstall", env, ...args),
 		cleanup: (): void => rmSync(home, { recursive: true, force: true }),
 	};
 }
@@ -563,8 +568,8 @@ exit 0
 			runModeler({ action: "install", env, args }),
 		update: (env: Record<string, string> = {}, ...args: string[]) =>
 			runModeler({ action: "update", env, args }),
-		remove: (env: Record<string, string> = {}, ...args: string[]) =>
-			runModeler({ action: "remove", env, args }),
+		uninstall: (env: Record<string, string> = {}, ...args: string[]) =>
+			runModeler({ action: "uninstall", env, args }),
 		installFrom: (
 			cwd: string,
 			env: Record<string, string | undefined> = {},
@@ -694,8 +699,8 @@ describe("CLI behavioural: modeler install", () => {
 		assert.ok(!result.stdout.includes("--force"));
 	});
 
-	test("shows help for the update and remove lifecycle commands", async () => {
-		for (const action of ["update", "remove"]) {
+	test("shows help for the update and uninstall lifecycle commands", async () => {
+		for (const action of ["update", "uninstall"]) {
 			const result = await c8WithOptions(
 				{ env: { C8CTL_OUTPUT_MODE: "text" } },
 				"modeler",
@@ -705,6 +710,34 @@ describe("CLI behavioural: modeler install", () => {
 
 			assert.strictEqual(result.status, 0, `${action}: ${result.stderr}`);
 			assert.ok(result.stdout.includes(`c8ctl modeler ${action}`));
+		}
+	});
+
+	test("modeler remove remains a compatibility alias for uninstall", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+		writeMacApp(appPath, "5.52.0");
+
+		try {
+			const dryRun = await sandbox.runAction(
+				"remove",
+				{},
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			// The payload reports the canonical command regardless of the alias.
+			assert.strictEqual(parseJson(dryRun).command, "modeler uninstall");
+
+			const removed = await sandbox.runAction("remove");
+			assert.strictEqual(removed.status, 0, removed.stderr);
+			assert.match(removed.stdout, /Removed Camunda Modeler/);
+			assert.ok(!existsSync(appPath));
+		} finally {
+			sandbox.cleanup();
 		}
 	});
 
@@ -883,10 +916,10 @@ describe("CLI behavioural: modeler install", () => {
 		writeMacApp(appPath, "5.52.0");
 
 		try {
-			const dryRun = await sandbox.remove({}, "--dry-run", "--json");
+			const dryRun = await sandbox.uninstall({}, "--dry-run", "--json");
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
 			const preview = parseJson(dryRun);
-			assert.strictEqual(preview.command, "modeler remove");
+			assert.strictEqual(preview.command, "modeler uninstall");
 			assert.deepStrictEqual(preview.removalTarget, {
 				method: "macos-app-bundle",
 				path: "/Applications/Camunda Modeler.app",
@@ -895,7 +928,7 @@ describe("CLI behavioural: modeler install", () => {
 			assert.ok(existsSync(appPath));
 
 			sandbox.resetToolCalls();
-			const removed = await sandbox.remove();
+			const removed = await sandbox.uninstall();
 			assert.strictEqual(removed.status, 0, removed.stderr);
 			assert.match(removed.stdout, /Removed Camunda Modeler/);
 			assert.ok(!existsSync(appPath));
@@ -923,7 +956,7 @@ describe("CLI behavioural: modeler install", () => {
 		try {
 			for (const result of [
 				await sandbox.update({ FAIL_AT: "verify" }),
-				await sandbox.remove({ FAIL_AT: "verify" }),
+				await sandbox.uninstall({ FAIL_AT: "verify" }),
 			]) {
 				assert.strictEqual(result.status, 1);
 				assert.match(result.stdout + result.stderr, /not signed by Camunda/);
@@ -955,7 +988,11 @@ describe("CLI behavioural: modeler install", () => {
 		);
 
 		try {
-			const dryRun = await sandbox.remove(homebrewEnv, "--dry-run", "--json");
+			const dryRun = await sandbox.uninstall(
+				homebrewEnv,
+				"--dry-run",
+				"--json",
+			);
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
 			const preview = parseJson(dryRun);
 			assert.deepStrictEqual(preview.removalTarget, {
@@ -970,7 +1007,7 @@ describe("CLI behavioural: modeler install", () => {
 			);
 
 			sandbox.resetToolCalls();
-			const removed = await sandbox.remove(homebrewEnv);
+			const removed = await sandbox.uninstall(homebrewEnv);
 			assert.strictEqual(removed.status, 0, removed.stderr);
 			assert.match(removed.stdout, /Removed Camunda Modeler with Homebrew/);
 			assert.deepStrictEqual(sandbox.toolCalls(), [
@@ -1004,7 +1041,7 @@ describe("CLI behavioural: modeler install", () => {
 		);
 
 		try {
-			const removed = await sandbox.remove({
+			const removed = await sandbox.uninstall({
 				C8CTL_SETUP_MODELER_REMOVAL_TARGET: JSON.stringify({
 					method: "homebrew-cask",
 					path: "/opt/homebrew/Caskroom/camunda-modeler/5.52.0/Camunda Modeler.app",
@@ -1033,7 +1070,7 @@ describe("CLI behavioural: modeler install", () => {
 		writeMacApp(appPath, "5.52.0");
 
 		try {
-			const removed = await sandbox.remove({
+			const removed = await sandbox.uninstall({
 				C8CTL_SETUP_MODELER_REMOVAL_TARGET: JSON.stringify({
 					method: "macos-app-bundle",
 					path: "/Applications/Camunda Modeler.app",
@@ -1541,14 +1578,14 @@ describe("CLI behavioural: modeler install", () => {
 			assert.ok(existsSync(sandbox.shortcut));
 
 			sandbox.resetToolCalls();
-			const dryRun = await sandbox.remove(
+			const dryRun = await sandbox.uninstall(
 				{ WINGET: "installed" },
 				"--dry-run",
 				"--json",
 			);
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
 			const preview = parseJson(dryRun);
-			assert.strictEqual(preview.command, "modeler remove");
+			assert.strictEqual(preview.command, "modeler uninstall");
 			assert.deepStrictEqual(preview.removalTarget, {
 				method: "winget-package",
 				path: sandbox.installDir,
@@ -1558,7 +1595,7 @@ describe("CLI behavioural: modeler install", () => {
 			assert.ok(existsSync(sandbox.shortcut));
 
 			sandbox.resetToolCalls();
-			const removed = await sandbox.remove({ WINGET: "installed" });
+			const removed = await sandbox.uninstall({ WINGET: "installed" });
 			assert.strictEqual(removed.status, 0, removed.stderr);
 			assert.match(removed.stdout, /Removed Camunda Modeler with winget/);
 			assert.ok(!existsSync(executable));
@@ -1586,7 +1623,7 @@ describe("CLI behavioural: modeler install", () => {
 
 			const results = [
 				await sandbox.update({ WINGET: "unregistered" }),
-				await sandbox.remove({ WINGET: "unregistered" }),
+				await sandbox.uninstall({ WINGET: "unregistered" }),
 			];
 
 			for (const result of results) {
@@ -2097,14 +2134,14 @@ describe("CLI behavioural: modeler install", () => {
 		}
 
 		try {
-			const dryRun = await sandbox.remove(
+			const dryRun = await sandbox.uninstall(
 				{ FAKE_UID: "0" },
 				"--dry-run",
 				"--json",
 			);
 			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
 			const preview = parseJson(dryRun);
-			assert.strictEqual(preview.command, "modeler remove");
+			assert.strictEqual(preview.command, "modeler uninstall");
 			assert.deepStrictEqual(preview.removalTarget, {
 				method: "linux-managed-install",
 				path: "/usr/bin/camunda-modeler-5.52.0-linux-x64",
@@ -2114,7 +2151,7 @@ describe("CLI behavioural: modeler install", () => {
 			assert.ok(existsSync(installed.launcher));
 			assert.deepStrictEqual(sandbox.toolCalls(), []);
 
-			const removed = await sandbox.remove({ FAKE_UID: "0" });
+			const removed = await sandbox.uninstall({ FAKE_UID: "0" });
 			assert.strictEqual(removed.status, 0, removed.stderr);
 			assert.match(removed.stdout, /Removed Camunda Modeler/);
 			assert.ok(!existsSync(installed.installDir));
@@ -2156,7 +2193,7 @@ describe("CLI behavioural: modeler install", () => {
 			assert.strictEqual(updated.status, 1);
 			assert.match(updated.stdout + updated.stderr, /partially installed/);
 
-			const removed = await sandbox.remove({ FAKE_UID: "0" });
+			const removed = await sandbox.uninstall({ FAKE_UID: "0" });
 			assert.strictEqual(removed.status, 0, removed.stderr);
 			assert.match(removed.stdout, /Removed Camunda Modeler 5\.52\.0/);
 			assert.ok(!readdirSync(sandbox.usrBin).includes("camunda-modeler"));
@@ -2175,7 +2212,7 @@ describe("CLI behavioural: modeler install", () => {
 
 			for (const result of [
 				await sandbox.update({ FAKE_UID: "0" }),
-				await sandbox.remove({ FAKE_UID: "0" }),
+				await sandbox.uninstall({ FAKE_UID: "0" }),
 			]) {
 				assert.strictEqual(result.status, 1);
 				assert.match(result.stdout + result.stderr, /not installed by c8ctl/);
@@ -2199,7 +2236,7 @@ describe("CLI behavioural: modeler install", () => {
 		try {
 			for (const result of [
 				await sandbox.update({ FAKE_UID: "0" }),
-				await sandbox.remove({ FAKE_UID: "0" }),
+				await sandbox.uninstall({ FAKE_UID: "0" }),
 			]) {
 				assert.strictEqual(result.status, 1);
 				assert.match(
@@ -2288,7 +2325,7 @@ describe("CLI behavioural: modeler install", () => {
 		const sandbox = createLinuxSandbox();
 		try {
 			// No installation at all.
-			for (const action of ["update", "remove"] as const) {
+			for (const action of ["update", "uninstall"] as const) {
 				const result = await sandbox[action](
 					{ FAKE_UID: "0" },
 					"--dry-run",
@@ -2427,7 +2464,7 @@ describe("CLI behavioural: modeler install", () => {
 		const sandbox = createLinuxSandbox();
 		sandbox.fakeTool("camunda-modeler");
 		try {
-			const results = [await sandbox.update(), await sandbox.remove()];
+			const results = [await sandbox.update(), await sandbox.uninstall()];
 
 			for (const result of results) {
 				assert.strictEqual(result.status, 1);

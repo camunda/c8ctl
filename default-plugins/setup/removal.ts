@@ -70,7 +70,7 @@ const SETUP_MCP_HARNESSES = [
  * Inspect setup-managed artifacts without changing them. MCP plans use an
  * explicit harness list so teardown can find entries even if a harness is no
  * longer detected by its executable. `detectModeler` probes the modeler
- * plugin's own `modeler remove --dry-run`, so whether a managed Modeler
+ * plugin's own `modeler uninstall --dry-run`, so whether a managed Modeler
  * installation exists — and how its removal is described — stays owned by
  * that plugin.
  */

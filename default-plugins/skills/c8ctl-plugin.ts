@@ -6,7 +6,7 @@
  * Usage:
  *   c8ctl skills install [--harness <agent-id>]
  *   c8ctl skills list [--harness <agent-id>]
- *   c8ctl skills remove [name...] [--harness <agent-id>]
+ *   c8ctl skills uninstall [name...] [--harness <agent-id>]
  */
 
 import { renderCommandFailure } from "../../src/core/index.ts";
@@ -43,7 +43,7 @@ export const metadata: PluginMetadata = {
 Requires GitHub CLI 2.90 or later; its skill commands are in preview.
 Re-run to update the same skill directories without duplicates when upstream changes. Local edits to up-to-date skills are preserved; upstream updates may replace edited files.
 To restore one skill's upstream files, use \`gh skill update --force --dir <skills-root> <skill-name>\`; pass the parent skills directory (for example \`~/.claude/skills\`), not the listed skill directory. Find names with \`gh skill list --scope user --agent <agent-id>\`. Extra local files are retained.
-Use \`skills list\` to inspect installed skills and \`skills remove\` to remove them. Removal deletes the full skill directories, including local edits. Name one or more skills to remove only those; unknown names fail before anything is deleted. When a name is installed at multiple paths, pair each positional name with a matching \`--skill-path\` value to remove only that installation. Use a GitHub CLI agent ID for --harness; see \`gh skill install --help\` for supported IDs. Pass \`--yes\` for non-interactive removal; \`--dry-run\` previews without deleting.`,
+Use \`skills list\` to inspect installed skills and \`skills uninstall\` to remove them (\`skills remove\` remains a compatibility alias). Removal deletes the full skill directories, including local edits. Name one or more skills to remove only those; unknown names fail before anything is deleted. When a name is installed at multiple paths, pair each positional name with a matching \`--skill-path\` value to remove only that installation. Use a GitHub CLI agent ID for --harness; see \`gh skill install --help\` for supported IDs. Pass \`--yes\` for non-interactive removal; \`--dry-run\` previews without deleting.`,
 			subcommands: [
 				{
 					name: "install",
@@ -54,8 +54,12 @@ Use \`skills list\` to inspect installed skills and \`skills remove\` to remove 
 					description: "List installed Camunda skills by harness",
 				},
 				{
-					name: "remove",
+					name: "uninstall",
 					description: "Remove installed Camunda skills",
+				},
+				{
+					name: "remove",
+					description: "Alias for uninstall",
 				},
 			],
 			examples: [
@@ -76,15 +80,15 @@ Use \`skills list\` to inspect installed skills and \`skills remove\` to remove 
 					description: "List installed Camunda skills by harness",
 				},
 				{
-					command: "c8ctl skills remove --dry-run",
+					command: "c8ctl skills uninstall --dry-run",
 					description: "Preview Camunda skills removal",
 				},
 				{
-					command: "c8ctl skills remove camunda-c8ctl --yes",
+					command: "c8ctl skills uninstall camunda-c8ctl --yes",
 					description: "Remove only the named Camunda skills",
 				},
 				{
-					command: "c8ctl skills remove --harness claude-code --yes",
+					command: "c8ctl skills uninstall --harness claude-code --yes",
 					description: "Remove Camunda skills from Claude Code",
 				},
 			],
@@ -211,7 +215,7 @@ async function removeSkills(
 	try {
 		if (ctx.unrecognizedFlags && ctx.unrecognizedFlags.length > 0) {
 			throw new Error(
-				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'skills remove'. Only --harness and --skill-path are supported removal selectors; fix or remove the flag before deleting skills.`,
+				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'skills uninstall'. Only --harness and --skill-path are supported removal selectors; fix or remove the flag before deleting skills.`,
 			);
 		}
 		// A mistyped flag can also be swallowed as the value of a string
@@ -298,7 +302,7 @@ async function removeSkills(
 			path,
 		}));
 		const preview = {
-			command: "skills remove",
+			command: "skills uninstall",
 			action: "remove",
 			preview: true,
 			items,
@@ -313,7 +317,7 @@ async function removeSkills(
 			if (ctx.outputMode === "json") {
 				emitRowsJson(
 					ctx,
-					{ command: "skills remove", harnesses, removed: [] },
+					{ command: "skills uninstall", harnesses, removed: [] },
 					[],
 				);
 			} else {
@@ -367,7 +371,7 @@ async function removeSkills(
 					const command = [
 						"c8ctl",
 						"skills",
-						"remove",
+						"uninstall",
 						...requestedNames,
 						...(requestedHarness ? ["--harness", requestedHarness] : []),
 						"--yes",
@@ -401,7 +405,7 @@ async function removeSkills(
 					.map((skill) => `"${skill.name}" (${skill.path})`)
 					.join(
 						", ",
-					)}. Run "c8ctl skills remove" again for a fresh preview before deleting.`,
+					)}. Run "c8ctl skills uninstall" again for a fresh preview before deleting.`,
 			);
 		}
 
@@ -422,7 +426,7 @@ async function removeSkills(
 		if (ctx.outputMode === "json") {
 			emitRowsJson(
 				ctx,
-				{ command: "skills remove", removed: skillRows(removed) },
+				{ command: "skills uninstall", removed: skillRows(removed) },
 				skillRows(removed),
 			);
 		} else {
@@ -450,7 +454,7 @@ async function removeSkills(
 		}
 		if (failures.length > 0) process.exitCode = 1;
 	} catch (error) {
-		renderCommandFailure(logger, "Failed to skills remove", error, {
+		renderCommandFailure(logger, "Failed to skills uninstall", error, {
 			verbose: ctx.verbose,
 		});
 		process.exitCode = 1;
@@ -465,17 +469,21 @@ async function skillsHandler(
 	if (!ctx) throw new Error("skills requires the plugin host context");
 	const { logger } = ctx;
 
-	if (args[0] !== "remove" && flags?.["skill-path"] !== undefined) {
-		logger.error("--skill-path can only be used with 'skills remove'.");
+	const subcommand = args[0];
+	// `remove` is the pre-uninstall spelling, kept as a compatibility alias.
+	const isUninstall = subcommand === "uninstall" || subcommand === "remove";
+
+	if (!isUninstall && flags?.["skill-path"] !== undefined) {
+		logger.error("--skill-path can only be used with 'skills uninstall'.");
 		process.exitCode = 1;
 		return;
 	}
 
-	if (args[0] === "list") {
+	if (subcommand === "list") {
 		await listSkills(flags?.harness, ctx);
 		return;
 	}
-	if (args[0] === "remove") {
+	if (isUninstall) {
 		await removeSkills(
 			flags?.harness,
 			args.slice(1),
@@ -485,10 +493,10 @@ async function skillsHandler(
 		return;
 	}
 
-	if (args[0] !== "install") {
-		if (args[0] === undefined) {
+	if (subcommand !== "install") {
+		if (subcommand === undefined) {
 			logger.info(
-				"\nUsage: c8ctl skills <install|list|remove> [--harness <agent-id>]\n\nAvailable commands:\n  install\n  list\n  remove",
+				"\nUsage: c8ctl skills <install|list|uninstall> [--harness <agent-id>]\n\nAvailable commands:\n  install\n  list\n  uninstall",
 				{
 					essential: true,
 				},

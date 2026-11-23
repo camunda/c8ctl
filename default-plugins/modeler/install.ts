@@ -1237,7 +1237,7 @@ function verifyExpectedRemovalTarget(
 }
 
 function dryRunResult(
-	command: "modeler update" | "modeler remove",
+	command: "modeler update" | "modeler uninstall",
 	message: string,
 	removalTarget?: ModelerRemovalTarget,
 ): ModelerInstallResult {
@@ -1606,7 +1606,7 @@ function removeWindowsModeler(
 	verifyExpectedRemovalTarget(ctx, removalTarget);
 	if (ctx.isDryRun) {
 		return dryRunResult(
-			"modeler remove",
+			"modeler uninstall",
 			"Dry run: would remove Camunda Modeler with `winget uninstall --id Camunda.Modeler --exact --source winget`.",
 			removalTarget,
 		);
@@ -1695,7 +1695,7 @@ async function updateLinuxModeler(
 	// must not pass the up-to-date check below as if it were working.
 	if (!existsSync(join(installation.installDir, LINUX_EXECUTABLE))) {
 		throw new Error(
-			`Camunda Modeler ${installation.version} is only partially installed: ${join(installation.installDir, LINUX_EXECUTABLE)} is missing. Run \`c8ctl modeler remove\` to clean up, then \`c8ctl modeler install\` to install it again.`,
+			`Camunda Modeler ${installation.version} is only partially installed: ${join(installation.installDir, LINUX_EXECUTABLE)} is missing. Run \`c8ctl modeler uninstall\` to clean up, then \`c8ctl modeler install\` to install it again.`,
 		);
 	}
 
@@ -1870,7 +1870,7 @@ function removeLinuxModeler(ctx: ModelerInstallContext): ModelerInstallResult {
 	verifyExpectedRemovalTarget(ctx, removalTarget);
 	if (ctx.isDryRun) {
 		return dryRunResult(
-			"modeler remove",
+			"modeler uninstall",
 			`Dry run: would remove Camunda Modeler ${installation.version} from ${installation.installDir} and unregister its file types.`,
 			removalTarget,
 		);
@@ -1936,7 +1936,7 @@ async function removeMacModeler(
 				);
 			}
 			return dryRunResult(
-				"modeler remove",
+				"modeler uninstall",
 				"Dry run: would remove Camunda Modeler with `brew uninstall --cask camunda-modeler`.",
 				removalTarget,
 			);
@@ -1969,7 +1969,7 @@ async function removeMacModeler(
 	verifyMacModelerBundle(appPath, "remove", ctx.quiet);
 	if (ctx.isDryRun) {
 		return dryRunResult(
-			"modeler remove",
+			"modeler uninstall",
 			`Dry run: would remove the Camunda Modeler app bundle at ${appPath}.`,
 			removalTarget,
 		);
@@ -2005,6 +2005,6 @@ export async function removeDesktopModeler(
 	}
 	if (process.platform === "darwin") return removeMacModeler(ctx);
 	throw new Error(
-		`c8ctl modeler remove currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
+		`c8ctl modeler uninstall currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
 	);
 }
