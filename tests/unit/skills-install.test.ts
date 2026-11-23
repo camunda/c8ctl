@@ -335,6 +335,19 @@ test("fails when available Camunda skills cannot be listed", async () => {
 	);
 });
 
+test("reports an outdated GitHub CLI when gh skill rejects a flag", async () => {
+	await assert.rejects(
+		runSkillInstall("claude-code", () =>
+			Promise.resolve({
+				status: 1,
+				stdout: "",
+				stderr: "unknown flag: --agent\n\nUsage:  gh skill <command> [flags]",
+			}),
+		),
+		/requires GitHub CLI 2\.95 or later/,
+	);
+});
+
 test("surfaces GitHub CLI skill install failures", async () => {
 	let install = false;
 
@@ -662,7 +675,7 @@ test("skills remove leaves installations untouched when discovery fails", async 
 		);
 
 		assert.equal(result.status, 1);
-		assert.match(result.stderr, /GitHub CLI 2\.90 or later/);
+		assert.match(result.stderr, /GitHub CLI 2\.95 or later/);
 		assert.ok(existsSync(fixture.skillDirectory));
 	} finally {
 		fixture.cleanup();

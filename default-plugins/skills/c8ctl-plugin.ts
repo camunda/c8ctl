@@ -40,7 +40,7 @@ export const metadata: PluginMetadata = {
 			description: "Manage Camunda AI coding skills",
 			helpDescription: `Manage Camunda skills installed in AI coding harnesses.
 
-Requires GitHub CLI 2.90 or later; its skill commands are in preview.
+Requires GitHub CLI 2.95 or later; its skill commands are in preview.
 Re-run to update the same skill directories without duplicates when upstream changes. Local edits to up-to-date skills are preserved; upstream updates may replace edited files.
 To restore one skill's upstream files, use \`gh skill update --force --dir <skills-root> <skill-name>\`; pass the parent skills directory (for example \`~/.claude/skills\`), not the listed skill directory. Find names with \`gh skill list --scope user --agent <agent-id>\`. Extra local files are retained.
 Use \`skills list\` to inspect installed skills and \`skills remove\` to remove them. Removal deletes the full skill directories, including local edits. Name one or more skills to remove only those; unknown names fail before anything is deleted. When a name is installed at multiple paths, pair each positional name with a matching \`--skill-path\` value to remove only that installation. Use a GitHub CLI agent ID for --harness; see \`gh skill install --help\` for supported IDs. Pass \`--yes\` for non-interactive removal; \`--dry-run\` previews without deleting.`,
