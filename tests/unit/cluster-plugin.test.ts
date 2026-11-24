@@ -1505,7 +1505,46 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 		);
 	});
 
-	test("does not persist alias mapping (start remains deterministic)", async () => {
+	test("advances alias mapping when the newer version is already installed", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+		try {
+			plugin.storeLocalAliasMapping(tempDir, "stable", "8.9");
+			// 8.10 installed explicitly (e.g. `cluster install 8.10`) as a pinned patch
+			const binaryDir = join(tempDir, "c8run-8.10.4", "c8run-8.10.4");
+			mkdirSync(binaryDir, { recursive: true });
+			writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+
+			// @ts-expect-error — mock fetch: remote says stable is 8.10
+			globalThis.fetch = async () => ({
+				ok: true,
+				text: async () => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.4/">8.10.4</a>
+        `,
+			});
+
+			await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+
+			const cached = readFileSync(
+				join(tempDir, "alias-stable.resolved"),
+				"utf-8",
+			).trim();
+			assert.strictEqual(cached, "8.10");
+			assert.ok(
+				loggedMessages.some(
+					(m: string) =>
+						m.includes("8.10") &&
+						m.includes("already installed") &&
+						!m.includes("cluster install"),
+				),
+				`Should report the promotion, got: ${loggedMessages.join("; ")}`,
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not persist alias mapping when the newer version is not installed", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
 		try {
 			// Seed a cached alias file pointing to 8.8
@@ -1520,7 +1559,7 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
         `,
 			});
 
-			await plugin.checkBackgroundAliasFreshness("stable", "8.8");
+			await plugin.checkBackgroundAliasFreshness("stable", "8.8", tempDir);
 
 			// The alias file should still point to 8.8 — not overwritten to 8.9
 			const cached = readFileSync(
@@ -1564,6 +1603,43 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 			loggedMessages.length,
 			0,
 			"should not log anything on non-OK response",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// flushStartHints
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – flushStartHints", () => {
+	test("waits for pending start hints before a failed start exits", async () => {
+		const printed: string[] = [];
+		const config = {
+			_aliasHintPromise: new Promise<void>((resolve) =>
+				setTimeout(() => {
+					printed.push("alias hint");
+					resolve();
+				}, 20),
+			),
+			_hintPromise: Promise.resolve().then(() => {
+				printed.push("rolling hint");
+			}),
+		};
+
+		await plugin.flushStartHints(config, 1000);
+
+		assert.deepStrictEqual(printed.sort(), ["alias hint", "rolling hint"]);
+	});
+
+	test("gives up after the timeout when a hint never settles", async () => {
+		const config = { _aliasHintPromise: new Promise(() => {}) };
+		const started = Date.now();
+
+		await plugin.flushStartHints(config, 50);
+
+		assert.ok(
+			Date.now() - started < 1000,
+			"must not block the failed start beyond the timeout",
 		);
 	});
 });

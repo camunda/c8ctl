@@ -215,29 +215,33 @@ function readLocalAliasMapping(cacheDir, alias) {
   const filePath = getAliasMappingPath(cacheDir, alias);
   if (!existsSync(filePath)) return null;
   try {
-    const value = readFileSync(filePath, 'utf-8').trim();
     // Only use the cached mapping if the version is actually installed
-    const config = { cacheDir, version: value };
-    if (isC8RunInstalled(config)) return value;
-
-    // For rolling versions (minor version patterns like "8.9"), check if any
-    // installed version matches the minor version prefix (e.g. "8.9" matches
-    // "8.9.5"). This prevents re-downloading a rolling alias when a compatible
-    // pinned version is already installed locally (#431).
-    if (isMinorVersionPattern(value)) {
-      const installedVersions = getInstalledVersionsList(cacheDir)
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      const match = installedVersions
-        .filter((v) => v.startsWith(value + '.'))
-        .reverse()
-        .find((v) => isC8RunInstalled({ cacheDir, version: v }));
-      if (match) return match;
-    }
-
-    return null;
+    return findInstalledAliasTarget(cacheDir, readFileSync(filePath, 'utf-8').trim());
   } catch {
     return null;
   }
+}
+
+/**
+ * Return the installed version that satisfies an alias target, or null.
+ * An exact install wins; for a rolling minor pattern ("8.9") the highest
+ * installed pin in that minor line ("8.9.5") also counts, so a compatible
+ * pinned install is not re-downloaded (#431).
+ */
+function findInstalledAliasTarget(cacheDir, value) {
+  if (isC8RunInstalled({ cacheDir, version: value })) return value;
+
+  if (isMinorVersionPattern(value)) {
+    const installedVersions = getInstalledVersionsList(cacheDir)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const match = installedVersions
+      .filter((v) => v.startsWith(value + '.'))
+      .reverse()
+      .find((v) => isC8RunInstalled({ cacheDir, version: v }));
+    if (match) return match;
+  }
+
+  return null;
 }
 
 export function storeLocalAliasMapping(cacheDir, alias, resolved) {
@@ -270,16 +274,21 @@ export function _resetDynamicAliasCache() {
 }
 
 /**
- * Non-blocking background check: query the remote download server and print
- * a hint if the remote alias resolves to a different (newer) version.
+ * Non-blocking background check: query the remote download server and act
+ * if the remote alias resolves to a newer minor than the one being started.
  *
- * Important: does NOT update the persisted alias mapping. The mapping is only
- * updated when the user explicitly runs `cluster install`, keeping `start`
- * deterministic across runs.
+ * - Newer version already installed (e.g. via `cluster install 8.10`): the
+ *   persisted alias mapping is advanced to it, so the *next* `start` uses it.
+ *   Nothing is downloaded — the user already chose to install that version.
+ * - Newer version not installed: only a hint is printed; the mapping is left
+ *   alone so `start` never silently switches to a version it would have to
+ *   download.
+ *
+ * The current run is never affected: it has already resolved its version.
  *
  * Returns the fire-and-forget promise (for testing).
  */
-export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
+export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion, cacheDir) {
   const logger = getLogger();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -290,7 +299,14 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
         if (html) {
           const remote = parseVersionsFromHtml(html);
           const remoteVersion = remote?.[versionSpec];
-          if (remoteVersion && isRemoteMinorNewer(remoteVersion, resolvedVersion)) {
+          if (!remoteVersion || !isRemoteMinorNewer(remoteVersion, resolvedVersion)) return;
+          if (cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion)) {
+            storeLocalAliasMapping(cacheDir, versionSpec, remoteVersion);
+            logger.info(
+              `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed. ` +
+              `The next "c8ctl cluster start" will use it.`,
+            );
+          } else {
             logger.info(
               `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
               `Install it with: c8ctl cluster install ${versionSpec}`,
@@ -313,6 +329,25 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
  */
 function fireAndForget(promise) {
   return promise.catch(() => {});
+}
+
+/**
+ * Give the background `start` hints (alias freshness, rolling update) a short,
+ * bounded chance to print before a failed start calls process.exit(), which
+ * would otherwise drop them mid-flight. A failed start is when a newer version
+ * is most worth knowing about.
+ */
+export async function flushStartHints(config, timeoutMs = 1000) {
+  const pending = [config?._aliasHintPromise, config?._hintPromise].filter(Boolean);
+  if (pending.length === 0) return;
+  let timer;
+  await Promise.race([
+    Promise.all(pending),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  clearTimeout(timer);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1719,6 +1754,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
     logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
+    await flushStartHints(config);
     process.exit(1);
   }
 
@@ -1772,6 +1808,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     logger.error(
       `c8run start exited with code ${exitCode ?? 'unknown'}${exitSignal ? ` (signal: ${exitSignal})` : ''}. Cluster will not be marked as running.`,
     );
+    await flushStartHints(config);
     process.exit(typeof exitCode === 'number' && exitCode > 0 ? exitCode : 1);
   }
 
@@ -3821,11 +3858,6 @@ export const commands = {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }
 
-    // For start with a named alias, check in the background whether the
-    // remote resolves to a different (newer) version and hint if so.
-    if (isStart && isVersionAlias(versionSpec)) {
-      checkBackgroundAliasFreshness(versionSpec, version);
-    }
     const rolling = isRollingVersion(versionSpec);
     const config = {
       cacheDir: theCacheDir,
@@ -3839,12 +3871,19 @@ export const commands = {
       verbose: ctx?.verbose === true,
     };
 
+    // For start with a named alias, check in the background whether the
+    // remote resolves to a different (newer) version and hint if so.
+    if (isStart && isVersionAlias(versionSpec)) {
+      config._aliasHintPromise = checkBackgroundAliasFreshness(versionSpec, version, theCacheDir);
+    }
+
     if (parsed.subcommand === 'start') {
       try {
         await ensureC8RunInstalled(config);
         await startC8Run(config, parsed.debug, parsed.startArgs);
       } catch (error) {
         logger.error(`Failed to start cluster: ${formatErrorWithCause(error)}`);
+        await flushStartHints(config);
         process.exit(1);
       }
     } else if (parsed.subcommand === 'stop') {
