@@ -291,9 +291,14 @@ function spawnClusterStart(ctx: PluginCtx): Promise<void> {
 }
 
 function spawnClusterStop(ctx: PluginCtx): Promise<void> {
+	// stop --purge: the cluster plugin waits for the signalled processes to
+	// exit before purging the stopped version's runtime data — a plain stop
+	// returns right after signalling, so a purge/delete right behind it
+	// would be refused for a cluster that is still shutting down. When
+	// nothing is running, the child warns and exits 0.
 	// Removal reports every child line, matching the previous dedicated
 	// spawner whose forwarders marked all lines essential.
-	return spawnC8ctl(ctx, ["cluster", "stop"], {
+	return spawnC8ctl(ctx, ["cluster", "stop", "--purge"], {
 		promoteStdoutLine: () => true,
 		stderrPassthrough: true,
 	});
@@ -1037,12 +1042,13 @@ async function applySetupRemoval(
 		);
 	}
 
-	// The cluster plugin owns cluster teardown. Stop first so purge and
-	// delete are not refused for a live install; then, per previewed
-	// version, purge the runtime data (the setup-deployed process state
-	// goes with it) and delete the downloaded binary. Only the previewed
-	// versions are touched: a version installed while the confirmation was
-	// open belongs to a target the user never confirmed.
+	// The cluster plugin owns cluster teardown. stop --purge first: it waits
+	// for the signalled processes to exit, then purges the stopped version's
+	// runtime data. Then, per previewed version, purge whatever data remains
+	// (versions that were not running; the setup-deployed process state goes
+	// with it) and delete the downloaded binary. Only the previewed versions
+	// are touched: a version installed while the confirmation was open
+	// belongs to a target the user never confirmed.
 	if (inventory.cluster) {
 		try {
 			await spawnClusterStop(ctx);
@@ -1487,7 +1493,7 @@ A run without a selection (piped output, CI) installs nothing unless you pass --
 
 Exit code 0: every selected setup step succeeded, or nothing was installed for lack of a go-ahead (wizard cancelled with Escape; a piped, --quiet or JSON-mode run without --yes; --json or --dry-run printing the plan). Ctrl+C ends the wizard by signal (130 on POSIX shells). A re-run reuses finished work where possible; the deploy, process start and skills install repeat by design. Exit code 1: arguments failed validation, or a step failed — other eligible steps still ran, while dependents (and the deploy finale after any failure) were skipped.
 
---remove shows setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, marker-listed blueprint files, and the local cluster before removing them: the cluster is stopped, and its runtime data and downloaded binaries are deleted — setup-deployed process state goes with the runtime data. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Removal runs the owning commands: cluster stop, purge and delete, mcp uninstall, skills uninstall, and modeler uninstall. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
+--remove shows setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, marker-listed blueprint files, and the local cluster before removing them: the cluster is stopped, and its runtime data and downloaded binaries are deleted — setup-deployed process state goes with the runtime data. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Removal runs the owning commands: cluster stop --purge plus per-version cluster purge and delete, mcp uninstall, skills uninstall, and modeler uninstall. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
 
 Removal exits 0 when every requested action succeeds, and 1 if any action fails; the other removal actions still run.`;
 

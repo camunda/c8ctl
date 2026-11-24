@@ -3173,33 +3173,6 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 		return { cacheDir, dataDirs, slow };
 	}
 
-	test("plain stop waits for a slow-shutting-down cluster before returning", {
-		skip: process.platform === "win32",
-	}, async () => {
-		// c8run stop only signals the process, which exits ~1s later. A stop
-		// that returned immediately would let a follow-up purge or delete see
-		// the still-shutting-down cluster and refuse.
-		const { cacheDir, slow } = await setupStopPurgeFixture({
-			killOnStop: true,
-		});
-		const prevCacheDir = process.env.C8RUN_CACHE_DIR;
-		process.env.C8RUN_CACHE_DIR = cacheDir;
-		const restoreExit = mockProcessExit();
-		try {
-			await plugin.commands.cluster(["stop"]);
-		} finally {
-			restoreExit();
-			if (prevCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
-			else process.env.C8RUN_CACHE_DIR = prevCacheDir;
-			if (slow.pid && plugin.isPidAlive(slow.pid)) slow.kill("SIGKILL");
-		}
-		rmSync(cacheDir, { recursive: true, force: true });
-		assert.ok(
-			slow.pid && !plugin.isPidAlive(slow.pid),
-			"stop must return only after the cluster process exited",
-		);
-	});
-
 	test("stop --purge waits for a slow-shutting-down cluster and then purges", {
 		skip: process.platform === "win32",
 	}, async () => {

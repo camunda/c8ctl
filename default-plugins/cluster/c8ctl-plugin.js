@@ -3919,24 +3919,6 @@ export const commands = {
     } else if (parsed.subcommand === 'stop') {
       try {
         const stoppedVersion = await stopC8Run(config, parsed.debug);
-        // `c8run stop` only signals the processes; Java can keep running
-        // while it shuts down. Wait for the exit here, in stop itself, so a
-        // follow-up purge or delete — via --purge or a later invocation — is
-        // not refused for a cluster that is still shutting down.
-        // C8CTL_STOP_WAIT_TIMEOUT_MS is an internal override so tests can
-        // bound the wait; in production the timeout is a safety net, not a
-        // correctness signal.
-        const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
-        const waitTimeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
-        if (!(await waitForClusterExit(theCacheDir, { timeoutMs: waitTimeoutMs }))) {
-          throw new Error(
-            parsed.purge && stoppedVersion
-              ? 'Cluster processes are still shutting down, so runtime data was not purged. ' +
-                `Once they have exited, run: c8ctl cluster purge ${stoppedVersion}`
-              : 'Cluster processes are still shutting down. ' +
-                'Wait for them to exit (check: c8ctl cluster status) before purging or deleting.',
-          );
-        }
         if (parsed.purge) {
           if (!stoppedVersion) {
             logger.warn('Cannot determine which version to purge (version marker is missing). ' +
@@ -3953,6 +3935,15 @@ export const commands = {
               `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
             );
           } else {
+            // C8CTL_STOP_WAIT_TIMEOUT_MS is an internal override so tests can bound the wait.
+            const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
+            const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
+            if (!(await waitForClusterExit(theCacheDir, { timeoutMs }))) {
+              throw new Error(
+                'Cluster processes are still shutting down, so runtime data was not purged. ' +
+                  `Once they have exited, run: c8ctl cluster purge ${stoppedVersion}`,
+              );
+            }
             await purgeClusterData(theCacheDir, stoppedVersion);
           }
         }

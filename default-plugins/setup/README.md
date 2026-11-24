@@ -29,8 +29,8 @@ only when a step fails.
 Removal orchestrates the same owners: the unified preview is built from
 shared inspection helpers and a `modeler uninstall --dry-run` probe, and after
 one confirmation the actual teardown runs as child commands —
-`c8ctl cluster stop` followed by `c8ctl cluster purge`/`delete` per installed
-version, `c8ctl mcp uninstall` per harness,
+`c8ctl cluster stop --purge` followed by `c8ctl cluster purge`/`delete` per
+installed version, `c8ctl mcp uninstall` per harness,
 `c8ctl skills uninstall --harness <harness> --yes`, and `c8ctl modeler uninstall`.
 
 ## Flags
