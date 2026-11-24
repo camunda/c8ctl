@@ -90,7 +90,9 @@ it. The GA build is extracted and checked in a staging directory first, so if
 the download or extraction fails, the archive still holds a prerelease, or
 another c8ctl has started that build in the meantime, the alpha build is kept.
 When the download fails, the error says that only a prerelease build is
-installed.
+installed. A prerelease build that already has cluster data is never replaced
+automatically, because that would delete the data: keep using it with
+`c8ctl cluster start <version>`, or run `c8ctl cluster purge <version>` first.
 
 ### Resilient running-state tracking
 

@@ -257,6 +257,21 @@ function isPrereleaseBuild(buildDirName) {
   return /^c8run-\d+\.\d+(\.\d+)?-/.test(buildDirName);
 }
 
+/**
+ * True when a build dir holds cluster data (the `camunda-data` dir, or the
+ * `data` dir inside any `camunda-zeebe-` dir) that `cluster purge` deletes.
+ */
+function hasClusterData(buildDir) {
+  if (existsSync(join(buildDir, 'camunda-data'))) return true;
+  try {
+    return readdirSync(buildDir, { withFileTypes: true }).some(
+      (entry) => entry.isDirectory() && entry.name.startsWith('camunda-zeebe-') && existsSync(join(buildDir, entry.name, 'data')),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Name of the build dir whose c8run would launch for `version` (e.g. "c8run-8.10.0-alpha1"), or null. */
 function installedBuildName(cacheDir, version) {
   const binaryPath = findC8RunBinaryPath({ cacheDir, version });
@@ -1593,8 +1608,19 @@ export async function ensureC8RunInstalled(config) {
   const prereleaseBuild = config.requireGA ? installedPrereleaseBuild(config.cacheDir, config.version) : null;
 
   if (prereleaseBuild) {
+    const prerelease = prereleaseBuild.slice('c8run-'.length);
+    // Replacing the build dir would also delete the cluster data kept beside
+    // its launcher, so never do that without the user's say-so.
+    if (hasClusterData(dirname(getC8RunBinaryPath(config)))) {
+      throw new Error(
+        `c8run ${config.version} holds a prerelease build (${prerelease}) with cluster data. ` +
+          '"stable" needs a GA build, and replacing this one would delete that data. ' +
+          `Keep using it with "c8ctl cluster start ${config.version}", or delete its data with ` +
+          `"c8ctl cluster purge ${config.version}" and run this command again.`,
+      );
+    }
     logger.info(
-      `c8run ${config.version} holds a prerelease build (${prereleaseBuild.slice('c8run-'.length)}); ` +
+      `c8run ${config.version} holds a prerelease build (${prerelease}); ` +
         '"stable" needs a GA build, so it will be replaced.',
     );
   } else if (isC8RunInstalled(config)) {
@@ -1615,7 +1641,9 @@ export async function ensureC8RunInstalled(config) {
             'Stop it first with "c8ctl cluster stop", then re-run the install.',
         );
       }
-      purgeInstalledVersion(config);
+      // stable is replaced via a staged swap after the new build is validated,
+      // so a rejected archive never leaves it without a usable install.
+      if (!config.requireGA) purgeInstalledVersion(config);
     } else {
       // Use local installation as-is (start subcommand, or pinned version)
       logger.info(`c8run ${config.version} is already installed.`);
@@ -1655,7 +1683,7 @@ export async function ensureC8RunInstalled(config) {
     );
   }
 
-  if (!prereleaseBuild) logger.info('No local installation found. Setting up...');
+  if (!isC8RunInstalled(config)) logger.info('No local installation found. Setting up...');
 
   let download;
   try {

@@ -258,7 +258,10 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		server = createServer((req, res) => {
 			if (req.url?.endsWith(`.${ARCHIVE_EXT}`)) {
 				onArchiveRequest();
-				res.writeHead(200, { "content-length": archiveBytes.length });
+				res.writeHead(200, {
+					"content-length": archiveBytes.length,
+					etag: '"current"',
+				});
 				res.end(archiveBytes);
 				return;
 			}
@@ -275,6 +278,18 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		server.close();
 		rmSync(cacheDir, { recursive: true, force: true });
 	});
+
+	const cluster = (downloadUrl: string, ...args: string[]) =>
+		c8WithEnv(
+			{
+				C8RUN_CACHE_DIR: cacheDir,
+				C8CTL_OUTPUT_MODE: "text",
+				C8CTL_C8RUN_DOWNLOAD_URL: downloadUrl,
+				C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
+			},
+			"cluster",
+			...args,
+		);
 
 	const start = (downloadUrl: string, ...args: string[]) =>
 		c8WithEnv(
@@ -383,5 +398,57 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 			"the running build's pidfile must survive",
 		);
 		assertAlphaKept();
+	});
+	test("a used alpha build is not replaced, so its cluster data survives", async () => {
+		const journal = join(
+			alphaBuildDir(),
+			"camunda-zeebe-8.11.0-alpha1",
+			"data",
+		);
+		mkdirSync(journal, { recursive: true });
+		writeFileSync(join(journal, "journal.log"), "deployments");
+		let archiveRequests = 0;
+		onArchiveRequest = () => archiveRequests++;
+
+		const refused = await start(baseUrl);
+		const combined = refused.stdout + refused.stderr;
+		assert.strictEqual(refused.status, 1, combined);
+		assert.match(
+			combined,
+			/prerelease build \(8\.11\.0-alpha1\) with cluster data/,
+		);
+		assert.match(combined, /c8ctl cluster purge 8\.11/);
+		assert.strictEqual(archiveRequests, 0, "nothing should be downloaded");
+		assert.ok(
+			existsSync(join(journal, "journal.log")),
+			"cluster data must survive",
+		);
+		assert.strictEqual(launched(), "");
+
+		// The suggested way forward: purge the data, then stable replaces the build.
+		assert.strictEqual((await cluster(baseUrl, "purge", "8.11")).status, 0);
+		assert.strictEqual((await start(baseUrl)).status, 7);
+		assert.strictEqual(launched(), "ga");
+	});
+
+	test("install stable keeps the existing GA build when the update archive is rejected", async () => {
+		rmSync(join(cacheDir, "c8run-8.11"), { recursive: true });
+		writeFakeC8Run(
+			join(cacheDir, "c8run-8.11", "c8run-8.11.0"),
+			"ga-installed",
+		);
+		// A stored ETag that differs from the mirror's, so install sees an update.
+		writeFileSync(join(cacheDir, "c8run-8.11.etag"), '"previous"');
+		archiveBytes = buildArchive("c8run-8.11.0-alpha2", "alpha2");
+
+		const result = await cluster(baseUrl, "install", "stable");
+		const combined = result.stdout + result.stderr;
+
+		assert.strictEqual(result.status, 1, combined);
+		assert.match(combined, /is a prerelease build \(8\.11\.0-alpha2\)/);
+		assert.ok(
+			existsSync(join(cacheDir, "c8run-8.11", "c8run-8.11.0", "c8run")),
+			"the existing GA build must survive",
+		);
 	});
 });
