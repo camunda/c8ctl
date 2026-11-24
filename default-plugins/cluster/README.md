@@ -77,7 +77,7 @@ patch releases.
 
 ### `start` vs `install` update behavior
 
-- **`start`** uses the local version if available. A non-blocking remote check runs in the background — if a newer rolling release exists, a hint is printed (e.g. *"A newer server version is available. Install it with: c8ctl cluster install 8.9"*). If the network is unreachable, the hint is silently skipped.
+- **`start`** uses the local version if available. A non-blocking remote check runs in the background — if a newer rolling release exists, a hint is printed (e.g. *"A newer server version is available. Install it with: c8ctl cluster install 8.9"*). If the network is unreachable, the hint is silently skipped. When starting a named alias (`stable`, `alpha`) whose newer target is already installed (e.g. via `c8ctl cluster install 8.10`), the check instead updates the cached alias so the next `start` uses that version, without downloading anything. If `start` fails, c8ctl waits up to one second for these checks before exiting, so the hint is not lost.
 - **`install`** always checks the remote for a newer rolling release (via ETag comparison) and re-downloads if one is available.
 
 If the download server is unreachable, the aliases fall back to the values

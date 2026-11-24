@@ -245,3 +245,77 @@ if (process.argv[2] === 'start') {
 		}
 	});
 });
+
+describe("failed start keeps the background alias hint", () => {
+	let cacheDir: string;
+
+	beforeEach(() => {
+		cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-failed-start-hint-"));
+		const exe = process.platform === "win32" ? "c8run.exe" : "c8run";
+		for (const segments of [
+			["c8run-8.9", "c8run-8.9.29"],
+			["c8run-8.10.4", "c8run-8.10.4"],
+		]) {
+			mkdirSync(join(cacheDir, ...segments), { recursive: true });
+			writeFileSync(join(cacheDir, ...segments, exe), "fixture executable");
+		}
+		writeFileSync(join(cacheDir, "alias-stable.resolved"), "8.9");
+		writeFileSync(
+			join(cacheDir, "launcher.mjs"),
+			`import { writeFileSync } from 'node:fs';
+writeFileSync(process.env.C8RUN_CACHE_DIR + '/launched', '');
+console.error('failed to get JAVA_HOME');
+process.exitCode = 7;
+`,
+		);
+		writeFileSync(
+			join(cacheDir, "preload.mjs"),
+			`import childProcess from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { join } from 'node:path';
+const cacheDir = process.env.C8RUN_CACHE_DIR;
+const spawn = childProcess.spawn;
+childProcess.spawn = (command, args, options) => command.startsWith(join(cacheDir, 'c8run-8.9'))
+  ? spawn(process.execPath, [join(cacheDir, 'launcher.mjs'), ...args], options)
+  : spawn(command, args, options);
+syncBuiltinESMExports();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+globalThis.fetch = async (url) => {
+  if (!String(url).endsWith('/c8run/')) return new Response('', { status: 404 });
+  // Answer only after the launcher has failed, so the hint is still in flight
+  // when the failed start would exit.
+  while (!existsSync(join(cacheDir, 'launched'))) await sleep(10);
+  await sleep(300);
+  return new Response('<a href="8.9/"></a><a href="8.9.0/"></a><a href="8.10/"></a><a href="8.10.4/"></a>');
+};`,
+		);
+	});
+
+	afterEach(() => {
+		rmSync(cacheDir, { recursive: true, force: true });
+	});
+
+	test("prints the hint, advances the installed alias and keeps the exit code", async () => {
+		const result = await c8WithEnv(
+			{
+				C8RUN_CACHE_DIR: cacheDir,
+				C8CTL_OUTPUT_MODE: "text",
+				NODE_OPTIONS: `--import ${pathToFileURL(join(cacheDir, "preload.mjs")).href}`,
+			},
+			"cluster",
+			"start",
+		);
+
+		assert.equal(result.status, 7, result.stderr);
+		assert.match(result.stderr, /failed to get JAVA_HOME/);
+		assert.match(
+			result.stdout + result.stderr,
+			/"stable" now resolves to 8\.10, which is already installed/,
+		);
+		assert.equal(
+			readFileSync(join(cacheDir, "alias-stable.resolved"), "utf-8").trim(),
+			"8.10",
+		);
+	});
+});
