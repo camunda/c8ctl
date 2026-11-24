@@ -272,6 +272,43 @@ function hasClusterData(buildDir) {
   }
 }
 
+/**
+ * Refuse to replace a `stable` install whose cluster data would be deleted:
+ * a prerelease build, or an install that lost its launcher. Data may sit
+ * beside the launcher or, without one, in the install dir or a subdir of it.
+ * A GA build is replaced like any rolling update.
+ */
+function refuseIfClusterDataAtRisk(config) {
+  const version = config.version;
+  const installDir = join(config.cacheDir, `c8run-${version}`);
+  if (!existsSync(installDir)) return;
+  const build = installedBuildName(config.cacheDir, version);
+  if (build && !isPrereleaseBuild(build)) return;
+
+  let roots = [installDir];
+  try {
+    roots = roots.concat(
+      readdirSync(installDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(installDir, entry.name)),
+    );
+  } catch {
+    // Unreadable: only the install dir itself is checked
+  }
+  if (!roots.some(hasClusterData)) return;
+
+  const state = build
+    ? `holds a prerelease build (${build.slice('c8run-'.length)}) with cluster data`
+    : 'has cluster data but no c8run launcher';
+  const options = build
+    ? `Keep using it with "c8ctl cluster start ${version}", or delete its data with`
+    : 'Delete its data with';
+  throw new Error(
+    `c8run ${version} ${state}. "stable" needs a GA build, and replacing this install would delete that data. ` +
+      `${options} "c8ctl cluster purge ${version}" and run this command again.`,
+  );
+}
+
 /** Name of the build dir whose c8run would launch for `version` (e.g. "c8run-8.10.0-alpha1"), or null. */
 function installedBuildName(cacheDir, version) {
   const binaryPath = findC8RunBinaryPath({ cacheDir, version });
@@ -1606,21 +1643,12 @@ export async function ensureC8RunInstalled(config) {
   // `stable` must never launch a prerelease, e.g. a rolling dir still holding
   // the alpha build installed through `alpha` before that minor went GA.
   const prereleaseBuild = config.requireGA ? installedPrereleaseBuild(config.cacheDir, config.version) : null;
+  // Checked before downloading anything, and again right before the swap.
+  if (config.requireGA) refuseIfClusterDataAtRisk(config);
 
   if (prereleaseBuild) {
-    const prerelease = prereleaseBuild.slice('c8run-'.length);
-    // Replacing the build dir would also delete the cluster data kept beside
-    // its launcher, so never do that without the user's say-so.
-    if (hasClusterData(dirname(getC8RunBinaryPath(config)))) {
-      throw new Error(
-        `c8run ${config.version} holds a prerelease build (${prerelease}) with cluster data. ` +
-          '"stable" needs a GA build, and replacing this one would delete that data. ' +
-          `Keep using it with "c8ctl cluster start ${config.version}", or delete its data with ` +
-          `"c8ctl cluster purge ${config.version}" and run this command again.`,
-      );
-    }
     logger.info(
-      `c8run ${config.version} holds a prerelease build (${prerelease}); ` +
+      `c8run ${config.version} holds a prerelease build (${prereleaseBuild.slice('c8run-'.length)}); ` +
         '"stable" needs a GA build, so it will be replaced.',
     );
   } else if (isC8RunInstalled(config)) {
@@ -1756,6 +1784,9 @@ async function installGABuild(config, archivePath, installDir) {
           'Stop it first with "c8ctl cluster stop".',
       );
     }
+
+    // Rechecked here too: data may have been created during the download.
+    refuseIfClusterDataAtRisk(config);
 
     const replacing = existsSync(installDir);
     if (replacing) {

@@ -451,4 +451,52 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 			"the existing GA build must survive",
 		);
 	});
+	test("an install that lost its launcher keeps its cluster data", async () => {
+		rmSync(join(alphaBuildDir(), "c8run"));
+		const data = join(alphaBuildDir(), "camunda-data");
+		mkdirSync(data);
+		writeFileSync(join(data, "state.db"), "deployments");
+		let archiveRequests = 0;
+		onArchiveRequest = () => archiveRequests++;
+
+		const result = await start(baseUrl);
+		const combined = result.stdout + result.stderr;
+
+		assert.strictEqual(result.status, 1, combined);
+		assert.match(
+			combined,
+			/c8run 8\.11 has cluster data but no c8run launcher/,
+		);
+		assert.match(combined, /c8ctl cluster purge 8\.11/);
+		assert.strictEqual(archiveRequests, 0, "nothing should be downloaded");
+		assert.ok(existsSync(join(data, "state.db")), "cluster data must survive");
+	});
+
+	test("cluster data created during the download is not deleted by the swap", async () => {
+		// Simulate the alpha build being started and stopped by another c8ctl mid-download.
+		const journal = join(
+			alphaBuildDir(),
+			"camunda-zeebe-8.11.0-alpha1",
+			"data",
+		);
+		onArchiveRequest = () => {
+			mkdirSync(journal, { recursive: true });
+			writeFileSync(join(journal, "journal.log"), "deployments");
+		};
+
+		const result = await start(baseUrl);
+		const combined = result.stdout + result.stderr;
+
+		assert.strictEqual(result.status, 1, combined);
+		assert.match(
+			combined,
+			/prerelease build \(8\.11\.0-alpha1\) with cluster data/,
+		);
+		assert.ok(
+			existsSync(join(journal, "journal.log")),
+			"cluster data must survive",
+		);
+		assert.strictEqual(launched(), "");
+		assertAlphaKept();
+	});
 });
