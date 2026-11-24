@@ -291,13 +291,24 @@ function spawnClusterStart(ctx: PluginCtx): Promise<void> {
 }
 
 function spawnClusterStop(ctx: PluginCtx): Promise<void> {
+	// Plain stop: signals the cluster and returns. Used when no version can
+	// be attributed to the running cluster (its install dir is gone) — the
+	// owner reaps it via the durable PID record, and there is no versioned
+	// runtime data left to purge.
+	// Removal reports every child line, matching the previous dedicated
+	// spawner whose forwarders marked all lines essential.
+	return spawnC8ctl(ctx, ["cluster", "stop"], {
+		promoteStdoutLine: () => true,
+		stderrPassthrough: true,
+	});
+}
+
+function spawnClusterStopPurge(ctx: PluginCtx): Promise<void> {
 	// stop --purge: the cluster plugin waits for the signalled processes to
 	// exit before purging the stopped version's runtime data — a plain stop
 	// returns right after signalling, so a purge/delete right behind it
 	// would be refused for a cluster that is still shutting down. When
 	// nothing is running, the child warns and exits 0.
-	// Removal reports every child line, matching the previous dedicated
-	// spawner whose forwarders marked all lines essential.
 	return spawnC8ctl(ctx, ["cluster", "stop", "--purge"], {
 		promoteStdoutLine: () => true,
 		stderrPassthrough: true,
@@ -402,6 +413,54 @@ async function detectModelerRemoval(): Promise<
 /** c8run's launcher exits before the services report healthy — poll for it. */
 const CLUSTER_HEALTH_TIMEOUT_MS = 120_000;
 const CLUSTER_HEALTH_POLL_MS = 2_000;
+
+interface RunningClusterProbe {
+	readonly running: boolean;
+	/** The running version when the owner can attribute one. */
+	readonly version?: string;
+}
+
+/**
+ * The local cluster's status in the owning plugin's own words. Returns
+ * undefined when the probe itself fails — callers then fail safe (no stop,
+ * and a purge of a genuinely running version is refused by the owner).
+ */
+async function probeRunningCluster(): Promise<RunningClusterProbe | undefined> {
+	try {
+		const payload: unknown = await captureC8ctlJson([
+			"cluster",
+			"status",
+			"--json",
+		]);
+		if (!isRecord(payload) || typeof payload.status !== "string") {
+			return undefined;
+		}
+		return {
+			running: payload.status !== "stopped",
+			version:
+				typeof payload.version === "string" && payload.version.length > 0
+					? payload.version
+					: undefined,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+/** Whether a local cluster is running — for the removal inventory probe. */
+async function detectClusterRunning(): Promise<boolean> {
+	const payload: unknown = await captureC8ctlJson([
+		"cluster",
+		"status",
+		"--json",
+	]);
+	if (!isRecord(payload) || typeof payload.status !== "string") {
+		throw new Error(
+			'cluster status --json returned an invalid response: expected a string "status" field.',
+		);
+	}
+	return payload.status !== "stopped";
+}
 
 async function runClusterStart(ctx: PluginCtx, run: SetupRun): Promise<void> {
 	await spawnClusterStart(ctx);
@@ -976,9 +1035,13 @@ function setupRemovalPreview(inventory: SetupRemovalInventory): {
 			action: "remove",
 			versions: [...inventory.cluster.versions],
 		});
-		lines.push(
-			`  Stop the local cluster and remove Camunda 8 Run ${inventory.cluster.versions.join(", ")} (runtime data and downloaded binaries will be deleted)`,
-		);
+		if (inventory.cluster.versions.length > 0) {
+			lines.push(
+				`  Stop the local cluster and remove Camunda 8 Run ${inventory.cluster.versions.join(", ")} (runtime data and downloaded binaries will be deleted)`,
+			);
+		} else {
+			lines.push("  Stop the local cluster");
+		}
 	}
 
 	if (items.length === 0)
@@ -1042,33 +1105,60 @@ async function applySetupRemoval(
 		);
 	}
 
-	// The cluster plugin owns cluster teardown. stop --purge first: it waits
-	// for the signalled processes to exit, then purges the stopped version's
-	// runtime data. Then, per previewed version, purge whatever data remains
-	// (versions that were not running; the setup-deployed process state goes
-	// with it) and delete the downloaded binary. Only the previewed versions
-	// are touched: a version installed while the confirmation was open
-	// belongs to a target the user never confirmed.
+	// The cluster plugin owns cluster teardown. Re-probe what is running
+	// now: the confirmation may have been open while the cluster changed.
+	// stop --purge purges the version it stops, so it may only run when that
+	// version was part of the confirmed preview — a version installed and
+	// started while the prompt was open keeps its data and stays running.
+	// A running cluster without an attributable version (its install dir is
+	// gone) gets a plain stop: the owner reaps it via the durable PID
+	// record and there is no versioned data left to purge.
+	// Then, per previewed version, purge whatever data remains (versions
+	// that were not running; the setup-deployed process state goes with it)
+	// and delete the downloaded binary. Only the previewed versions are
+	// touched: a version installed while the confirmation was open belongs
+	// to a target the user never confirmed.
 	if (inventory.cluster) {
-		try {
-			await spawnClusterStop(ctx);
-		} catch (error) {
-			failures += 1;
-			removalFailure(ctx, "stop the local cluster", error);
+		const probe = await probeRunningCluster();
+		let purgedByStop: string | undefined;
+		if (probe?.running) {
+			if (probe.version && inventory.cluster.versions.includes(probe.version)) {
+				try {
+					await spawnClusterStopPurge(ctx);
+					purgedByStop = probe.version;
+				} catch (error) {
+					failures += 1;
+					removalFailure(ctx, "stop the local cluster", error);
+				}
+			} else if (probe.version) {
+				failures += 1;
+				logger.error(
+					`Camunda 8 Run ${probe.version} is running but was not in the removal preview; leaving it running and keeping its data. Stop it yourself with: c8ctl cluster stop`,
+				);
+			} else {
+				try {
+					await spawnClusterStop(ctx);
+				} catch (error) {
+					failures += 1;
+					removalFailure(ctx, "stop the local cluster", error);
+				}
+			}
 		}
 		for (const version of inventory.cluster.versions) {
-			try {
-				await spawnC8ctl(ctx, ["cluster", "purge", version], {
-					promoteStdoutLine: () => true,
-					stderrPassthrough: true,
-				});
-			} catch (error) {
-				failures += 1;
-				removalFailure(
-					ctx,
-					`delete the runtime data of Camunda 8 Run ${version}`,
-					error,
-				);
+			if (version !== purgedByStop) {
+				try {
+					await spawnC8ctl(ctx, ["cluster", "purge", version], {
+						promoteStdoutLine: () => true,
+						stderrPassthrough: true,
+					});
+				} catch (error) {
+					failures += 1;
+					removalFailure(
+						ctx,
+						`delete the runtime data of Camunda 8 Run ${version}`,
+						error,
+					);
+				}
 			}
 			try {
 				await spawnC8ctl(ctx, ["cluster", "delete", version], {
@@ -1228,6 +1318,7 @@ async function runSetupRemoval(ctx: PluginCtx): Promise<void> {
 	const { logger } = ctx;
 	const inventory = await inspectSetupRemovalInventory({
 		detectModeler: detectModelerRemoval,
+		detectClusterRunning,
 	});
 	const preview = setupRemovalPreview(inventory);
 	const jsonMode = logger.mode === "json";

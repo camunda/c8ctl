@@ -53,7 +53,9 @@ export interface SetupClusterRemoval {
 	/**
 	 * Installed Camunda 8 Run versions. Teardown stops the local cluster,
 	 * purges its runtime data (removing setup-deployed process state with
-	 * it), and deletes every listed version's downloaded binary.
+	 * it), and deletes every listed version's downloaded binary. Empty when
+	 * only a running cluster was found (its install dir is gone, so there
+	 * is nothing to purge or delete — only to stop).
 	 */
 	readonly versions: readonly string[];
 }
@@ -93,9 +95,17 @@ const SETUP_MCP_HARNESSES = [
 export async function inspectSetupRemovalInventory({
 	cwd = process.cwd(),
 	detectModeler,
+	detectClusterRunning,
 }: {
 	cwd?: string;
 	detectModeler?: () => Promise<SetupModelerRemoval | undefined>;
+	/**
+	 * Whether a local cluster is running, in the cluster plugin's own words
+	 * (its status command). Needed only when no install dirs remain: a
+	 * cluster whose install dir was deleted out from under it is otherwise
+	 * invisible here, yet still needs stopping.
+	 */
+	detectClusterRunning?: () => Promise<boolean>;
 } = {}): Promise<SetupRemovalInventory> {
 	const mcpHarnesses =
 		process.platform === "darwin" || process.platform === "win32"
@@ -175,12 +185,24 @@ export async function inspectSetupRemovalInventory({
 	// detector mirrors that plugin's install layout, so a cache the plugin
 	// sees is a cache teardown can hand back to its stop/purge/delete. Every
 	// install dir counts — including one whose binary went missing — so a
-	// partial install's runtime data is purged instead of left behind.
+	// partial install's runtime data is purged instead of left behind. A
+	// running cluster without any install dir is still found via the
+	// running probe, so confirmed removal stops it.
 	let cluster: SetupClusterRemoval | undefined;
 	let clusterInspectionFailure: SetupClusterInspectionFailure | undefined;
 	try {
 		const versions = camunda8RunInstallDirs();
-		if (versions.length > 0) cluster = { versions };
+		let running = false;
+		if (versions.length === 0 && detectClusterRunning) {
+			try {
+				running = await detectClusterRunning();
+			} catch (error) {
+				clusterInspectionFailure = {
+					message: error instanceof Error ? error.message : String(error),
+				};
+			}
+		}
+		if (versions.length > 0 || running) cluster = { versions };
 	} catch (error) {
 		clusterInspectionFailure = {
 			message: error instanceof Error ? error.message : String(error),

@@ -80,7 +80,7 @@ import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 
 // ── Desktop Modeler looks installed ────────────────────────────────
@@ -205,9 +205,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Flipped by a successful fake `cluster start`; the health endpoint
  * follows it, so the setup flow observes a cluster that actually came up.
+ * A marker file in C8RUN_CACHE_DIR mirrors the real plugin's
+ * cluster.active marker, so a running cluster stays visible across the
+ * separate CLI processes of a test (setup run, then removal run).
  */
 let clusterRunning = clusterUpAtBoot;
 let mcpConflictInjected = false;
+
+function clusterMarkerPath(): string | null {
+	const dir = process.env.C8RUN_CACHE_DIR;
+	return dir ? join(dir, "cluster.running") : null;
+}
+
+function clusterMarkerExists(): boolean {
+	const marker = clusterMarkerPath();
+	return marker !== null && fs.existsSync(marker);
+}
+
+function isClusterRunning(): boolean {
+	return clusterRunning || clusterMarkerExists();
+}
 
 // ── Child processes ────────────────────────────────────────────────
 
@@ -439,6 +456,53 @@ Object.defineProperty(childProcess, "spawn", {
 		}
 		// setup self-invokes the cluster plugin to start the cluster.
 		if (argv.includes("cluster")) {
+			// The running version is the newest install dir present right now,
+			// so a test can change it between the preview and the confirmation.
+			const stubCacheDirNow = process.env.C8RUN_CACHE_DIR;
+			const runningVersion = () => {
+				if (!stubCacheDirNow || !fs.existsSync(stubCacheDirNow)) return null;
+				return (
+					fs
+						.readdirSync(stubCacheDirNow)
+						.filter((name) => name.startsWith("c8run-"))
+						.map((name) => name.slice("c8run-".length))
+						.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+						.at(-1) ?? null
+				);
+			};
+			const purgeVersionData = (version: string): string[] => {
+				const deleted: string[] = [];
+				if (!stubCacheDirNow) return deleted;
+				const installDir = join(stubCacheDirNow, `c8run-${version}`);
+				if (!fs.existsSync(installDir)) return deleted;
+				const camundaData = join(installDir, "camunda-data");
+				if (fs.existsSync(camundaData)) {
+					fs.rmSync(camundaData, { recursive: true, force: true });
+					deleted.push("camunda-data");
+				}
+				for (const entry of fs.readdirSync(installDir, {
+					withFileTypes: true,
+				})) {
+					if (!entry.isDirectory() || !entry.name.startsWith("camunda-zeebe-"))
+						continue;
+					const journalDir = join(installDir, entry.name, "data");
+					if (fs.existsSync(journalDir)) {
+						fs.rmSync(journalDir, { recursive: true, force: true });
+						deleted.push(`${entry.name}/data`);
+					}
+				}
+				return deleted;
+			};
+			if (argv.includes("status")) {
+				const running = isClusterRunning();
+				const version = running ? runningVersion() : null;
+				return fakeChild(0, {
+					stdout: `${JSON.stringify({
+						status: running ? "running" : "stopped",
+						version,
+					})}\n`,
+				});
+			}
 			if (argv.includes("start")) {
 				if (failStep === "start-cluster") {
 					// Like the real plugin: chatter on stdout, diagnostics on stderr.
@@ -448,6 +512,11 @@ Object.defineProperty(childProcess, "spawn", {
 					});
 				}
 				clusterRunning = true;
+				const marker = clusterMarkerPath();
+				if (marker) {
+					fs.mkdirSync(dirname(marker), { recursive: true });
+					fs.writeFileSync(marker, "running");
+				}
 				return fakeChild(0, {
 					...CLUSTER_CHILD_OUTPUT,
 					...(process.env.C8CTL_SETUP_STUB_CLUSTER_WARN === "1"
@@ -461,10 +530,25 @@ Object.defineProperty(childProcess, "spawn", {
 						stderr: "stubbed cluster stop failure diagnostics\n",
 					});
 				}
+				if (!isClusterRunning()) {
+					return fakeChild(0, {
+						stderr: "No cluster is currently running.\n",
+					});
+				}
+				const stoppedVersion = runningVersion();
 				clusterRunning = false;
-				return fakeChild(0, {
-					stdout: "Stopped local Camunda 8 cluster.\n",
-				});
+				const stoppedMarker = clusterMarkerPath();
+				if (stoppedMarker) fs.rmSync(stoppedMarker, { force: true });
+				let stdout = "Stopped local Camunda 8 cluster.\n";
+				// stop --purge purges the stopped version's runtime data, like
+				// the real plugin.
+				if (argv.includes("--purge") && stoppedVersion) {
+					const deleted = purgeVersionData(stoppedVersion);
+					if (deleted.length > 0) {
+						stdout += `Purged runtime data for ${stoppedVersion}:\n${deleted.map((d) => `  deleted: ${d}\n`).join("")}`;
+					}
+				}
+				return fakeChild(0, { stdout });
 			}
 			// purge/delete mirror the real plugin's fs effects, but only inside
 			// the cache dir the test pinned via C8RUN_CACHE_DIR — without it the
@@ -479,31 +563,7 @@ Object.defineProperty(childProcess, "spawn", {
 				}
 				// Real layout: runtime data sits next to the version's binary —
 				// camunda-data plus the camunda-zeebe-* journal directory.
-				const deleted: string[] = [];
-				const installDir = stubCacheDir
-					? join(stubCacheDir, `c8run-${versionArg}`)
-					: undefined;
-				if (installDir && fs.existsSync(installDir)) {
-					const camundaData = join(installDir, "camunda-data");
-					if (fs.existsSync(camundaData)) {
-						fs.rmSync(camundaData, { recursive: true, force: true });
-						deleted.push("camunda-data");
-					}
-					for (const entry of fs.readdirSync(installDir, {
-						withFileTypes: true,
-					})) {
-						if (
-							!entry.isDirectory() ||
-							!entry.name.startsWith("camunda-zeebe-")
-						)
-							continue;
-						const journalDir = join(installDir, entry.name, "data");
-						if (fs.existsSync(journalDir)) {
-							fs.rmSync(journalDir, { recursive: true, force: true });
-							deleted.push(`${entry.name}/data`);
-						}
-					}
-				}
+				const deleted = purgeVersionData(versionArg);
 				const stdout =
 					deleted.length > 0
 						? `Purged runtime data for ${versionArg}:\n${deleted.map((d) => `  deleted: ${d}\n`).join("")}`

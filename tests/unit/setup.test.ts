@@ -65,6 +65,8 @@ interface KeyStage {
 	waitFor: string;
 	/** Keys written (stdin closed) once the marker appears. */
 	keys: string;
+	/** Runs after the marker renders, before the keys are sent. */
+	beforeKeys?: () => void;
 }
 
 /**
@@ -130,6 +132,7 @@ function runInteractive(
 		let stageIndex = 0;
 		const sendStage = () => {
 			if (stageIndex >= stages.length) return;
+			stages[stageIndex].beforeKeys?.();
 			child.stdin.write(stages[stageIndex].keys);
 			stageIndex += 1;
 			if (stageIndex >= stages.length) child.stdin.end();
@@ -1837,6 +1840,73 @@ describe("c8ctl setup", () => {
 			);
 			assert.match(output, /deleted: camunda-data/);
 			assert.ok(!existsSync(installDir));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("stops a running cluster whose install directory is gone", async () => {
+		const stub = stubbedExecution({ clusterUp: true });
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+			// Nothing planted: the install dir was deleted out from under a
+			// running cluster, so only the owner's status still sees it.
+
+			const preview = await c8WithOptions(stub.options, "setup", "--remove");
+			assert.strictEqual(preview.status, 0, preview.stderr + preview.stdout);
+			assert.match(preview.stdout, /Stop the local cluster/);
+			assert.doesNotMatch(preview.stdout, /remove Camunda 8 Run/);
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 0, output);
+			assert.match(output, /Stopped local Camunda 8 cluster/);
+			assert.match(output, /Setup removal finished/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("keeps a cluster version installed and started after the preview", async () => {
+		const stub = stubbedExecution({ clusterUp: true });
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+			plantC8RunInstall(stub.c8runCache, "8.10.0");
+
+			// The preview covers 8.10.0; while the confirmation prompt is open,
+			// 8.11.0 appears and is the version now running.
+			const result = await runInteractive(
+				[
+					{
+						waitFor: "Remove the listed setup components?",
+						beforeKeys: () => plantC8RunInstall(stub.c8runCache, "8.11.0"),
+						keys: "\x1b[B\r",
+					},
+				],
+				{
+					args: ["--remove"],
+					nodeArgs: stub.options.nodeArgs,
+					env: stub.options.env,
+					cwd: stub.cwd,
+				},
+			);
+			const output = `${result.stderr}\n${result.stdout}`;
+			assert.strictEqual(result.status, 1, output);
+			assert.match(
+				output,
+				/Camunda 8 Run 8\.11\.0 is running but was not in the removal preview/,
+			);
+			// The unpreviewed running version keeps its binary and its data…
+			const unpreviewed = join(stub.c8runCache, "c8run-8.11.0");
+			assert.ok(existsSync(unpreviewed));
+			assert.ok(existsSync(join(unpreviewed, "camunda-data")));
+			// …while the previewed one is purged and deleted.
+			assert.ok(!existsSync(join(stub.c8runCache, "c8run-8.10.0")));
 		} finally {
 			stub.cleanup();
 		}
