@@ -19,6 +19,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -206,6 +207,26 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 	let cacheDir: string;
 	let server: Server;
 	let baseUrl: string;
+	let archiveBytes: Buffer;
+	let onArchiveRequest: () => void;
+
+	/** Pack a fake c8run build dir as the mirror's rolling 8.11 archive. */
+	function buildArchive(buildDir: string, label: string): Buffer {
+		const src = mkdtempSync(join(tmpdir(), "c8ctl-archive-src-"));
+		try {
+			writeFakeC8Run(join(src, buildDir), label);
+			const archive = join(src, `archive.${ARCHIVE_EXT}`);
+			// The download center ships .zip for macOS and .tar.gz for Linux.
+			if (ARCHIVE_EXT === "zip") {
+				execFileSync("zip", ["-qr", archive, buildDir], { cwd: src });
+			} else {
+				execFileSync("tar", ["-czf", archive, "-C", src, buildDir]);
+			}
+			return readFileSync(archive);
+		} finally {
+			rmSync(src, { recursive: true, force: true });
+		}
+	}
 
 	/** A c8run that records which build ran, then fails like a missing JAVA_HOME. */
 	function writeFakeC8Run(dir: string, label: string) {
@@ -231,23 +252,12 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		writeFakeC8Run(alphaBuildDir(), "alpha");
 
 		// 8.11 has since gone GA; its rolling archive now holds the GA build.
-		const archiveSrc = join(cacheDir, "archive-src");
-		writeFakeC8Run(join(archiveSrc, "c8run-8.11.0"), "ga");
-		// The download center ships .zip for macOS and .tar.gz for Linux.
-		const archive = join(cacheDir, `ga.${ARCHIVE_EXT}`);
-		if (ARCHIVE_EXT === "zip") {
-			execFileSync("zip", ["-qr", archive, "c8run-8.11.0"], {
-				cwd: archiveSrc,
-			});
-		} else {
-			execFileSync("tar", ["-czf", archive, "-C", archiveSrc, "c8run-8.11.0"]);
-		}
-		rmSync(archiveSrc, { recursive: true });
-		const archiveBytes = readFileSync(archive);
-		rmSync(archive);
+		archiveBytes = buildArchive("c8run-8.11.0", "ga");
+		onArchiveRequest = () => {};
 
 		server = createServer((req, res) => {
 			if (req.url?.endsWith(`.${ARCHIVE_EXT}`)) {
+				onArchiveRequest();
 				res.writeHead(200, { "content-length": archiveBytes.length });
 				res.end(archiveBytes);
 				return;
@@ -314,5 +324,64 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		// alpha itself still launches the installed prerelease.
 		assert.strictEqual((await start(offline, "alpha")).status, 7);
 		assert.strictEqual(launched(), "alpha");
+	});
+	const assertAlphaKept = () => {
+		assert.ok(
+			existsSync(join(alphaBuildDir(), "c8run")),
+			"the alpha build must be kept",
+		);
+		assert.deepStrictEqual(
+			readdirSync(cacheDir).filter((name) => name.startsWith(".")),
+			[],
+			"no staging or backup dirs may be left behind",
+		);
+	};
+
+	test("a mirror whose GA-listed archive still holds a prerelease is rejected", async () => {
+		archiveBytes = buildArchive("c8run-8.11.0-alpha2", "alpha2");
+
+		const result = await start(baseUrl);
+		const combined = result.stdout + result.stderr;
+
+		assert.strictEqual(result.status, 1, combined);
+		assert.match(
+			combined,
+			/downloaded c8run 8\.11 is a prerelease build \(8\.11\.0-alpha2\); "stable" needs a GA build/,
+		);
+		assert.strictEqual(launched(), "");
+		assertAlphaKept();
+	});
+
+	test("a corrupt archive leaves the existing build usable", async () => {
+		archiveBytes = Buffer.from("not an archive");
+
+		const result = await start(baseUrl);
+
+		assert.strictEqual(result.status, 1, result.stdout + result.stderr);
+		assert.strictEqual(launched(), "");
+		assertAlphaKept();
+	});
+
+	test("a build started by another c8ctl during the download is not replaced", async () => {
+		// Simulate a concurrent `start alpha` that launched the alpha build mid-download.
+		onArchiveRequest = () =>
+			writeFileSync(
+				join(alphaBuildDir(), "camunda.process"),
+				String(process.pid),
+			);
+
+		const result = await start(baseUrl);
+		const combined = result.stdout + result.stderr;
+
+		assert.strictEqual(result.status, 1, combined);
+		assert.match(
+			combined,
+			/Refusing to replace c8run 8\.11: an instance started from it is still running/,
+		);
+		assert.ok(
+			existsSync(join(alphaBuildDir(), "camunda.process")),
+			"the running build's pidfile must survive",
+		);
+		assertAlphaKept();
 	});
 });

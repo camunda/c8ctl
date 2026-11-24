@@ -1669,23 +1669,20 @@ export async function ensureC8RunInstalled(config) {
 
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
 
-  // Only now that the GA build is downloaded: removing the prerelease earlier
-  // would leave nothing installed if the download failed. Not via
-  // purgeInstalledVersion, which would also delete the archive just downloaded;
-  // the running-instance guard above already applies.
-  if (prereleaseBuild) {
-    logger.info(`Replacing the prerelease build of ${config.version}...`);
-    rmSync(installDir, { recursive: true, force: true });
+  if (config.requireGA) {
+    await installGABuild(config, archivePath, installDir);
+  } else {
+    await extractArchive(archivePath, installDir);
   }
-  await extractArchive(archivePath, installDir);
 
   // Clean up the downloaded archive to save disk space
   if (existsSync(archivePath)) {
     rmSync(archivePath);
   }
 
-  const binaryPath = getC8RunBinaryPath(config);
-  await chmod(binaryPath, 0o755);
+  if (!config.requireGA) {
+    await chmod(getC8RunBinaryPath(config), 0o755);
+  }
 
   // Store the ETag for rolling versions so future checks can detect new releases
   if (config.isRolling && etag) {
@@ -1693,6 +1690,61 @@ export async function ensureC8RunInstalled(config) {
   }
 
   logger.info(`c8run ${config.version} installed successfully.`);
+}
+
+/**
+ * Install the archive for `stable` without ever leaving a prerelease or
+ * nothing in place: extract into a staging dir, require a GA launcher there,
+ * then swap it in. Any failure before the swap leaves the existing install
+ * (e.g. a usable alpha build) untouched.
+ */
+async function installGABuild(config, archivePath, installDir) {
+  const logger = getLogger();
+  const stagingRoot = join(config.cacheDir, `.staging-c8run-${config.version}-${process.pid}`);
+  const stagedDir = join(stagingRoot, `c8run-${config.version}`);
+  // Dot-prefixed so neither dir is ever listed as an installed version ("c8run-*").
+  const backupDir = join(config.cacheDir, `.replaced-c8run-${config.version}-${process.pid}`);
+  rmSync(stagingRoot, { recursive: true, force: true });
+
+  try {
+    await extractArchive(archivePath, stagedDir);
+    const stagedBinary = findC8RunBinaryPath({ cacheDir: stagingRoot, version: config.version });
+    if (!stagedBinary) {
+      throw new Error(`The downloaded c8run ${config.version} archive does not contain a c8run launcher.`);
+    }
+    const stagedBuild = basename(dirname(stagedBinary));
+    if (isPrereleaseBuild(stagedBuild)) {
+      throw new Error(
+        `The downloaded c8run ${config.version} is a prerelease build (${stagedBuild.slice('c8run-'.length)}); ` +
+          '"stable" needs a GA build. Try again once the GA build is published, or start an explicit GA version.',
+      );
+    }
+    await chmod(stagedBinary, 0o755);
+
+    // Rechecked here: another c8ctl may have started this version during the download.
+    if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+      throw new Error(
+        `Refusing to replace c8run ${config.version}: an instance started from it is still running. ` +
+          'Stop it first with "c8ctl cluster stop".',
+      );
+    }
+
+    const replacing = existsSync(installDir);
+    if (replacing) {
+      logger.info(`Replacing the existing c8run ${config.version} build...`);
+      rmSync(backupDir, { recursive: true, force: true });
+      renameSync(installDir, backupDir);
+    }
+    try {
+      renameSync(stagedDir, installDir);
+    } catch (error) {
+      if (replacing) renameSync(backupDir, installDir);
+      throw error;
+    }
+    if (replacing) rmSync(backupDir, { recursive: true, force: true });
+  } finally {
+    rmSync(stagingRoot, { recursive: true, force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------

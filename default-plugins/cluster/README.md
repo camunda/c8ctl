@@ -86,8 +86,11 @@ shipped in the plugin's `package.json`.
 `stable` never launches a prerelease build. If the install for its version
 still holds an alpha build (for example, a `8.11` install made through `alpha`
 before 8.11 went GA), `start` and `install` download the GA build and replace
-it. If that download fails, the alpha build is kept and the error says that
-only a prerelease build is installed.
+it. The GA build is extracted and checked in a staging directory first, so if
+the download or extraction fails, the archive still holds a prerelease, or
+another c8ctl has started that build in the meantime, the alpha build is kept.
+When the download fails, the error says that only a prerelease build is
+installed.
 
 ### Resilient running-state tracking
 
