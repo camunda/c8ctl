@@ -36,7 +36,7 @@ import {
 	realpathSync,
 	statSync,
 } from "node:fs";
-import { join, matchesGlob } from "node:path";
+import { join } from "node:path";
 import { isRecord, normalizeToError } from "../../core/index.ts";
 import {
 	CAMUNDA_PROJECT_FILE,
@@ -46,6 +46,7 @@ import {
 	parseCamundaJson,
 } from "./camunda-json.ts";
 import {
+	matchesGlob,
 	matchesParsedPattern,
 	type ParsedPattern,
 	parsePattern,
