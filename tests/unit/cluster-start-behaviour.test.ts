@@ -13,11 +13,27 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, describe, test } from "node:test";
+import {
+	after,
+	afterEach,
+	before,
+	beforeEach,
+	describe,
+	test,
+} from "node:test";
 import { c8WithEnv } from "../utils/cli.ts";
 import { listenOnLoopback, sendHalfThenDrop } from "../utils/http-server.ts";
 
@@ -178,5 +194,125 @@ describe("CLI behavioural: cluster start with a dropping download", () => {
 			!result.stdout.includes("[verbose]"),
 			`Expected no download diagnostics on stdout, got:\n${result.stdout}`,
 		);
+	});
+});
+
+// Fake c8run builds are POSIX shell scripts, so this runs on macOS and Linux only.
+const ARCHIVE_EXT = process.platform === "darwin" ? "zip" : "tar.gz";
+
+describe("CLI behavioural: stable never launches a prerelease build", {
+	skip: process.platform === "win32",
+}, () => {
+	let cacheDir: string;
+	let server: Server;
+	let baseUrl: string;
+
+	/** A c8run that records which build ran, then fails like a missing JAVA_HOME. */
+	function writeFakeC8Run(dir: string, label: string) {
+		mkdirSync(dir, { recursive: true });
+		const binary = join(dir, "c8run");
+		writeFileSync(
+			binary,
+			`#!/bin/sh\necho ${label} >> "$C8RUN_CACHE_DIR/launched.log"\necho "failed to get JAVA_HOME" >&2\nexit 7\n`,
+		);
+		chmodSync(binary, 0o755);
+	}
+
+	const launched = () => {
+		const log = join(cacheDir, "launched.log");
+		return existsSync(log) ? readFileSync(log, "utf-8").trim() : "";
+	};
+	const alphaBuildDir = () =>
+		join(cacheDir, "c8run-8.11", "c8run-8.11.0-alpha1");
+
+	beforeEach(async () => {
+		cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-stable-ga-"));
+		// Installed through `alpha` while 8.11 was alpha-only: the rolling dir holds an alpha build.
+		writeFakeC8Run(alphaBuildDir(), "alpha");
+
+		// 8.11 has since gone GA; its rolling archive now holds the GA build.
+		const archiveSrc = join(cacheDir, "archive-src");
+		writeFakeC8Run(join(archiveSrc, "c8run-8.11.0"), "ga");
+		// The download center ships .zip for macOS and .tar.gz for Linux.
+		const archive = join(cacheDir, `ga.${ARCHIVE_EXT}`);
+		if (ARCHIVE_EXT === "zip") {
+			execFileSync("zip", ["-qr", archive, "c8run-8.11.0"], {
+				cwd: archiveSrc,
+			});
+		} else {
+			execFileSync("tar", ["-czf", archive, "-C", archiveSrc, "c8run-8.11.0"]);
+		}
+		rmSync(archiveSrc, { recursive: true });
+		const archiveBytes = readFileSync(archive);
+		rmSync(archive);
+
+		server = createServer((req, res) => {
+			if (req.url?.endsWith(`.${ARCHIVE_EXT}`)) {
+				res.writeHead(200, { "content-length": archiveBytes.length });
+				res.end(archiveBytes);
+				return;
+			}
+			res.end(
+				["8.9/", "8.9.0/", "8.11/", "8.11.0-alpha1/", "8.11.0/"]
+					.map((d) => `<a href="${d}">${d}</a>`)
+					.join(""),
+			);
+		});
+		baseUrl = `http://127.0.0.1:${await listenOnLoopback(server)}/c8run/`;
+	});
+
+	afterEach(() => {
+		server.close();
+		rmSync(cacheDir, { recursive: true, force: true });
+	});
+
+	const start = (downloadUrl: string, ...args: string[]) =>
+		c8WithEnv(
+			{
+				C8RUN_CACHE_DIR: cacheDir,
+				C8CTL_OUTPUT_MODE: "text",
+				C8CTL_C8RUN_DOWNLOAD_URL: downloadUrl,
+				C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
+			},
+			"cluster",
+			"start",
+			...args,
+		);
+
+	test("online, stable replaces the alpha build in the rolling dir with the GA build", async () => {
+		for (let run = 1; run <= 2; run++) {
+			const result = await start(baseUrl);
+			assert.strictEqual(result.status, 7, result.stdout + result.stderr);
+		}
+
+		assert.strictEqual(launched(), "ga\nga");
+		assert.strictEqual(existsSync(alphaBuildDir()), false);
+	});
+
+	test("offline, stable explains that only an alpha build is installed and keeps it", async () => {
+		writeFileSync(join(cacheDir, "alias-stable.resolved"), "8.11");
+		writeFileSync(join(cacheDir, "alias-alpha.resolved"), "8.11");
+		// Bind then close a server to obtain a port that refuses connections.
+		const closed = createServer();
+		const port = await listenOnLoopback(closed);
+		await new Promise<void>((resolve) => closed.close(() => resolve()));
+		const offline = `http://127.0.0.1:${port}/c8run/`;
+
+		const stable = await start(offline);
+		const combined = stable.stdout + stable.stderr;
+		assert.strictEqual(stable.status, 1, combined);
+		assert.match(
+			combined,
+			/Only a prerelease build of 8\.11 is installed \(8\.11\.0-alpha1\); "stable" needs a GA build\./,
+		);
+		assert.strictEqual(launched(), "");
+		assert.ok(
+			existsSync(alphaBuildDir()),
+			"the alpha build must survive a failed download",
+		);
+
+		// alpha itself still launches the installed prerelease.
+		assert.strictEqual((await start(offline, "alpha")).status, 7);
+		assert.strictEqual(launched(), "alpha");
 	});
 });

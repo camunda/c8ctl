@@ -232,9 +232,9 @@ function readLocalAliasMapping(cacheDir, alias) {
  */
 function findInstalledAliasTarget(cacheDir, value, alias) {
   const accepts = (version) => {
-    const binaryPath = findC8RunBinaryPath({ cacheDir, version });
-    if (!binaryPath) return false;
-    return alias !== 'stable' || !isPrereleaseBuild(basename(dirname(binaryPath)));
+    const build = installedBuildName(cacheDir, version);
+    if (!build) return false;
+    return alias !== 'stable' || !isPrereleaseBuild(build);
   };
 
   if (accepts(value)) return value;
@@ -255,6 +255,39 @@ function findInstalledAliasTarget(cacheDir, value, alias) {
 /** True for a build dir like "c8run-8.10.0-alpha1" (anything with a semver prerelease suffix). */
 function isPrereleaseBuild(buildDirName) {
   return /^c8run-\d+\.\d+(\.\d+)?-/.test(buildDirName);
+}
+
+/** Name of the build dir whose c8run would launch for `version` (e.g. "c8run-8.10.0-alpha1"), or null. */
+function installedBuildName(cacheDir, version) {
+  const binaryPath = findC8RunBinaryPath({ cacheDir, version });
+  return binaryPath ? basename(dirname(binaryPath)) : null;
+}
+
+/** The prerelease build installed for `version`, or null when none is installed or it is GA. */
+function installedPrereleaseBuild(cacheDir, version) {
+  const build = installedBuildName(cacheDir, version);
+  return build && isPrereleaseBuild(build) ? build : null;
+}
+
+/**
+ * Explain why `stable` has no usable local install when the version it would
+ * resolve to only holds a prerelease build — either `version` itself or the
+ * cached `stable` mapping (which resolution skips for that reason). Null otherwise.
+ */
+function describePrereleaseOnlyStable(cacheDir, version) {
+  let cached = null;
+  try {
+    cached = readFileSync(getAliasMappingPath(cacheDir, 'stable'), 'utf-8').trim();
+  } catch {
+    // No cached mapping
+  }
+  for (const candidate of [version, cached]) {
+    const build = candidate && installedPrereleaseBuild(cacheDir, candidate);
+    if (build) {
+      return `Only a prerelease build of ${candidate} is installed (${build.slice('c8run-'.length)}); "stable" needs a GA build.`;
+    }
+  }
+  return null;
 }
 
 /** Persist an alias mapping. Returns false if it could not be written. */
@@ -1555,7 +1588,16 @@ export async function hasNewerVersionAvailable(config) {
 export async function ensureC8RunInstalled(config) {
   const logger = getLogger();
 
-  if (isC8RunInstalled(config)) {
+  // `stable` must never launch a prerelease, e.g. a rolling dir still holding
+  // the alpha build installed through `alpha` before that minor went GA.
+  const prereleaseBuild = config.requireGA ? installedPrereleaseBuild(config.cacheDir, config.version) : null;
+
+  if (prereleaseBuild) {
+    logger.info(
+      `c8run ${config.version} holds a prerelease build (${prereleaseBuild.slice('c8run-'.length)}); ` +
+        '"stable" needs a GA build, so it will be replaced.',
+    );
+  } else if (isC8RunInstalled(config)) {
     if (config.checkForUpdates) {
       // Explicitly asked to check for updates (e.g. install subcommand with a rolling version)
       const hasUpdate = await hasNewerVersionAvailable(config);
@@ -1613,11 +1655,28 @@ export async function ensureC8RunInstalled(config) {
     );
   }
 
-  logger.info('No local installation found. Setting up...');
+  if (!prereleaseBuild) logger.info('No local installation found. Setting up...');
 
-  const { archivePath, etag } = await downloadC8Run(config);
+  let download;
+  try {
+    download = await downloadC8Run(config);
+  } catch (error) {
+    const note = config.requireGA && describePrereleaseOnlyStable(config.cacheDir, config.version);
+    if (note) throw new Error(`${note} ${error?.message ?? error}`, { cause: error?.cause });
+    throw error;
+  }
+  const { archivePath, etag } = download;
 
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
+
+  // Only now that the GA build is downloaded: removing the prerelease earlier
+  // would leave nothing installed if the download failed. Not via
+  // purgeInstalledVersion, which would also delete the archive just downloaded;
+  // the running-instance guard above already applies.
+  if (prereleaseBuild) {
+    logger.info(`Replacing the prerelease build of ${config.version}...`);
+    rmSync(installDir, { recursive: true, force: true });
+  }
   await extractArchive(archivePath, installDir);
 
   // Clean up the downloaded archive to save disk space
@@ -3899,6 +3958,8 @@ export const commands = {
       checkForUpdateHint: parsed.subcommand === 'start' && rolling,
       // --verbose: detailed HTTP diagnostics for the c8run download
       verbose: ctx?.verbose === true,
+      // stable: reject (and replace) an install whose build is a prerelease
+      requireGA: versionSpec === 'stable',
     };
 
     // For start with a named alias, check in the background whether the

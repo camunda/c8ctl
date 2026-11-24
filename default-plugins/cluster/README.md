@@ -83,6 +83,12 @@ patch releases.
 If the download server is unreachable, the aliases fall back to the values
 shipped in the plugin's `package.json`.
 
+`stable` never launches a prerelease build. If the install for its version
+still holds an alpha build (for example, a `8.11` install made through `alpha`
+before 8.11 went GA), `start` and `install` download the GA build and replace
+it. If that download fails, the alpha build is kept and the error says that
+only a prerelease build is installed.
+
 ### Resilient running-state tracking
 
 A running cluster is tracked both by c8run's own `.process` pidfiles (which live
