@@ -96,6 +96,7 @@ c8ctl mcp install                         # orchestration, all detected harnesse
 c8ctl mcp install --docs                  # docs only, no cluster profile needed
 c8ctl mcp install cursor --docs --orchestration
 c8ctl mcp uninstall cursor --docs         # leaves orchestration untouched
+c8ctl mcp list                            # read-only: managed entries and their profiles
 ```
 
 Orchestration references the selected saved profile and does not copy credentials. Use `--profile` and `--alias` for another cluster. `--dry-run` previews the selected entries without writing. See `c8ctl help mcp` for supported harnesses.
