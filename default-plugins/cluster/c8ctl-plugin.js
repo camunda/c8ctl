@@ -216,7 +216,7 @@ function readLocalAliasMapping(cacheDir, alias) {
   if (!existsSync(filePath)) return null;
   try {
     // Only use the cached mapping if the version is actually installed
-    return findInstalledAliasTarget(cacheDir, readFileSync(filePath, 'utf-8').trim());
+    return findInstalledAliasTarget(cacheDir, readFileSync(filePath, 'utf-8').trim(), alias);
   } catch {
     return null;
   }
@@ -226,9 +226,10 @@ function readLocalAliasMapping(cacheDir, alias) {
  * Return the installed version that satisfies an alias target, or null.
  * An exact install wins; for a rolling minor pattern ("8.9") the highest
  * installed pin in that minor line ("8.9.5") also counts, so a compatible
- * pinned install is not re-downloaded (#431).
+ * pinned install is not re-downloaded (#431). For `stable`, prerelease pins
+ * ("8.10.0-alpha1") never count, so the stable alias can't land on an alpha.
  */
-function findInstalledAliasTarget(cacheDir, value) {
+function findInstalledAliasTarget(cacheDir, value, alias) {
   if (isC8RunInstalled({ cacheDir, version: value })) return value;
 
   if (isMinorVersionPattern(value)) {
@@ -236,6 +237,7 @@ function findInstalledAliasTarget(cacheDir, value) {
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const match = installedVersions
       .filter((v) => v.startsWith(value + '.'))
+      .filter((v) => alias !== 'stable' || !v.includes('-'))
       .reverse()
       .find((v) => isC8RunInstalled({ cacheDir, version: v }));
     if (match) return match;
@@ -300,7 +302,7 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion, cach
           const remote = parseVersionsFromHtml(html);
           const remoteVersion = remote?.[versionSpec];
           if (!remoteVersion || !isRemoteMinorNewer(remoteVersion, resolvedVersion)) return;
-          if (cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion)) {
+          if (cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion, versionSpec)) {
             storeLocalAliasMapping(cacheDir, versionSpec, remoteVersion);
             logger.info(
               `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed. ` +
@@ -1751,6 +1753,9 @@ async function startC8Run(config, debug = false, startArgs = []) {
   });
 
   if (typeof proc.pid !== 'number') {
+    // spawn() reports this failure via an async 'error' event; without a
+    // listener it would crash the process while the hints are flushed below.
+    proc.on('error', (err) => logger.error(`Failed to spawn c8run: ${err.message}`));
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
     logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
