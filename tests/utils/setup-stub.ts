@@ -42,8 +42,12 @@
  *                                   written to this file as JSON.
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "stop-cluster",
+ *                                   "purge-cluster", "delete-cluster",
  *                                   "install-skills", "list-skills",
  *                                   "remove-modeler", "probe-modeler").
+ *   C8RUN_CACHE_DIR=dir           — the fake `cluster purge`/`delete`
+ *                                   children mirror the real plugin's
+ *                                   effects, but only inside this dir.
  *   C8CTL_SETUP_STUB_MODELER=absent — the faked `modeler uninstall --dry-run`
  *                                   probe reports no managed installation,
  *                                   so removal previews omit Modeler.
@@ -460,6 +464,49 @@ Object.defineProperty(childProcess, "spawn", {
 				clusterRunning = false;
 				return fakeChild(0, {
 					stdout: "Stopped local Camunda 8 cluster.\n",
+				});
+			}
+			// purge/delete mirror the real plugin's fs effects, but only inside
+			// the cache dir the test pinned via C8RUN_CACHE_DIR — without it the
+			// fake must not touch a developer's real c8run cache.
+			const stubCacheDir = process.env.C8RUN_CACHE_DIR;
+			const versionArg = argv[argv.length - 1];
+			if (argv.includes("purge")) {
+				if (failStep === "purge-cluster") {
+					return fakeChild(1, {
+						stderr: "stubbed cluster purge failure diagnostics\n",
+					});
+				}
+				let stdout = `No runtime data found for ${versionArg} — nothing to delete.\n`;
+				if (stubCacheDir) {
+					const dataDir = join(stubCacheDir, "camunda-data");
+					if (fs.existsSync(dataDir)) {
+						fs.rmSync(dataDir, { recursive: true, force: true });
+						stdout = "  deleted: camunda-data\n";
+					}
+				}
+				return fakeChild(0, { stdout });
+			}
+			if (argv.includes("delete")) {
+				if (failStep === "delete-cluster") {
+					return fakeChild(1, {
+						stderr: "stubbed cluster delete failure diagnostics\n",
+					});
+				}
+				if (
+					stubCacheDir &&
+					fs.existsSync(join(stubCacheDir, `c8run-${versionArg}`))
+				) {
+					fs.rmSync(join(stubCacheDir, `c8run-${versionArg}`), {
+						recursive: true,
+						force: true,
+					});
+					return fakeChild(0, {
+						stdout: `Version ${versionArg} has been deleted.\n`,
+					});
+				}
+				return fakeChild(0, {
+					stdout: `Version ${versionArg} is not installed locally.\n`,
 				});
 			}
 			return fakeChild(1);

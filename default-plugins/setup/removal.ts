@@ -13,6 +13,7 @@ import {
 	planSetupBlueprintRemovals,
 	type SetupBlueprintRemoval,
 } from "./blueprint-scaffold.ts";
+import { installedCamunda8RunVersions } from "./detectors.ts";
 
 export interface SetupMcpRemoval {
 	readonly plan: McpConfigPlan;
@@ -48,6 +49,19 @@ export interface SetupModelerInspectionFailure {
 	readonly message: string;
 }
 
+export interface SetupClusterRemoval {
+	/**
+	 * Installed Camunda 8 Run versions. Teardown stops the local cluster,
+	 * purges its runtime data (removing setup-deployed process state with
+	 * it), and deletes every listed version's downloaded binary.
+	 */
+	readonly versions: readonly string[];
+}
+
+export interface SetupClusterInspectionFailure {
+	readonly message: string;
+}
+
 export interface SetupRemovalInventory {
 	readonly mcp: readonly SetupMcpRemoval[];
 	readonly mcpPlanningFailures: readonly SetupMcpPlanningFailure[];
@@ -57,6 +71,8 @@ export interface SetupRemovalInventory {
 	readonly blueprintPlanningFailures: readonly SetupBlueprintPlanningFailure[];
 	readonly modeler: SetupModelerRemoval | undefined;
 	readonly modelerInspectionFailure: SetupModelerInspectionFailure | undefined;
+	readonly cluster: SetupClusterRemoval | undefined;
+	readonly clusterInspectionFailure: SetupClusterInspectionFailure | undefined;
 }
 
 const SETUP_MCP_HARNESSES = [
@@ -155,6 +171,20 @@ export async function inspectSetupRemovalInventory({
 		}
 	}
 
+	// Setup's local cluster is the cache the cluster plugin manages. The
+	// detector mirrors that plugin's install layout, so a cache the plugin
+	// sees is a cache teardown can hand back to its stop/purge/delete.
+	let cluster: SetupClusterRemoval | undefined;
+	let clusterInspectionFailure: SetupClusterInspectionFailure | undefined;
+	try {
+		const versions = installedCamunda8RunVersions();
+		if (versions.length > 0) cluster = { versions };
+	} catch (error) {
+		clusterInspectionFailure = {
+			message: error instanceof Error ? error.message : String(error),
+		};
+	}
+
 	return {
 		mcp,
 		mcpPlanningFailures,
@@ -164,5 +194,7 @@ export async function inspectSetupRemovalInventory({
 		blueprintPlanningFailures,
 		modeler,
 		modelerInspectionFailure,
+		cluster,
+		clusterInspectionFailure,
 	};
 }

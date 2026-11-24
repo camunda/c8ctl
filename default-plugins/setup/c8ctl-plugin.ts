@@ -109,7 +109,6 @@ interface SetupFlags {
 	readonly "no-modeler"?: boolean;
 	readonly "docs-mcp"?: boolean;
 	readonly remove?: boolean;
-	readonly "stop-cluster"?: boolean;
 }
 
 /**
@@ -867,10 +866,7 @@ function modelerRemovalLine(message: string): string {
 	return `Remove Camunda Desktop Modeler with \`c8ctl modeler uninstall\` (${message})`;
 }
 
-function setupRemovalPreview(
-	inventory: SetupRemovalInventory,
-	stopCluster: boolean,
-): {
+function setupRemovalPreview(inventory: SetupRemovalInventory): {
 	text: string;
 	payload: {
 		command: "setup";
@@ -921,6 +917,12 @@ function setupRemovalPreview(
 		lines.push(`  Warning: ${warning}`);
 	}
 
+	if (inventory.clusterInspectionFailure) {
+		const warning = `Could not inspect the local Camunda 8 Run installation: ${inventory.clusterInspectionFailure.message}. The cluster was left untouched.`;
+		warnings.push(warning);
+		lines.push(`  Warning: ${warning}`);
+	}
+
 	for (const failure of inventory.blueprintPlanningFailures) {
 		const warning = `Could not inspect setup blueprint marker in ${failure.directory}: ${failure.message}. That project was left untouched.`;
 		warnings.push(warning);
@@ -963,10 +965,14 @@ function setupRemovalPreview(
 		for (const file of files) lines.push(`    ${file}`);
 	}
 
-	if (stopCluster) {
-		items.push({ type: "local-cluster", action: "stop" });
+	if (inventory.cluster) {
+		items.push({
+			type: "local-cluster",
+			action: "remove",
+			versions: [...inventory.cluster.versions],
+		});
 		lines.push(
-			"  Stop the local cluster with `c8ctl cluster stop` (downloaded binaries and runtime data will be kept)",
+			`  Stop the local cluster and remove Camunda 8 Run ${inventory.cluster.versions.join(", ")} (runtime data and downloaded binaries will be deleted)`,
 		);
 	}
 
@@ -997,14 +1003,14 @@ function removalFailure(ctx: PluginCtx, action: string, error: unknown): void {
 async function applySetupRemoval(
 	ctx: PluginCtx,
 	inventory: SetupRemovalInventory,
-	stopCluster: boolean,
 ): Promise<void> {
 	const { logger } = ctx;
 	let failures =
 		inventory.mcpPlanningFailures.length +
 		inventory.skillDiscoveryFailures.length +
 		inventory.blueprintPlanningFailures.length +
-		(inventory.modelerInspectionFailure ? 1 : 0);
+		(inventory.modelerInspectionFailure ? 1 : 0) +
+		(inventory.clusterInspectionFailure ? 1 : 0);
 	for (const failure of inventory.mcpPlanningFailures) {
 		logger.error(
 			`Could not inspect MCP configuration for ${failure.harness}: ${failure.message}. That configuration was left untouched.`,
@@ -1025,17 +1031,48 @@ async function applySetupRemoval(
 			`Could not inspect the Camunda Desktop Modeler installation: ${inventory.modelerInspectionFailure.message}. Modeler was left untouched.`,
 		);
 	}
+	if (inventory.clusterInspectionFailure) {
+		logger.error(
+			`Could not inspect the local Camunda 8 Run installation: ${inventory.clusterInspectionFailure.message}. The cluster was left untouched.`,
+		);
+	}
 
-	if (stopCluster) {
+	// The cluster plugin owns cluster teardown. Stop first so purge and
+	// delete are not refused for a live install; then, per previewed
+	// version, purge the runtime data (the setup-deployed process state
+	// goes with it) and delete the downloaded binary. Only the previewed
+	// versions are touched: a version installed while the confirmation was
+	// open belongs to a target the user never confirmed.
+	if (inventory.cluster) {
 		try {
 			await spawnClusterStop(ctx);
-			logger.info(
-				"Stopped the local cluster; downloaded binaries and runtime data were kept.",
-				{ essential: true },
-			);
 		} catch (error) {
 			failures += 1;
 			removalFailure(ctx, "stop the local cluster", error);
+		}
+		for (const version of inventory.cluster.versions) {
+			try {
+				await spawnC8ctl(ctx, ["cluster", "purge", version], {
+					promoteStdoutLine: () => true,
+					stderrPassthrough: true,
+				});
+			} catch (error) {
+				failures += 1;
+				removalFailure(
+					ctx,
+					`delete the runtime data of Camunda 8 Run ${version}`,
+					error,
+				);
+			}
+			try {
+				await spawnC8ctl(ctx, ["cluster", "delete", version], {
+					promoteStdoutLine: () => true,
+					stderrPassthrough: true,
+				});
+			} catch (error) {
+				failures += 1;
+				removalFailure(ctx, `remove Camunda 8 Run ${version}`, error);
+			}
 		}
 	}
 
@@ -1181,15 +1218,12 @@ async function applySetupRemoval(
 	}
 }
 
-async function runSetupRemoval(
-	ctx: PluginCtx,
-	stopCluster: boolean,
-): Promise<void> {
+async function runSetupRemoval(ctx: PluginCtx): Promise<void> {
 	const { logger } = ctx;
 	const inventory = await inspectSetupRemovalInventory({
 		detectModeler: detectModelerRemoval,
 	});
-	const preview = setupRemovalPreview(inventory, stopCluster);
+	const preview = setupRemovalPreview(inventory);
 	const jsonMode = logger.mode === "json";
 
 	if (ctx.dryRun || jsonMode) {
@@ -1206,7 +1240,8 @@ async function runSetupRemoval(
 			inventory.mcpPlanningFailures.length > 0 ||
 			inventory.skillDiscoveryFailures.length > 0 ||
 			inventory.blueprintPlanningFailures.length > 0 ||
-			inventory.modelerInspectionFailure
+			inventory.modelerInspectionFailure ||
+			inventory.clusterInspectionFailure
 		) {
 			process.exitCode = 1;
 		}
@@ -1227,20 +1262,14 @@ async function runSetupRemoval(
 			return;
 		}
 	} else if (!ctx.yes) {
-		const command = [
-			"c8ctl",
-			"setup",
-			"--remove",
-			...(stopCluster ? ["--stop-cluster"] : []),
-			"--yes",
-		].join(" ");
-		logger.info(`Nothing was removed. Run "${command}" to confirm.`, {
-			essential: true,
-		});
+		logger.info(
+			'Nothing was removed. Run "c8ctl setup --remove --yes" to confirm.',
+			{ essential: true },
+		);
 		return;
 	}
 
-	await applySetupRemoval(ctx, inventory, stopCluster);
+	await applySetupRemoval(ctx, inventory);
 }
 
 // ── The command ────────────────────────────────────────────────────
@@ -1248,16 +1277,13 @@ async function runSetupRemoval(
 async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 	const { logger } = ctx;
 
-	if (flags["stop-cluster"] && !flags.remove) {
-		throw new Error("--stop-cluster can only be used with --remove.");
-	}
 	if (flags.remove) {
 		if (flags.modeler || flags["no-modeler"] || flags["docs-mcp"]) {
 			throw new Error(
 				"--remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.",
 			);
 		}
-		await runSetupRemoval(ctx, flags["stop-cluster"] === true);
+		await runSetupRemoval(ctx);
 		return;
 	}
 
@@ -1421,12 +1447,23 @@ async function setupHandler(
 	ctx?: PluginCtx,
 ): Promise<void> {
 	if (!ctx) throw new Error("setup requires the plugin host context");
+	if (ctx.unrecognizedFlags?.includes("--stop-cluster")) {
+		renderCommandFailure(
+			ctx.logger,
+			"Failed to setup",
+			new Error(
+				"--stop-cluster no longer exists: c8ctl setup --remove stops the local cluster and deletes its runtime data and downloaded Camunda 8 Run binaries after confirmation.",
+			),
+			{ verbose: ctx.verbose },
+		);
+		process.exitCode = 1;
+		return;
+	}
 	const flags: SetupFlags = {
 		modeler: flagsRecord?.modeler === true,
 		"no-modeler": flagsRecord?.["no-modeler"] === true,
 		"docs-mcp": flagsRecord?.["docs-mcp"] === true,
 		remove: flagsRecord?.remove === true,
-		"stop-cluster": flagsRecord?.["stop-cluster"] === true,
 	};
 	try {
 		await runSetup(ctx, flags);
@@ -1450,9 +1487,7 @@ A run without a selection (piped output, CI) installs nothing unless you pass --
 
 Exit code 0: every selected setup step succeeded, or nothing was installed for lack of a go-ahead (wizard cancelled with Escape; a piped, --quiet or JSON-mode run without --yes; --json or --dry-run printing the plan). Ctrl+C ends the wizard by signal (130 on POSIX shells). A re-run reuses finished work where possible; the deploy, process start and skills install repeat by design. Exit code 1: arguments failed validation, or a step failed — other eligible steps still ran, while dependents (and the deploy finale after any failure) were skipped.
 
---remove shows setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, and marker-listed blueprint files before removing them. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Removal runs the owning commands: mcp uninstall, skills uninstall, and modeler uninstall. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
-
---stop-cluster is available only with --remove. It stops the local cluster without purging runtime data or deleting downloaded binaries.
+--remove shows setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, marker-listed blueprint files, and the local cluster before removing them: the cluster is stopped, and its runtime data and downloaded binaries are deleted — setup-deployed process state goes with the runtime data. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Removal runs the owning commands: cluster stop, purge and delete, mcp uninstall, skills uninstall, and modeler uninstall. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
 
 Removal exits 0 when every requested action succeeds, and 1 if any action fails; the other removal actions still run.`;
 
@@ -1480,10 +1515,6 @@ export const metadata: PluginMetadata = {
 					command: "c8ctl setup --remove --yes",
 					description: "Remove the previewed setup-managed components",
 				},
-				{
-					command: "c8ctl setup --remove --stop-cluster --yes",
-					description: "Also stop the local cluster without purging its data",
-				},
 			],
 		},
 	},
@@ -1508,12 +1539,7 @@ export const commands: PluginCommands = {
 			remove: {
 				type: "boolean",
 				description:
-					"Preview and remove setup-managed MCP entries, skills, Modeler, and blueprint files",
-			},
-			"stop-cluster": {
-				type: "boolean",
-				description:
-					"With --remove, stop the local cluster without purging its data",
+					"Preview and remove setup-managed MCP entries, skills, Modeler, blueprint files, and the local cluster",
 			},
 		},
 		handler: setupHandler,

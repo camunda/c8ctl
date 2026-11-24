@@ -196,6 +196,7 @@ function stubbedExecution({
 } = {}): {
 	cwd: string;
 	home: string;
+	c8runCache: string;
 	options: {
 		cwd: string;
 		nodeArgs: string[];
@@ -206,6 +207,7 @@ function stubbedExecution({
 	const cwd = mkdtempSync(join(tmpdir(), "c8ctl-setup-run-"));
 	const bin = join(cwd, "bin");
 	const home = join(cwd, "home");
+	const c8runCache = join(cwd, "c8run-cache");
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	mkdirSync(bin);
 	const fakeModeler = join(bin, "camunda-modeler");
@@ -214,6 +216,7 @@ function stubbedExecution({
 	return {
 		cwd,
 		home,
+		c8runCache,
 		options: {
 			cwd,
 			nodeArgs: ["--import", SETUP_STUB],
@@ -224,6 +227,10 @@ function stubbedExecution({
 				USERPROFILE: home,
 				APPDATA: join(home, "AppData", "Roaming"),
 				XDG_CONFIG_HOME: join(home, ".config"),
+				// Pin the c8run cache into the fixture, or the removal
+				// inventory would scan (and the faked children would delete)
+				// a developer's real Camunda 8 Run installation.
+				C8RUN_CACHE_DIR: c8runCache,
 				// These take precedence over HOME in the MCP helper — pin them
 				// into the fixture as well, or a developer who exports them
 				// would have their real harness config rewritten by the test.
@@ -236,6 +243,22 @@ function stubbedExecution({
 		},
 		cleanup: () => rmSync(cwd, { recursive: true, force: true }),
 	};
+}
+
+/**
+ * Plant a fake Camunda 8 Run install the removal inventory detects: the
+ * binary the install check looks for plus a runtime-data directory.
+ */
+function plantC8RunInstall(cache: string, ...versions: string[]): void {
+	const binary = process.platform === "win32" ? "c8run.exe" : "c8run";
+	for (const version of versions) {
+		const installDir = join(cache, `c8run-${version}`);
+		mkdirSync(installDir, { recursive: true });
+		writeFileSync(join(installDir, binary), "");
+	}
+	const dataDir = join(cache, "camunda-data");
+	mkdirSync(dataDir, { recursive: true });
+	writeFileSync(join(dataDir, "raft-partition.json"), "{}");
 }
 
 /**
@@ -455,7 +478,9 @@ describe("c8ctl setup", () => {
 		assert.match(result.stdout, /\[SUCCESS\]/);
 		assert.match(result.stdout, /--no-modeler/);
 		assert.match(result.stdout, /--remove/);
-		assert.match(result.stdout, /--stop-cluster/);
+		// The stop-only opt-in is retired: --remove tears the cluster down.
+		assert.doesNotMatch(result.stdout, /--stop-cluster/);
+		assert.match(result.stdout, /runtime data and downloaded binaries/);
 		// Removal delegates to the owning commands; Modeler is now included.
 		assert.match(
 			result.stdout,
@@ -490,7 +515,7 @@ describe("c8ctl setup", () => {
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 		assert.match(result.stdout, /setup/);
 		assert.match(result.stdout, /--remove/);
-		assert.match(result.stdout, /--stop-cluster/);
+		assert.doesNotMatch(result.stdout, /--stop-cluster/);
 	});
 
 	test("--yes runs every selected step and reports [SUCCESS] per step", async () => {
@@ -1250,14 +1275,12 @@ describe("c8ctl setup", () => {
 				stub.options,
 				"setup",
 				"--remove",
-				"--stop-cluster",
 				"--yes",
 			);
 			const output = `${removal.stderr}\n${removal.stdout}`;
 			assert.strictEqual(removal.status, 1, output);
 			assert.match(output, /Could not inspect MCP configuration for cursor/);
 			assert.match(output, /Could not inspect MCP configuration for vscode/);
-			assert.match(output, /Stopped the local cluster/);
 			assert.strictEqual(readFileSync(cursorConfigPath, "utf-8"), "{");
 			assert.strictEqual(
 				readFileSync(vscodeConfigPath, "utf-8"),
@@ -1305,7 +1328,6 @@ describe("c8ctl setup", () => {
 				stub.options,
 				"setup",
 				"--remove",
-				"--stop-cluster",
 				"--yes",
 			);
 			const output = `${removal.stderr}\n${removal.stdout}`;
@@ -1318,7 +1340,6 @@ describe("c8ctl setup", () => {
 				2,
 				output,
 			);
-			assert.match(output, /Stopped the local cluster/);
 			assert.match(output, /Removed MCP server "camunda"/);
 			assert.match(output, /Removed Camunda skill "camunda-c8ctl"/);
 			assert.strictEqual(readFileSync(malformedMarkerPath, "utf-8"), "{");
@@ -1630,7 +1651,7 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("removal JSON and dry-run only preview, and cluster stop requires removal", async () => {
+	test("removal JSON and dry-run only preview, and the retired --stop-cluster flag errors", async () => {
 		const stub = stubbedExecution();
 		try {
 			const installed = await c8WithOptions(stub.options, "setup", "--yes");
@@ -1639,6 +1660,10 @@ describe("c8ctl setup", () => {
 				0,
 				installed.stderr + installed.stdout,
 			);
+
+			plantC8RunInstall(stub.c8runCache, "8.10.0");
+			const installDir = join(stub.c8runCache, "c8run-8.10.0");
+			const dataDir = join(stub.c8runCache, "camunda-data");
 
 			const blueprintFile = join(
 				stub.cwd,
@@ -1655,20 +1680,22 @@ describe("c8ctl setup", () => {
 				stub.options,
 				"setup",
 				"--remove",
-				"--stop-cluster",
 				"--json",
 			);
 			assert.strictEqual(jsonPreview.status, 0, jsonPreview.stderr);
 			const jsonPayload: unknown = JSON.parse(jsonPreview.stdout);
 			assert.ok(isRecord(jsonPayload) && Array.isArray(jsonPayload.items));
 			assert.strictEqual(jsonPayload.preview, true);
-			assert.ok(
-				jsonPayload.items.some(
-					(item: unknown) => isRecord(item) && item.type === "local-cluster",
-				),
+			const clusterItem = jsonPayload.items.find(
+				(item: unknown) => isRecord(item) && item.type === "local-cluster",
 			);
+			assert.ok(isRecord(clusterItem));
+			assert.strictEqual(clusterItem.action, "remove");
+			assert.deepStrictEqual(clusterItem.versions, ["8.10.0"]);
 			assert.ok(existsSync(blueprintFile));
 			assert.ok(existsSync(skillDirectory));
+			assert.ok(existsSync(installDir));
+			assert.ok(existsSync(dataDir));
 
 			const dryRun = await c8WithOptions(
 				stub.options,
@@ -1683,48 +1710,97 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(dryRunPayload.preview, true);
 			assert.ok(existsSync(blueprintFile));
 			assert.ok(existsSync(skillDirectory));
+			assert.ok(existsSync(installDir));
 
-			const stopPreview = await c8WithOptions(
-				stub.options,
-				"setup",
-				"--remove",
-				"--stop-cluster",
-			);
-			assert.strictEqual(
-				stopPreview.status,
-				0,
-				stopPreview.stderr + stopPreview.stdout,
+			const preview = await c8WithOptions(stub.options, "setup", "--remove");
+			assert.strictEqual(preview.status, 0, preview.stderr + preview.stdout);
+			assert.match(
+				preview.stdout,
+				/Stop the local cluster and remove Camunda 8 Run 8\.10\.0/,
 			);
 			assert.match(
-				stopPreview.stdout,
-				/Run "c8ctl setup --remove --stop-cluster --yes" to confirm/,
+				preview.stdout,
+				/Run "c8ctl setup --remove --yes" to confirm/,
 			);
 			assert.ok(existsSync(blueprintFile));
 			assert.ok(existsSync(skillDirectory));
+			assert.ok(existsSync(installDir));
 
-			const invalid = await c8WithOptions(
-				stub.options,
-				"setup",
-				"--stop-cluster",
-			);
-			assert.strictEqual(invalid.status, 1);
-			assert.match(
-				invalid.stderr,
-				/--stop-cluster can only be used with --remove/,
-			);
-
-			const removed = await c8WithOptions(
+			const retired = await c8WithOptions(
 				stub.options,
 				"setup",
 				"--remove",
 				"--stop-cluster",
 				"--yes",
 			);
+			assert.strictEqual(retired.status, 1);
+			assert.match(`${retired.stderr}\n${retired.stdout}`, /--stop-cluster/);
+			assert.ok(existsSync(blueprintFile));
+			assert.ok(existsSync(installDir));
+
+			const retiredAlone = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--stop-cluster",
+			);
+			assert.strictEqual(retiredAlone.status, 1);
+			assert.match(
+				`${retiredAlone.stderr}\n${retiredAlone.stdout}`,
+				/--stop-cluster/,
+			);
+
+			const removed = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
 			assert.strictEqual(removed.status, 0, removed.stderr + removed.stdout);
 			assert.match(removed.stdout, /Stopped local Camunda 8 cluster/);
-			assert.match(removed.stdout, /runtime data were kept/);
+			assert.match(removed.stdout, /deleted: camunda-data/);
+			assert.match(removed.stdout, /Version 8\.10\.0 has been deleted/);
 			assert.ok(!existsSync(blueprintFile));
 			assert.ok(!existsSync(skillDirectory));
+			assert.ok(!existsSync(installDir));
+			assert.ok(!existsSync(dataDir));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("continues the remaining removals when cluster teardown fails", async () => {
+		const stub = stubbedExecution({ failStep: "delete-cluster" });
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			plantC8RunInstall(stub.c8runCache, "8.10.0");
+			const installDir = join(stub.c8runCache, "c8run-8.10.0");
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Stopped local Camunda 8 cluster/);
+			assert.match(output, /deleted: camunda-data/);
+			assert.match(output, /Could not remove Camunda 8 Run 8\.10\.0/);
+			// The binary survives its failed delete; the other teardowns ran.
+			assert.ok(existsSync(installDir));
+			assert.ok(!existsSync(join(stub.c8runCache, "camunda-data")));
+			assert.ok(
+				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
+			);
+			assert.ok(
+				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
+			);
 		} finally {
 			stub.cleanup();
 		}

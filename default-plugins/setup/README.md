@@ -12,10 +12,10 @@ development.
   `--yes`.
 - `c8ctl setup --yes` — set up the defaults without prompting (Rocket Launch
   blueprint).
-- `c8ctl setup --remove [--stop-cluster]` — preview and remove setup-managed
-  MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation,
-  and blueprint files; `--stop-cluster` also stops the local cluster without
-  purging its data.
+- `c8ctl setup --remove` — preview and remove setup-managed MCP entries,
+  Camunda skills, a c8ctl-managed Desktop Modeler installation, blueprint
+  files, and the local cluster: the cluster is stopped, and its runtime
+  data and downloaded Camunda 8 Run binaries are deleted.
 
 ## Architecture
 
@@ -29,12 +29,13 @@ only when a step fails.
 Removal orchestrates the same owners: the unified preview is built from
 shared inspection helpers and a `modeler uninstall --dry-run` probe, and after
 one confirmation the actual teardown runs as child commands —
-`c8ctl mcp uninstall` per harness,
+`c8ctl cluster stop` followed by `c8ctl cluster purge`/`delete` per installed
+version, `c8ctl mcp uninstall` per harness,
 `c8ctl skills uninstall --harness <harness> --yes`, and `c8ctl modeler uninstall`.
 
 ## Flags
 
-`--modeler`, `--no-modeler`, `--docs-mcp`, `--remove`, `--stop-cluster`, plus
+`--modeler`, `--no-modeler`, `--docs-mcp`, `--remove`, plus
 the global `--yes`, `--json`, `--dry-run`, `--quiet`, and `--verbose` flags.
 
 **Exit codes:** `0` when every selected step succeeded or nothing was
