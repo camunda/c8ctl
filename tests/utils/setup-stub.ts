@@ -477,14 +477,37 @@ Object.defineProperty(childProcess, "spawn", {
 						stderr: "stubbed cluster purge failure diagnostics\n",
 					});
 				}
-				let stdout = `No runtime data found for ${versionArg} — nothing to delete.\n`;
-				if (stubCacheDir) {
-					const dataDir = join(stubCacheDir, "camunda-data");
-					if (fs.existsSync(dataDir)) {
-						fs.rmSync(dataDir, { recursive: true, force: true });
-						stdout = "  deleted: camunda-data\n";
+				// Real layout: runtime data sits next to the version's binary —
+				// camunda-data plus the camunda-zeebe-* journal directory.
+				const deleted: string[] = [];
+				const installDir = stubCacheDir
+					? join(stubCacheDir, `c8run-${versionArg}`)
+					: undefined;
+				if (installDir && fs.existsSync(installDir)) {
+					const camundaData = join(installDir, "camunda-data");
+					if (fs.existsSync(camundaData)) {
+						fs.rmSync(camundaData, { recursive: true, force: true });
+						deleted.push("camunda-data");
+					}
+					for (const entry of fs.readdirSync(installDir, {
+						withFileTypes: true,
+					})) {
+						if (
+							!entry.isDirectory() ||
+							!entry.name.startsWith("camunda-zeebe-")
+						)
+							continue;
+						const journalDir = join(installDir, entry.name, "data");
+						if (fs.existsSync(journalDir)) {
+							fs.rmSync(journalDir, { recursive: true, force: true });
+							deleted.push(`${entry.name}/data`);
+						}
 					}
 				}
+				const stdout =
+					deleted.length > 0
+						? `Purged runtime data for ${versionArg}:\n${deleted.map((d) => `  deleted: ${d}\n`).join("")}`
+						: `No runtime data found for ${versionArg} — nothing to delete.\n`;
 				return fakeChild(0, { stdout });
 			}
 			if (argv.includes("delete")) {

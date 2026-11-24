@@ -247,18 +247,25 @@ function stubbedExecution({
 
 /**
  * Plant a fake Camunda 8 Run install the removal inventory detects: the
- * binary the install check looks for plus a runtime-data directory.
+ * binary the install check looks for plus runtime data next to it
+ * (camunda-data and the camunda-zeebe journal), mirroring the real layout
+ * the cluster plugin's purge deletes.
  */
 function plantC8RunInstall(cache: string, ...versions: string[]): void {
 	const binary = process.platform === "win32" ? "c8run.exe" : "c8run";
 	for (const version of versions) {
 		const installDir = join(cache, `c8run-${version}`);
-		mkdirSync(installDir, { recursive: true });
+		mkdirSync(join(installDir, "camunda-data"), { recursive: true });
 		writeFileSync(join(installDir, binary), "");
+		writeFileSync(join(installDir, "camunda-data", "state.json"), "{}");
+		mkdirSync(join(installDir, `camunda-zeebe-${version}`, "data"), {
+			recursive: true,
+		});
+		writeFileSync(
+			join(installDir, `camunda-zeebe-${version}`, "data", "raft.json"),
+			"{}",
+		);
 	}
-	const dataDir = join(cache, "camunda-data");
-	mkdirSync(dataDir, { recursive: true });
-	writeFileSync(join(dataDir, "raft-partition.json"), "{}");
 }
 
 /**
@@ -1663,7 +1670,7 @@ describe("c8ctl setup", () => {
 
 			plantC8RunInstall(stub.c8runCache, "8.10.0");
 			const installDir = join(stub.c8runCache, "c8run-8.10.0");
-			const dataDir = join(stub.c8runCache, "camunda-data");
+			const dataDir = join(stub.c8runCache, "c8run-8.10.0", "camunda-data");
 
 			const blueprintFile = join(
 				stub.cwd,
@@ -1794,13 +1801,42 @@ describe("c8ctl setup", () => {
 			assert.match(output, /Could not remove Camunda 8 Run 8\.10\.0/);
 			// The binary survives its failed delete; the other teardowns ran.
 			assert.ok(existsSync(installDir));
-			assert.ok(!existsSync(join(stub.c8runCache, "camunda-data")));
+			assert.ok(!existsSync(join(installDir, "camunda-data")));
 			assert.ok(
 				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 			);
 			assert.ok(
 				!existsSync(join(stub.home, ".claude", "skills", "camunda-c8ctl")),
 			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("removes a partial cluster installation whose binary is missing", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+			// A launcher deleted while runtime data remains: the install dir
+			// survives without a c8run binary.
+			const installDir = join(stub.c8runCache, "c8run-8.10.0");
+			mkdirSync(join(installDir, "camunda-data"), { recursive: true });
+			writeFileSync(join(installDir, "camunda-data", "state.json"), "{}");
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 0, output);
+			assert.match(
+				output,
+				/Stop the local cluster and remove Camunda 8 Run 8\.10\.0/,
+			);
+			assert.match(output, /deleted: camunda-data/);
+			assert.ok(!existsSync(installDir));
 		} finally {
 			stub.cleanup();
 		}

@@ -13,7 +13,7 @@ import {
 	planSetupBlueprintRemovals,
 	type SetupBlueprintRemoval,
 } from "./blueprint-scaffold.ts";
-import { installedCamunda8RunVersions } from "./detectors.ts";
+import { camunda8RunInstallDirs } from "./detectors.ts";
 
 export interface SetupMcpRemoval {
 	readonly plan: McpConfigPlan;
@@ -173,11 +173,13 @@ export async function inspectSetupRemovalInventory({
 
 	// Setup's local cluster is the cache the cluster plugin manages. The
 	// detector mirrors that plugin's install layout, so a cache the plugin
-	// sees is a cache teardown can hand back to its stop/purge/delete.
+	// sees is a cache teardown can hand back to its stop/purge/delete. Every
+	// install dir counts — including one whose binary went missing — so a
+	// partial install's runtime data is purged instead of left behind.
 	let cluster: SetupClusterRemoval | undefined;
 	let clusterInspectionFailure: SetupClusterInspectionFailure | undefined;
 	try {
-		const versions = installedCamunda8RunVersions();
+		const versions = camunda8RunInstallDirs();
 		if (versions.length > 0) cluster = { versions };
 	} catch (error) {
 		clusterInspectionFailure = {
