@@ -2415,7 +2415,7 @@ describe("c8ctl setup", () => {
 		const stub = stubbedExecution();
 		try {
 			const result = await runInteractive(
-				[{ waitFor: "Docs MCP server", keys: " \r" }],
+				[{ waitFor: "Docs MCP server", keys: " \t\r" }],
 				{
 					nodeArgs: stub.options.nodeArgs,
 					env: stub.options.env,
@@ -2479,7 +2479,7 @@ describe("c8ctl setup", () => {
 		try {
 			const result = await runInteractive(
 				[
-					{ waitFor: "Docs MCP server", keys: "\r" },
+					{ waitFor: "Docs MCP server", keys: "\t\r" },
 					{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\r" },
 				],
 				{
@@ -2530,7 +2530,7 @@ describe("c8ctl setup", () => {
 
 	test("interactive: Escape at the blueprint choice cancels too", async () => {
 		const result = await runInteractive([
-			{ waitFor: "Docs MCP server", keys: "\r" },
+			{ waitFor: "Docs MCP server", keys: "\t\r" },
 			{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\x1b" },
 		]);
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
@@ -2543,7 +2543,7 @@ describe("c8ctl setup", () => {
 		try {
 			const result = await runInteractive(
 				[
-					{ waitFor: "Docs MCP server", keys: "\r" },
+					{ waitFor: "Docs MCP server", keys: "\t\r" },
 					// Down past "Rocket Launch" to "Service worker", then Enter.
 					{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\x1b[B\r" },
 				],
@@ -2621,8 +2621,9 @@ describe("c8ctl setup", () => {
 		const stub = stubbedExecution();
 		try {
 			const result = await runInteractive(
-				// Down, down to "Starter blueprint", space to deselect, Enter.
-				[{ waitFor: "Docs MCP server", keys: "\x1b[B\x1b[B \r" }],
+				// Down, down to "Starter blueprint", space to deselect, then
+				// Tab to the submit button and Enter to confirm.
+				[{ waitFor: "Docs MCP server", keys: "\x1b[B\x1b[B \t\r" }],
 				{
 					nodeArgs: stub.options.nodeArgs,
 					env: stub.options.env,

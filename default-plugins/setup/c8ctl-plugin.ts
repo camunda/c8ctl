@@ -1431,6 +1431,7 @@ async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 	if (interactive) {
 		const result = await ctx.prompt.multiSelect({
 			message: "What should we set up for you?",
+			submitLabel: "Start setup",
 			options: SETUP_COMPONENTS.map((c) => ({
 				label: c.label,
 				description: c.why,
