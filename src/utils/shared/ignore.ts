@@ -116,7 +116,7 @@ export function matchesParsedPattern(
 /**
  * `path.matchesGlob`, looked up at call time. A named import would make Node.js
  * releases without it (<20.17, 22.0–22.4) fail to load the whole CLI, before
- * the unsupported-Node.js warning can print (#839).
+ * the unsupported-Node.js warning can print.
  */
 export function matchesGlob(path: string, pattern: string): boolean {
 	return nodePath.matchesGlob(path, pattern);
