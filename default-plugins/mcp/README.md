@@ -1,7 +1,7 @@
 # c8ctl-plugin-mcp
 
-Default c8ctl plugin that installs or uninstalls Camunda MCP (Model Context
-Protocol) connections in AI coding harnesses.
+Default c8ctl plugin that installs, uninstalls, or lists Camunda MCP (Model
+Context Protocol) connections in AI coding harnesses.
 
 ## Commands
 
@@ -13,6 +13,10 @@ Protocol) connections in AI coding harnesses.
   remove the c8ctl-managed entries, leaving unrelated servers untouched. A
   foreign entry under the same name fails the uninstall unless
   `--preserve-conflicts` leaves it in place instead.
+- `c8ctl mcp list [harness...]` — show the c8ctl-managed entries across all
+  supported (or only the named) harnesses, with the profile each orchestration
+  entry points at. Read-only: missing configs are skipped, a corrupt config
+  is reported in its own row, and foreign entries are never surfaced.
 
 Supported harnesses: Claude Code, GitHub Copilot, Cursor, VS Code, and Claude
 Desktop (macOS/Windows). Omit harness names to configure all detected

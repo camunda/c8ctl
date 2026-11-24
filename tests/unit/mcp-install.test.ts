@@ -623,6 +623,7 @@ test("MCP help and shell completions expose target selection and uninstall", asy
 	assert.match(help.stdout, /--docs/);
 	assert.match(help.stdout, /--preserve-conflicts/);
 	assert.match(help.stdout, /uninstall/);
+	assert.match(help.stdout, /list/);
 	for (const shell of ["bash", "zsh", "fish"]) {
 		const completion = await c8("completion", shell);
 		assert.equal(completion.status, 0, completion.stderr);
@@ -695,5 +696,110 @@ test("empty or valueless --alias is rejected before any config write", async (t)
 			assert.match(result.stderr, /--alias/);
 			assert.equal(readFileSync(s.paths.cursor, "utf8"), original, label);
 		}
+	}
+});
+
+test("mcp list surfaces c8ctl-managed entries across harnesses and skips foreign ones", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s);
+	s.write(
+		"cursor",
+		'{"mcpServers":{"foreign":{"url":"https://foreign.invalid/mcp"}}}',
+	);
+	s.write("vscode", "{}");
+	assert.equal(
+		(await s.run("mcp", "install", "cursor", "--profile", "work")).status,
+		0,
+	);
+	assert.equal((await s.run("mcp", "install", "vscode", "--docs")).status, 0);
+
+	const result = await s.run("mcp", "list");
+	assert.equal(result.status, 0, result.stderr);
+	const items = parseJson(result);
+	assert.ok(Array.isArray(items));
+	const byHarness = new Map(
+		items.map((item: unknown) => {
+			assert.ok(isRecord(item));
+			return [item.harness, item];
+		}),
+	);
+	const cursor = byHarness.get("cursor");
+	assert.ok(cursor);
+	assert.equal(cursor.server, "camunda");
+	assert.equal(cursor.target, "orchestration");
+	assert.equal(cursor.profile, "work");
+	assert.equal(cursor.path, s.paths.cursor);
+	const vscode = byHarness.get("vscode");
+	assert.ok(vscode);
+	assert.equal(vscode.server, "camunda-docs");
+	assert.equal(vscode.target, "docs");
+	assert.equal(items.length, 2);
+});
+
+test("mcp list scopes to named harnesses and resolves aliases", async (t) => {
+	const s = sandbox(t);
+	s.write("cursor", "{}");
+	s.write("vscode", "{}");
+	assert.equal((await s.run("mcp", "install", "cursor", "--docs")).status, 0);
+	assert.equal((await s.run("mcp", "install", "vscode", "--docs")).status, 0);
+
+	const result = await s.run("mcp", "list", "code");
+	assert.equal(result.status, 0, result.stderr);
+	const items = parseJson(result);
+	assert.ok(Array.isArray(items));
+	assert.equal(items.length, 1);
+	const [item] = items;
+	assert.ok(isRecord(item));
+	assert.equal(item.harness, "vscode");
+	assert.equal(item.server, "camunda-docs");
+});
+
+test("mcp list on a machine without managed entries exits 0 with an empty list", async (t) => {
+	const s = sandbox(t);
+	const result = await s.run("mcp", "list");
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(parseJson(result), []);
+});
+
+test("mcp list reports a corrupt config in its row and still lists other harnesses", async (t) => {
+	const s = sandbox(t);
+	s.write("cursor", "{not json");
+	s.write("vscode", "{}");
+	assert.equal((await s.run("mcp", "install", "vscode", "--docs")).status, 0);
+
+	const result = await s.run("mcp", "list");
+	assert.equal(result.status, 0, result.stderr);
+	const items = parseJson(result);
+	assert.ok(Array.isArray(items));
+	assert.equal(items.length, 2);
+	const corrupt = items.find(
+		(item: unknown) => isRecord(item) && item.harness === "cursor",
+	);
+	assert.ok(isRecord(corrupt));
+	assert.match(String(corrupt.error), /parse|invalid/i);
+	assert.equal(corrupt.path, s.paths.cursor);
+	assert.ok(
+		items.some((item: unknown) => isRecord(item) && item.harness === "vscode"),
+	);
+});
+
+test("mcp list rejects unknown harnesses and install-only flags", async (t) => {
+	const s = sandbox(t);
+	const unknown = await s.run("mcp", "list", "bogus");
+	assert.equal(unknown.status, 1);
+	assert.match(unknown.stderr, /Unsupported MCP harness 'bogus'/);
+
+	for (const flag of [
+		"--docs",
+		"--orchestration",
+		"--alias=x",
+		"--preserve-conflicts",
+	]) {
+		const result = await s.run("mcp", "list", flag);
+		assert.equal(result.status, 1, `mcp list ${flag}`);
+		assert.match(
+			result.stderr,
+			new RegExp(flag.replace(/=.*/, "").replace(/^--/, "--")),
+		);
 	}
 });
