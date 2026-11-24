@@ -27,7 +27,7 @@ import {
 import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, dirname, basename, isAbsolute, resolve } from 'node:path';
+import { join, dirname, basename, isAbsolute, relative, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
@@ -258,18 +258,31 @@ function isPrereleaseBuild(buildDirName) {
 }
 
 /**
- * True when a build dir holds cluster data (the `camunda-data` dir, or the
- * `data` dir inside any `camunda-zeebe-` dir) that `cluster purge` deletes.
+ * Every cluster data dir in an install: `camunda-data` and the `data` dir
+ * inside each `camunda-zeebe-` dir, beside any launcher in the install dir
+ * or one of its immediate subdirs (older builds of a rolling install, or an
+ * install that lost its launcher). `cluster purge` deletes exactly these, and
+ * `stable` refuses to replace an install that still has any.
  */
-function hasClusterData(buildDir) {
-  if (existsSync(join(buildDir, 'camunda-data'))) return true;
-  try {
-    return readdirSync(buildDir, { withFileTypes: true }).some(
-      (entry) => entry.isDirectory() && entry.name.startsWith('camunda-zeebe-') && existsSync(join(buildDir, entry.name, 'data')),
-    );
-  } catch {
-    return false;
+function findClusterDataDirs(installDir) {
+  const listDirs = (dir) => {
+    try {
+      return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+    } catch {
+      return [];
+    }
+  };
+  const roots = [installDir, ...listDirs(installDir).map((entry) => join(installDir, entry.name))];
+  const found = [];
+  for (const root of roots) {
+    const camundaData = join(root, 'camunda-data');
+    if (existsSync(camundaData)) found.push(camundaData);
+    for (const entry of listDirs(root)) {
+      const journal = join(root, entry.name, 'data');
+      if (entry.name.startsWith('camunda-zeebe-') && existsSync(journal)) found.push(journal);
+    }
   }
+  return found;
 }
 
 /**
@@ -285,17 +298,7 @@ function refuseIfClusterDataAtRisk(config) {
   const build = installedBuildName(config.cacheDir, version);
   if (build && !isPrereleaseBuild(build)) return;
 
-  let roots = [installDir];
-  try {
-    roots = roots.concat(
-      readdirSync(installDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => join(installDir, entry.name)),
-    );
-  } catch {
-    // Unreadable: only the install dir itself is checked
-  }
-  if (!roots.some(hasClusterData)) return;
+  if (findClusterDataDirs(installDir).length === 0) return;
 
   const state = build
     ? `holds a prerelease build (${build.slice('c8run-'.length)}) with cluster data`
@@ -3443,48 +3446,19 @@ export async function purgeClusterData(cacheDir, versionSpec) {
     process.exit(1);
   }
 
-  const config = { cacheDir, version: resolvedVersion };
   const installDir = join(cacheDir, `c8run-${resolvedVersion}`);
   if (!existsSync(installDir)) {
     logger.error(`Version ${resolvedVersion} is not installed locally.`);
     process.exit(1);
   }
 
-  // Runtime data normally sits next to the c8run binary. If the binary itself
-  // is missing but the install dir survives — a partial/corrupt install, or the
-  // orphan case where the binary was removed out from under a running cluster
-  // (#560) — fall back to scanning the install dir and its immediate subdirs so
-  // leftover data is still purged instead of being silently left behind.
-  const binaryPath = findC8RunBinaryPath(config);
-  const dataRoots = binaryPath
-    ? [dirname(binaryPath)]
-    : [
-        installDir,
-        ...readdirSync(installDir, { withFileTypes: true })
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => join(installDir, entry.name)),
-      ];
-
+  // Not only beside the launcher that would run: an older build of a rolling
+  // install, or an install that lost its launcher, can hold data too, and
+  // `stable` refuses to replace an install while any of it is left.
   const deleted = [];
-  for (const dataRoot of dataRoots) {
-    // Delete camunda-data (history data + application state)
-    const camundaDataDir = join(dataRoot, 'camunda-data');
-    if (existsSync(camundaDataDir)) {
-      rmSync(camundaDataDir, { recursive: true });
-      deleted.push('camunda-data');
-    }
-
-    // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
-    if (existsSync(dataRoot)) {
-      for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {
-        if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
-        const dataDir = join(dataRoot, entry.name, 'data');
-        if (existsSync(dataDir)) {
-          rmSync(dataDir, { recursive: true });
-          deleted.push(join(entry.name, 'data'));
-        }
-      }
-    }
+  for (const dataDir of findClusterDataDirs(installDir)) {
+    rmSync(dataDir, { recursive: true });
+    deleted.push(relative(installDir, dataDir));
   }
 
   if (deleted.length > 0) {

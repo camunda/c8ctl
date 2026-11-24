@@ -499,4 +499,32 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		assert.strictEqual(launched(), "");
 		assertAlphaKept();
 	});
+	test("purge clears data from every build in the install, so stable can then replace it", async () => {
+		// A newer alpha build now launches; the older one still holds data.
+		writeFakeC8Run(
+			join(cacheDir, "c8run-8.11", "c8run-8.11.0-alpha2"),
+			"alpha2",
+		);
+		const stale = join(alphaBuildDir(), "camunda-data");
+		mkdirSync(stale);
+		writeFileSync(join(stale, "state.db"), "deployments");
+
+		const refused = await start(baseUrl);
+		assert.strictEqual(refused.status, 1, refused.stdout + refused.stderr);
+		assert.match(
+			refused.stdout + refused.stderr,
+			/prerelease build \(8\.11\.0-alpha2\) with cluster data/,
+		);
+
+		const purge = await cluster(baseUrl, "purge", "8.11");
+		assert.strictEqual(purge.status, 0, purge.stdout + purge.stderr);
+		assert.match(
+			purge.stdout,
+			/deleted: c8run-8\.11\.0-alpha1[\\/]camunda-data/,
+		);
+		assert.strictEqual(existsSync(stale), false);
+
+		assert.strictEqual((await start(baseUrl)).status, 7);
+		assert.strictEqual(launched(), "ga");
+	});
 });
