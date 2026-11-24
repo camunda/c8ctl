@@ -27,7 +27,7 @@ import {
 import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, dirname, basename, isAbsolute, resolve } from 'node:path';
+import { join, dirname, basename, isAbsolute, relative, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
@@ -232,9 +232,9 @@ function readLocalAliasMapping(cacheDir, alias) {
  */
 function findInstalledAliasTarget(cacheDir, value, alias) {
   const accepts = (version) => {
-    const binaryPath = findC8RunBinaryPath({ cacheDir, version });
-    if (!binaryPath) return false;
-    return alias !== 'stable' || !isPrereleaseBuild(basename(dirname(binaryPath)));
+    const build = installedBuildName(cacheDir, version);
+    if (!build) return false;
+    return alias !== 'stable' || !isPrereleaseBuild(build);
   };
 
   if (accepts(value)) return value;
@@ -255,6 +255,94 @@ function findInstalledAliasTarget(cacheDir, value, alias) {
 /** True for a build dir like "c8run-8.10.0-alpha1" (anything with a semver prerelease suffix). */
 function isPrereleaseBuild(buildDirName) {
   return /^c8run-\d+\.\d+(\.\d+)?-/.test(buildDirName);
+}
+
+/**
+ * Every cluster data dir in an install: `camunda-data` and the `data` dir
+ * inside each `camunda-zeebe-` dir, beside any launcher in the install dir
+ * or one of its immediate subdirs (older builds of a rolling install, or an
+ * install that lost its launcher). `cluster purge` deletes exactly these, and
+ * `stable` refuses to replace an install that still has any.
+ */
+function findClusterDataDirs(installDir) {
+  const listDirs = (dir) => {
+    try {
+      return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+    } catch {
+      return [];
+    }
+  };
+  const roots = [installDir, ...listDirs(installDir).map((entry) => join(installDir, entry.name))];
+  const found = [];
+  for (const root of roots) {
+    const camundaData = join(root, 'camunda-data');
+    if (existsSync(camundaData)) found.push(camundaData);
+    for (const entry of listDirs(root)) {
+      const journal = join(root, entry.name, 'data');
+      if (entry.name.startsWith('camunda-zeebe-') && existsSync(journal)) found.push(journal);
+    }
+  }
+  return found;
+}
+
+/**
+ * Refuse to replace a `stable` install whose cluster data would be deleted:
+ * a prerelease build, or an install that lost its launcher. Data may sit
+ * beside the launcher or, without one, in the install dir or a subdir of it.
+ * A GA build is replaced like any rolling update.
+ */
+function refuseIfClusterDataAtRisk(config) {
+  const version = config.version;
+  const installDir = join(config.cacheDir, `c8run-${version}`);
+  if (!existsSync(installDir)) return;
+  const build = installedBuildName(config.cacheDir, version);
+  if (build && !isPrereleaseBuild(build)) return;
+
+  if (findClusterDataDirs(installDir).length === 0) return;
+
+  const state = build
+    ? `holds a prerelease build (${build.slice('c8run-'.length)}) with cluster data`
+    : 'has cluster data but no c8run launcher';
+  const options = build
+    ? `Keep using it with "c8ctl cluster start ${version}", or delete its data with`
+    : 'Delete its data with';
+  throw new Error(
+    `c8run ${version} ${state}. "stable" needs a GA build, and replacing this install would delete that data. ` +
+      `${options} "c8ctl cluster purge ${version}" and run this command again.`,
+  );
+}
+
+/** Name of the build dir whose c8run would launch for `version` (e.g. "c8run-8.10.0-alpha1"), or null. */
+function installedBuildName(cacheDir, version) {
+  const binaryPath = findC8RunBinaryPath({ cacheDir, version });
+  return binaryPath ? basename(dirname(binaryPath)) : null;
+}
+
+/** The prerelease build installed for `version`, or null when none is installed or it is GA. */
+function installedPrereleaseBuild(cacheDir, version) {
+  const build = installedBuildName(cacheDir, version);
+  return build && isPrereleaseBuild(build) ? build : null;
+}
+
+/**
+ * Explain why `stable` has no usable local install when the version it would
+ * resolve to only holds a prerelease build — either `version` itself or the
+ * cached `stable` mapping (which resolution skips for that reason). Null otherwise.
+ */
+function describePrereleaseOnlyStable(cacheDir, version) {
+  let cached = null;
+  try {
+    cached = readFileSync(getAliasMappingPath(cacheDir, 'stable'), 'utf-8').trim();
+  } catch {
+    // No cached mapping
+  }
+  for (const candidate of [version, cached]) {
+    const build = candidate && installedPrereleaseBuild(cacheDir, candidate);
+    if (build) {
+      return `Only a prerelease build of ${candidate} is installed (${build.slice('c8run-'.length)}); "stable" needs a GA build.`;
+    }
+  }
+  return null;
 }
 
 /** Persist an alias mapping. Returns false if it could not be written. */
@@ -1555,7 +1643,18 @@ export async function hasNewerVersionAvailable(config) {
 export async function ensureC8RunInstalled(config) {
   const logger = getLogger();
 
-  if (isC8RunInstalled(config)) {
+  // `stable` must never launch a prerelease, e.g. a rolling dir still holding
+  // the alpha build installed through `alpha` before that minor went GA.
+  const prereleaseBuild = config.requireGA ? installedPrereleaseBuild(config.cacheDir, config.version) : null;
+  // Checked before downloading anything, and again right before the swap.
+  if (config.requireGA) refuseIfClusterDataAtRisk(config);
+
+  if (prereleaseBuild) {
+    logger.info(
+      `c8run ${config.version} holds a prerelease build (${prereleaseBuild.slice('c8run-'.length)}); ` +
+        '"stable" needs a GA build, so it will be replaced.',
+    );
+  } else if (isC8RunInstalled(config)) {
     if (config.checkForUpdates) {
       // Explicitly asked to check for updates (e.g. install subcommand with a rolling version)
       const hasUpdate = await hasNewerVersionAvailable(config);
@@ -1573,7 +1672,9 @@ export async function ensureC8RunInstalled(config) {
             'Stop it first with "c8ctl cluster stop", then re-run the install.',
         );
       }
-      purgeInstalledVersion(config);
+      // stable is replaced via a staged swap after the new build is validated,
+      // so a rejected archive never leaves it without a usable install.
+      if (!config.requireGA) purgeInstalledVersion(config);
     } else {
       // Use local installation as-is (start subcommand, or pinned version)
       logger.info(`c8run ${config.version} is already installed.`);
@@ -1613,20 +1714,34 @@ export async function ensureC8RunInstalled(config) {
     );
   }
 
-  logger.info('No local installation found. Setting up...');
+  if (!isC8RunInstalled(config)) logger.info('No local installation found. Setting up...');
 
-  const { archivePath, etag } = await downloadC8Run(config);
+  let download;
+  try {
+    download = await downloadC8Run(config);
+  } catch (error) {
+    const note = config.requireGA && describePrereleaseOnlyStable(config.cacheDir, config.version);
+    if (note) throw new Error(`${note} ${error?.message ?? error}`, { cause: error?.cause });
+    throw error;
+  }
+  const { archivePath, etag } = download;
 
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
-  await extractArchive(archivePath, installDir);
+
+  if (config.requireGA) {
+    await installGABuild(config, archivePath, installDir);
+  } else {
+    await extractArchive(archivePath, installDir);
+  }
 
   // Clean up the downloaded archive to save disk space
   if (existsSync(archivePath)) {
     rmSync(archivePath);
   }
 
-  const binaryPath = getC8RunBinaryPath(config);
-  await chmod(binaryPath, 0o755);
+  if (!config.requireGA) {
+    await chmod(getC8RunBinaryPath(config), 0o755);
+  }
 
   // Store the ETag for rolling versions so future checks can detect new releases
   if (config.isRolling && etag) {
@@ -1634,6 +1749,64 @@ export async function ensureC8RunInstalled(config) {
   }
 
   logger.info(`c8run ${config.version} installed successfully.`);
+}
+
+/**
+ * Install the archive for `stable` without ever leaving a prerelease or
+ * nothing in place: extract into a staging dir, require a GA launcher there,
+ * then swap it in. Any failure before the swap leaves the existing install
+ * (e.g. a usable alpha build) untouched.
+ */
+async function installGABuild(config, archivePath, installDir) {
+  const logger = getLogger();
+  const stagingRoot = join(config.cacheDir, `.staging-c8run-${config.version}-${process.pid}`);
+  const stagedDir = join(stagingRoot, `c8run-${config.version}`);
+  // Dot-prefixed so neither dir is ever listed as an installed version ("c8run-*").
+  const backupDir = join(config.cacheDir, `.replaced-c8run-${config.version}-${process.pid}`);
+  rmSync(stagingRoot, { recursive: true, force: true });
+
+  try {
+    await extractArchive(archivePath, stagedDir);
+    const stagedBinary = findC8RunBinaryPath({ cacheDir: stagingRoot, version: config.version });
+    if (!stagedBinary) {
+      throw new Error(`The downloaded c8run ${config.version} archive does not contain a c8run launcher.`);
+    }
+    const stagedBuild = basename(dirname(stagedBinary));
+    if (isPrereleaseBuild(stagedBuild)) {
+      throw new Error(
+        `The downloaded c8run ${config.version} is a prerelease build (${stagedBuild.slice('c8run-'.length)}); ` +
+          '"stable" needs a GA build. Try again once the GA build is published, or start an explicit GA version.',
+      );
+    }
+    await chmod(stagedBinary, 0o755);
+
+    // Rechecked here: another c8ctl may have started this version during the download.
+    if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+      throw new Error(
+        `Refusing to replace c8run ${config.version}: an instance started from it is still running. ` +
+          'Stop it first with "c8ctl cluster stop".',
+      );
+    }
+
+    // Rechecked here too: data may have been created during the download.
+    refuseIfClusterDataAtRisk(config);
+
+    const replacing = existsSync(installDir);
+    if (replacing) {
+      logger.info(`Replacing the existing c8run ${config.version} build...`);
+      rmSync(backupDir, { recursive: true, force: true });
+      renameSync(installDir, backupDir);
+    }
+    try {
+      renameSync(stagedDir, installDir);
+    } catch (error) {
+      if (replacing) renameSync(backupDir, installDir);
+      throw error;
+    }
+    if (replacing) rmSync(backupDir, { recursive: true, force: true });
+  } finally {
+    rmSync(stagingRoot, { recursive: true, force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3273,48 +3446,19 @@ export async function purgeClusterData(cacheDir, versionSpec) {
     process.exit(1);
   }
 
-  const config = { cacheDir, version: resolvedVersion };
   const installDir = join(cacheDir, `c8run-${resolvedVersion}`);
   if (!existsSync(installDir)) {
     logger.error(`Version ${resolvedVersion} is not installed locally.`);
     process.exit(1);
   }
 
-  // Runtime data normally sits next to the c8run binary. If the binary itself
-  // is missing but the install dir survives — a partial/corrupt install, or the
-  // orphan case where the binary was removed out from under a running cluster
-  // (#560) — fall back to scanning the install dir and its immediate subdirs so
-  // leftover data is still purged instead of being silently left behind.
-  const binaryPath = findC8RunBinaryPath(config);
-  const dataRoots = binaryPath
-    ? [dirname(binaryPath)]
-    : [
-        installDir,
-        ...readdirSync(installDir, { withFileTypes: true })
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => join(installDir, entry.name)),
-      ];
-
+  // Not only beside the launcher that would run: an older build of a rolling
+  // install, or an install that lost its launcher, can hold data too, and
+  // `stable` refuses to replace an install while any of it is left.
   const deleted = [];
-  for (const dataRoot of dataRoots) {
-    // Delete camunda-data (history data + application state)
-    const camundaDataDir = join(dataRoot, 'camunda-data');
-    if (existsSync(camundaDataDir)) {
-      rmSync(camundaDataDir, { recursive: true });
-      deleted.push('camunda-data');
-    }
-
-    // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
-    if (existsSync(dataRoot)) {
-      for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {
-        if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
-        const dataDir = join(dataRoot, entry.name, 'data');
-        if (existsSync(dataDir)) {
-          rmSync(dataDir, { recursive: true });
-          deleted.push(join(entry.name, 'data'));
-        }
-      }
-    }
+  for (const dataDir of findClusterDataDirs(installDir)) {
+    rmSync(dataDir, { recursive: true });
+    deleted.push(relative(installDir, dataDir));
   }
 
   if (deleted.length > 0) {
@@ -3899,6 +4043,8 @@ export const commands = {
       checkForUpdateHint: parsed.subcommand === 'start' && rolling,
       // --verbose: detailed HTTP diagnostics for the c8run download
       verbose: ctx?.verbose === true,
+      // stable: reject (and replace) an install whose build is a prerelease
+      requireGA: versionSpec === 'stable',
     };
 
     // For start with a named alias, check in the background whether the

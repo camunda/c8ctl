@@ -83,6 +83,18 @@ patch releases.
 If the download server is unreachable, the aliases fall back to the values
 shipped in the plugin's `package.json`.
 
+`stable` never launches a prerelease build. If the install for its version
+still holds an alpha build (for example, a `8.11` install made through `alpha`
+before 8.11 went GA), `start` and `install` download the GA build and replace
+it. The GA build is extracted and checked in a staging directory first, so if
+the download or extraction fails, the archive still holds a prerelease, or
+another c8ctl has started that build in the meantime, the alpha build is kept.
+When the download fails, the error says that only a prerelease build is
+installed. A prerelease build that has cluster data, or an install that has
+lost its launcher but still holds data, is never replaced automatically,
+because that would delete the data: keep using a prerelease build with
+`c8ctl cluster start <version>`, or run `c8ctl cluster purge <version>` first.
+
 ### Resilient running-state tracking
 
 A running cluster is tracked both by c8run's own `.process` pidfiles (which live
