@@ -103,6 +103,20 @@ async function startFakeCluster(): Promise<FakeCluster> {
 				});
 				return;
 			}
+			if (req.method === "POST" && url.endsWith("/expression/evaluation")) {
+				if (request.body.includes("broken")) {
+					send(400, {
+						type: "about:blank",
+						title: "INVALID_ARGUMENT",
+						status: 400,
+						detail: "Failed to parse expression 'broken('",
+						instance: "/v2/expression/evaluation",
+					});
+					return;
+				}
+				send(200, { result: 42, warnings: [] });
+				return;
+			}
 			if (req.method === "POST" && url.endsWith("/incidents/search")) {
 				send(200, {
 					items: [
@@ -340,6 +354,7 @@ describe("@camunda8/cli/internal", () => {
 			"deleteTenant",
 			"deleteUser",
 			"deploy",
+			"evaluateExpression",
 			"failJob",
 			"getAuthorization",
 			"getGroup",
@@ -894,6 +909,46 @@ describe("@camunda8/cli/internal", () => {
 			(error: unknown) => {
 				assert.ok(api.isC8ctlError(error));
 				assert.strictEqual(error.code, "invalid-input");
+				return true;
+			},
+		);
+	});
+
+	test("evaluateExpression evaluates FEEL on the cluster", async () => {
+		const dataDir = createDataDir(cluster.baseUrl);
+		const requestsBefore = cluster.requests.length;
+
+		const evaluation = await api.evaluateExpression(
+			{
+				target: { profile: "embedded" },
+				expression: "a + 1",
+				variables: { a: 41 },
+			},
+			{ dataDir },
+		);
+
+		assert.deepStrictEqual(evaluation, {
+			expression: "a + 1",
+			result: 42,
+			warnings: [],
+		});
+		const [request] = cluster.requests.slice(requestsBefore);
+		const body = JSON.parse(request.body);
+		assert.strictEqual(body.expression, "= a + 1");
+		assert.deepStrictEqual(body.variables, { a: 41 });
+	});
+
+	test("evaluateExpression reports a rejected expression as invalid input", async () => {
+		await assert.rejects(
+			api.evaluateExpression(
+				{ target: { profile: "embedded" }, expression: "broken(" },
+				{ dataDir: createDataDir(cluster.baseUrl) },
+			),
+			(error: unknown) => {
+				assert.ok(api.isC8ctlError(error));
+				assert.strictEqual(error.code, "invalid-input");
+				assert.strictEqual(error.field, "expression");
+				assert.strictEqual(error.problem?.status, 400);
 				return true;
 			},
 		);

@@ -2,6 +2,7 @@
 // framework, composition root). Hosts outside c8ctl use the curated
 // `src/internal/index.ts` instead.
 export * from "./deploy.ts";
+export * from "./expressions.ts";
 export * from "./forms.ts";
 export * from "./identity-assignments.ts";
 export * from "./identity-authorizations.ts";
