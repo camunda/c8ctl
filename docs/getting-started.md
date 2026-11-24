@@ -58,15 +58,14 @@ Use `--modeler` / `--no-modeler` to force or skip the Desktop Modeler step regar
 
 ### Remove what setup installed
 
-`--remove` shows the setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, and the marker-listed blueprint files before removing them:
+`--remove` shows the setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, the marker-listed blueprint files, and the local cluster before removing them:
 
 ```bash
 c8ctl setup --remove                        # preview what would be removed
 c8ctl setup --remove --yes                  # remove without prompting
-c8ctl setup --remove --stop-cluster --yes   # also stop the local cluster
 ```
 
-Confirm in the interactive prompt or pass `--yes` in non-interactive use; `--json` and `--dry-run` print only the removal preview. Removal delegates to the owning commands — `c8ctl mcp uninstall`, `c8ctl skills uninstall`, and `c8ctl modeler uninstall`. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. `--stop-cluster` is available only with `--remove` and stops the local cluster without purging runtime data or deleting downloaded binaries. Removal exits `0` when every requested action succeeds and `1` if any action fails; the other removal actions still run.
+Confirm in the interactive prompt or pass `--yes` in non-interactive use; `--json` and `--dry-run` print only the removal preview. Removal delegates to the owning commands — `c8ctl cluster stop --purge` followed by `c8ctl cluster purge`/`delete` per installed version (the cluster is stopped, and its runtime data and downloaded binaries are deleted — setup-deployed process state goes with the runtime data), `c8ctl mcp uninstall`, `c8ctl skills uninstall`, and `c8ctl modeler uninstall`. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. Removal exits `0` when every requested action succeeds and `1` if any action fails; the other removal actions still run.
 
 ## Manage Camunda Desktop Modeler
 

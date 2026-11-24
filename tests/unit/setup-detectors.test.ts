@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import {
 	c8runCacheDir,
+	camunda8RunInstallDirs,
 	checkLocalClusterHealth,
 	type HealthFetch,
 	installedCamunda8RunVersions,
@@ -196,6 +197,27 @@ describe("installedCamunda8RunVersions()", () => {
 	test("is empty when the cache does not exist", () => {
 		assert.deepStrictEqual(
 			installedCamunda8RunVersions({ cacheDir: join(cacheDir, "missing") }),
+			[],
+		);
+	});
+});
+
+describe("camunda8RunInstallDirs()", () => {
+	test("lists every install directory, even without a binary, in version order", () => {
+		writeBinary("c8run-8.10.0", BINARY);
+		writeBinary("c8run-8.9", BINARY);
+		mkdirSync(join(cacheDir, "c8run-8.11.0-alpha1")); // half-extracted
+		mkdirSync(join(cacheDir, "not-c8run"));
+		assert.deepStrictEqual(camunda8RunInstallDirs({ cacheDir }), [
+			"8.9",
+			"8.10.0",
+			"8.11.0-alpha1",
+		]);
+	});
+
+	test("is empty when the cache does not exist", () => {
+		assert.deepStrictEqual(
+			camunda8RunInstallDirs({ cacheDir: join(cacheDir, "missing") }),
 			[],
 		);
 	});

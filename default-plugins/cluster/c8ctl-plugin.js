@@ -3226,7 +3226,10 @@ export async function deleteVersion(cacheDir, versionSpec) {
 
   const config = { cacheDir, version: resolvedVersion };
 
-  if (!isC8RunInstalled(config)) {
+  // Guard on the install dir, not on the binary: the dir can survive
+  // without its launcher (partial/corrupt install), and delete should
+  // still remove what is left rather than report the version unremovable.
+  if (!existsSync(join(cacheDir, `c8run-${resolvedVersion}`))) {
     logger.warn(`Version ${versionSpec} is not installed locally.`);
     return;
   }

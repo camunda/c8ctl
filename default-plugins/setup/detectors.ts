@@ -77,13 +77,28 @@ export function installedCamunda8RunVersions({
 	cacheDir?: string;
 	platform?: string;
 } = {}): string[] {
+	return camunda8RunInstallDirs({ cacheDir }).filter((version) =>
+		isCamunda8RunInstalled({ version, cacheDir, platform }),
+	);
+}
+
+/**
+ * Every installed-version directory in the cache, in version order —
+ * including ones whose c8run binary is missing (a partial install, or a
+ * launcher deleted while runtime data remains). Teardown uses this so
+ * stop/purge/delete still reach leftover state;
+ * `installedCamunda8RunVersions` stays the binary-present check for start
+ * decisions.
+ */
+export function camunda8RunInstallDirs({
+	cacheDir = c8runCacheDir(),
+}: {
+	cacheDir?: string;
+} = {}): string[] {
 	if (!existsSync(cacheDir)) return [];
 	return readdirSync(cacheDir, { withFileTypes: true })
 		.filter((entry) => entry.isDirectory() && entry.name.startsWith("c8run-"))
 		.map((entry) => entry.name.slice("c8run-".length))
-		.filter((version) =>
-			isCamunda8RunInstalled({ version, cacheDir, platform }),
-		)
 		.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 

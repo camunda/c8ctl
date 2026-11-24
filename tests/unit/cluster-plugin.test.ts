@@ -2226,6 +2226,20 @@ describe("Cluster Plugin – deleteVersion", () => {
 		);
 	});
 
+	test("removes an install dir whose binary is missing", async () => {
+		// A partial/corrupt install — or a launcher deleted while runtime data
+		// remained — must still be deletable; setup teardown relies on it.
+		const installDir = join(tempDir, "c8run-8.8");
+		mkdirSync(join(installDir, "camunda-data"), { recursive: true });
+
+		await plugin.deleteVersion(tempDir, "8.8");
+		assert.strictEqual(
+			existsSync(installDir),
+			false,
+			"binary-less install dir should be removed",
+		);
+	});
+
 	test("prevents deleting a currently running version", async () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
