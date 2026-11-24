@@ -444,6 +444,12 @@ export interface MultiSelectConfig<T> {
 	 */
 	keyHint?: string;
 	/**
+	 * Label of the submit button pinned below the list. Confirming
+	 * happens only via this button — Enter on an option row toggles it.
+	 * Defaults to "Submit".
+	 */
+	submitLabel?: string;
+	/**
 	 * Hint appended to non-interactive fallback output.
 	 * Defaults to "Hint: run interactively to choose."
 	 */
@@ -478,8 +484,8 @@ export type MultiSelectResult<T> =
 	| MultiSelectResultCancelled
 	| MultiSelectResultNonInteractive<T>;
 
-const DEFAULT_MULTISELECT_KEY_HINT =
-	"↑/↓ move · space toggle · a all · enter confirm · esc cancel";
+const defaultMultiSelectKeyHint = (submitLabel: string): string =>
+	`↑/↓ move · space/enter toggle · a all · tab to ${submitLabel} · esc cancel`;
 
 /**
  * Evaluate a checkbox list with dependencies: an option counts as
@@ -545,13 +551,15 @@ function buildRows<T>(
  * Present an interactive checkbox list.
  *
  * - **Interactive**: renders one row per option on stderr, grouped
- *   under non-interactive header rows when options carry a `group`.
- *   Arrow keys move the highlight, Space (or the row's number) toggles
- *   it, `a` toggles all, Enter confirms — possibly with nothing
- *   checked — and Escape cancels. Options blocked by `requires` are
- *   dimmed with their reason highlighted, and the line under the list
- *   explains the focused blocked row. Returns the checked values in
- *   option order.
+ *   under non-interactive header rows when options carry a `group`,
+ *   with a submit button pinned below a divider. Arrow keys move the
+ *   highlight through the options and the button, Space (or the row's
+ *   number) toggles an option, Enter toggles the focused option, `a`
+ *   toggles all, Tab jumps to the button — and only Enter on the
+ *   button confirms, possibly with nothing checked. Escape cancels.
+ *   Options blocked by `requires` are dimmed with their reason
+ *   highlighted, and the line under the list explains the focused
+ *   blocked row. Returns the checked values in option order.
  * - **Non-interactive**: returns the values of options marked
  *   `checked` with `interactive: false` and a `hint` string the caller
  *   can log.
@@ -561,7 +569,8 @@ export async function multiSelect<T>(
 ): Promise<MultiSelectResult<T>> {
 	const { message, options, nonInteractiveHint } = config;
 	const { input, output: out } = config.io ?? defaultIO();
-	const keyHint = config.keyHint ?? DEFAULT_MULTISELECT_KEY_HINT;
+	const submitLabel = config.submitLabel ?? "Submit";
+	const keyHint = config.keyHint ?? defaultMultiSelectKeyHint(submitLabel);
 
 	if (options.length === 0) {
 		throw new Error("multiSelect() requires at least one option");
@@ -601,6 +610,8 @@ export async function multiSelect<T>(
 
 	// ── Interactive mode ────────────────────────────────────────
 	return new Promise<MultiSelectResult<T>>((resolve) => {
+		/** Cursor value when the submit button (not an option) is focused. */
+		const SUBMIT = options.length;
 		let cursor = 0;
 		const checked = options.map((opt) => opt.checked === true);
 		let state = evaluateChecked(options, checked);
@@ -659,6 +670,17 @@ export async function multiSelect<T>(
 			const text = footerText();
 			return text === undefined ? 0 : 2 + text.length;
 		};
+		// The divider and submit button sit below the footer line. Both
+		// are fixed-height (one logical line each) but can wrap.
+		const dividerWidth = Math.max(8, Math.min(60, cols - 4));
+		const dividerVisibleLength = 2 + dividerWidth;
+		/** `${submitLabel} — ${n} of ${total} selected` */
+		const buttonText = (): string => {
+			const selected = state.effective.filter(Boolean).length;
+			return `${submitLabel} — ${selected} of ${options.length} selected`;
+		};
+		// "  ❯ " (4) + "[ " + text + " ]" (4 + text)
+		const buttonVisibleLength = (): number => 8 + buttonText().length;
 		// Recomputed per render: dependency reasons appear and disappear
 		// as options are toggled, changing how rows wrap.
 		const physicalLineCount = (): number =>
@@ -666,7 +688,10 @@ export async function multiSelect<T>(
 				(sum, row) =>
 					sum + Math.max(1, Math.ceil(rowVisibleLength(row) / cols)),
 				0,
-			) + Math.max(1, Math.ceil(footerVisibleLength() / cols));
+			) +
+			Math.max(1, Math.ceil(footerVisibleLength() / cols)) +
+			Math.max(1, Math.ceil(dividerVisibleLength / cols)) +
+			Math.max(1, Math.ceil(buttonVisibleLength() / cols));
 		// Cursor rewinds must traverse the *previous* render's line count.
 		let lastRenderedLines = 0;
 
@@ -717,6 +742,17 @@ export async function multiSelect<T>(
 			const footer = footerText();
 			out.write(
 				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${eraseTail(footerVisibleLength())}\n`,
+			);
+			out.write(
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${DIM}${"─".repeat(dividerWidth)}${RESET}${eraseTail(dividerVisibleLength)}\n`,
+			);
+			const text = buttonText();
+			const button =
+				cursor === SUBMIT
+					? `${CYAN}❯${RESET} ${INVERSE}[ ${text} ]${RESET}`
+					: `  [ ${text} ]`;
+			out.write(
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${button}${eraseTail(buttonVisibleLength())}\n`,
 			);
 			// A repaint can be shorter than the previous render (a reason
 			// or the footer collapsed to fewer wrapped lines). Erase the
@@ -789,13 +825,16 @@ export async function multiSelect<T>(
 			) {
 				retoggle(digit - 1);
 			} else if (key.name === "up" || (key.ctrl && key.name === "p")) {
-				cursor = cursor <= 0 ? options.length - 1 : cursor - 1;
+				cursor = cursor <= 0 ? SUBMIT : cursor - 1;
 				render(false);
 			} else if (key.name === "down" || (key.ctrl && key.name === "n")) {
-				cursor = cursor >= options.length - 1 ? 0 : cursor + 1;
+				cursor = cursor >= SUBMIT ? 0 : cursor + 1;
+				render(false);
+			} else if (key.name === "tab") {
+				cursor = cursor === SUBMIT ? 0 : SUBMIT;
 				render(false);
 			} else if (key.name === "space") {
-				retoggle(cursor);
+				if (cursor !== SUBMIT) retoggle(cursor);
 			} else if (key.sequence === "a") {
 				// Set every option together so dependencies enabled by this
 				// selection are included in the same all-toggle.
@@ -804,7 +843,8 @@ export async function multiSelect<T>(
 				reevaluate();
 				render(false);
 			} else if (key.name === "return") {
-				confirmSelection();
+				if (cursor === SUBMIT) confirmSelection();
+				else retoggle(cursor);
 			} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 				cleanup();
 				clearMenu();

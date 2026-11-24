@@ -26,6 +26,7 @@ import {
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const ENTER = "\r";
+const TAB = "\t";
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const ESCAPE = "\x1b";
@@ -375,9 +376,9 @@ describe("multiSelect()", () => {
 		{ label: "Charlie", value: "c", checked: true },
 	];
 
-	test("Enter keeps the pre-checked options", async () => {
+	test("Enter on the submit button keeps the pre-checked options", async () => {
 		const io = fakeTTY();
-		type(io, ENTER);
+		type(io, TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -389,7 +390,7 @@ describe("multiSelect()", () => {
 
 	test("Space toggles the highlighted option off", async () => {
 		const io = fakeTTY();
-		type(io, " ", ENTER);
+		type(io, " ", TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -401,7 +402,7 @@ describe("multiSelect()", () => {
 
 	test("Space on an unchecked option adds it", async () => {
 		const io = fakeTTY();
-		type(io, DOWN, " ", ENTER);
+		type(io, DOWN, " ", TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -414,7 +415,7 @@ describe("multiSelect()", () => {
 	test("values come back in option order, not toggle order", async () => {
 		const io = fakeTTY();
 		// Toggle Charlie off first, then Bravo on.
-		type(io, UP, " ", DOWN, DOWN, " ", ENTER);
+		type(io, DOWN, DOWN, " ", UP, " ", TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -426,7 +427,7 @@ describe("multiSelect()", () => {
 
 	test("'a' checks every option, a second 'a' clears all", async () => {
 		const io = fakeTTY();
-		type(io, "a", ENTER);
+		type(io, "a", TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -436,7 +437,7 @@ describe("multiSelect()", () => {
 		assert.deepStrictEqual(result.values, ["a", "b", "c"]);
 
 		const io2 = fakeTTY();
-		type(io2, "a", "a", ENTER);
+		type(io2, "a", "a", TAB, ENTER);
 		const result2 = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -449,7 +450,7 @@ describe("multiSelect()", () => {
 	test("an empty selection is allowed", async () => {
 		const io = fakeTTY();
 		// Alpha and Charlie start checked; toggle both off.
-		type(io, " ", DOWN, DOWN, " ", ENTER);
+		type(io, " ", DOWN, DOWN, " ", TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -461,8 +462,9 @@ describe("multiSelect()", () => {
 
 	test("arrow keys wrap around at the ends", async () => {
 		const io = fakeTTY();
-		// Up from the first option lands on the last (Charlie, checked).
-		type(io, UP, " ", ENTER);
+		// Up from the first option lands on the submit button, up again
+		// wraps to the last option (Charlie, checked).
+		type(io, UP, UP, " ", TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -474,7 +476,7 @@ describe("multiSelect()", () => {
 
 	test("a number key toggles the matching option", async () => {
 		const io = fakeTTY();
-		type(io, "2", ENTER);
+		type(io, "2", TAB, ENTER);
 		const result = await multiSelect({
 			message: "Pick",
 			options: CHECKED_OPTIONS,
@@ -486,7 +488,7 @@ describe("multiSelect()", () => {
 
 	test("renders checked and unchecked markers per option", async () => {
 		const io = fakeTTY();
-		type(io, ENTER);
+		type(io, TAB, ENTER);
 		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
 		const plain = stripVTControlCharacters(io.text());
 		assert.match(plain, /\[x\] Alpha/);
@@ -496,7 +498,7 @@ describe("multiSelect()", () => {
 
 	test("uses inverse video for checked markers on either terminal theme", async () => {
 		const io = fakeTTY();
-		type(io, ENTER);
+		type(io, TAB, ENTER);
 		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
 		assert.ok(io.text().includes("\x1b[7m[x]\x1b[0m"));
 		assert.ok(io.text().includes("[ ] Bravo"));
@@ -504,16 +506,17 @@ describe("multiSelect()", () => {
 
 	test("renders the key hint below the message", async () => {
 		const io = fakeTTY();
-		type(io, ENTER);
+		type(io, TAB, ENTER);
 		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
 		const plain = stripVTControlCharacters(io.text());
 		assert.match(plain, /space/);
 		assert.match(plain, /enter/);
+		assert.match(plain, /tab/);
 	});
 
 	test("the summary line lists the chosen labels", async () => {
 		const io = fakeTTY();
-		type(io, DOWN, " ", ENTER);
+		type(io, DOWN, " ", TAB, ENTER);
 		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
 		const plain = stripVTControlCharacters(io.text());
 		assert.match(plain, /Alpha, Bravo, Charlie/);
@@ -521,7 +524,7 @@ describe("multiSelect()", () => {
 
 	test("the summary line reports an empty selection", async () => {
 		const io = fakeTTY();
-		type(io, "a", "a", ENTER);
+		type(io, "a", "a", TAB, ENTER);
 		await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
 		const plain = stripVTControlCharacters(io.text());
 		assert.match(plain, /none selected/i);
@@ -539,7 +542,7 @@ describe("multiSelect()", () => {
 	});
 
 	for (const [name, keys] of [
-		["Enter", [ENTER]],
+		["Enter on the submit button", [TAB, ENTER]],
 		["Escape", [ESCAPE]],
 	] as const) {
 		test(`restores raw mode and the cursor after ${name}`, async () => {
@@ -582,7 +585,7 @@ describe("multiSelect()", () => {
 
 		test("select all checks options enabled by selecting their requirements", async () => {
 			const io = fakeTTY();
-			type(io, "a", ENTER);
+			type(io, "a", TAB, ENTER);
 			const result = await multiSelect({
 				message: "Pick",
 				options: [
@@ -602,7 +605,7 @@ describe("multiSelect()", () => {
 		test("unchecking the requirement forces the dependent off and shows why", async () => {
 			const io = fakeTTY();
 			// Space on the highlighted "Cluster" row unchecks it.
-			type(io, " ", ENTER);
+			type(io, " ", TAB, ENTER);
 			const result = await multiSelect({
 				message: "Pick",
 				options: DEPENDENT_OPTIONS,
@@ -619,7 +622,7 @@ describe("multiSelect()", () => {
 		test("a blocked row is dimmed and its reason rendered in warning yellow", async () => {
 			const io = fakeTTY();
 			// Space on the highlighted "Cluster" row unchecks it.
-			type(io, " ", ENTER);
+			type(io, " ", TAB, ENTER);
 			await multiSelect({
 				message: "Pick",
 				options: DEPENDENT_OPTIONS,
@@ -635,7 +638,7 @@ describe("multiSelect()", () => {
 		test("the status line under the list explains the focused blocked row", async () => {
 			const io = fakeTTY();
 			// Cluster off, then move onto the blocked Blueprint row.
-			type(io, " ", DOWN, ENTER);
+			type(io, " ", DOWN, TAB, ENTER);
 			await multiSelect({
 				message: "Pick",
 				options: DEPENDENT_OPTIONS,
@@ -649,7 +652,7 @@ describe("multiSelect()", () => {
 
 		test("the status line is blank when the focused row is not blocked", async () => {
 			const io = fakeTTY();
-			type(io, ENTER);
+			type(io, TAB, ENTER);
 			await multiSelect({
 				message: "Pick",
 				options: DEPENDENT_OPTIONS,
@@ -702,7 +705,10 @@ describe("multiSelect()", () => {
 				visible.every((l) => !l.includes("requires the local cluster")),
 				`stale reason survived the repaint: ${JSON.stringify(visible)}`,
 			);
-			setImmediate(() => io.input.write(ENTER));
+			setImmediate(() => {
+				io.input.write(TAB);
+				io.input.write(ENTER);
+			});
 			const result = await done;
 			assert.ok(result.interactive && !result.cancelled);
 			// The blueprint stays off: re-enabling the requirement does
@@ -728,7 +734,10 @@ describe("multiSelect()", () => {
 				visible.some((l) => l.includes(exactLabel)),
 				`exact-width row lost its final character: ${JSON.stringify(visible)}`,
 			);
-			setImmediate(() => io.input.write(ENTER));
+			setImmediate(() => {
+				io.input.write(TAB);
+				io.input.write(ENTER);
+			});
 			const result = await done;
 			assert.ok(result.interactive && !result.cancelled);
 			assert.deepStrictEqual(result.values, ["a"]);
@@ -740,7 +749,7 @@ describe("multiSelect()", () => {
 			// the status line, which wraps past 80 columns; moving off
 			// collapses it to a blank line. The wrapped remainder of the
 			// old status line must not survive below the menu.
-			type(io, " ", DOWN, UP, ENTER);
+			type(io, " ", DOWN, UP, DOWN, DOWN, ENTER);
 			await multiSelect({
 				message: "Pick",
 				options: [
@@ -758,7 +767,7 @@ describe("multiSelect()", () => {
 			const visible = renderScreen(io.text()).filter((l) => l !== "");
 			assert.deepStrictEqual(visible, [
 				"? Pick",
-				"  ↑/↓ move · space toggle · a all · enter confirm · esc cancel",
+				"  ↑/↓ move · space/enter toggle · a all · tab to Submit · esc cancel",
 				"  (none selected)",
 			]);
 		});
@@ -767,7 +776,7 @@ describe("multiSelect()", () => {
 			const io = fakeTTY();
 			// Cluster off; Blueprint toggle attempt (blocked); Cluster on;
 			// Blueprint toggle (works now).
-			type(io, " ", DOWN, " ", UP, " ", DOWN, " ", ENTER);
+			type(io, " ", DOWN, " ", UP, " ", DOWN, " ", TAB, ENTER);
 			const result = await multiSelect({
 				message: "Pick",
 				options: [
@@ -787,7 +796,7 @@ describe("multiSelect()", () => {
 		test("a re-enabled row stays unchecked — disabling clears the checkmark", async () => {
 			const io = fakeTTY();
 			// Cluster off (Blueprint force-unchecked), Cluster back on, Enter.
-			type(io, " ", " ", ENTER);
+			type(io, " ", " ", TAB, ENTER);
 			const result = await multiSelect({
 				message: "Pick",
 				options: DEPENDENT_OPTIONS,
@@ -836,7 +845,7 @@ describe("multiSelect()", () => {
 
 		test("renders a header above each group and indents its options", async () => {
 			const io = fakeTTY();
-			type(io, ENTER);
+			type(io, TAB, ENTER);
 			await multiSelect({ message: "Pick", options: GROUPED_OPTIONS, io });
 			const plain = stripVTControlCharacters(io.text());
 			assert.match(plain, /^ {2}Essentials$/m);
@@ -851,7 +860,7 @@ describe("multiSelect()", () => {
 			const io = fakeTTY();
 			// Cluster → Modeler → Skills; the header rows are skipped.
 			// Space on Skills checks it.
-			type(io, DOWN, DOWN, " ", ENTER);
+			type(io, DOWN, DOWN, " ", TAB, ENTER);
 			const result = await multiSelect({
 				message: "Pick",
 				options: GROUPED_OPTIONS,
@@ -863,7 +872,7 @@ describe("multiSelect()", () => {
 
 		test("a number key still toggles the matching option", async () => {
 			const io = fakeTTY();
-			type(io, "3", ENTER);
+			type(io, "3", TAB, ENTER);
 			const result = await multiSelect({
 				message: "Pick",
 				options: GROUPED_OPTIONS,
@@ -885,6 +894,159 @@ describe("multiSelect()", () => {
 			assert.match(
 				result.hint,
 				/ {2}AI-assisted development\n {4}\[ \] Skills/,
+			);
+		});
+	});
+	describe("submit button", () => {
+		test("Enter on an option row toggles it instead of confirming", async () => {
+			const io = fakeTTY();
+			// Alpha starts checked; Enter unchecks it. Only the submit
+			// button confirms.
+			type(io, ENTER, TAB, ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["c"]);
+		});
+
+		test("Tab focuses the submit button; Enter there confirms", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a", "c"]);
+		});
+
+		test("arrow down past the last option lands on the submit button", async () => {
+			const io = fakeTTY();
+			type(io, DOWN, DOWN, DOWN, ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a", "c"]);
+		});
+
+		test("arrow up from the first option wraps onto the submit button", async () => {
+			const io = fakeTTY();
+			// Up lands on the button; Space there is a no-op, so the
+			// selection is unchanged when Enter confirms.
+			type(io, UP, " ", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a", "c"]);
+		});
+
+		test("Space on the submit button does not confirm", async () => {
+			const io = fakeTTY();
+			let resolved = false;
+			const done = multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			}).then((r) => {
+				resolved = true;
+				return r;
+			});
+			type(io, TAB, " ");
+			for (let i = 0; i < 100 && !resolved; i++) {
+				await new Promise((resolveSpin) => setImmediate(resolveSpin));
+			}
+			assert.strictEqual(resolved, false, "Space on the button confirmed");
+			setImmediate(() => io.input.write(ENTER));
+			const result = await done;
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a", "c"]);
+		});
+
+		test("number keys toggle options while the button is focused", async () => {
+			const io = fakeTTY();
+			type(io, TAB, "2", ENTER);
+			const result = await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			});
+			assert.ok(result.interactive && !result.cancelled);
+			assert.deepStrictEqual(result.values, ["a", "b", "c"]);
+		});
+
+		test("Escape on the submit button cancels", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ESCAPE);
+			const result = await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			});
+			assert.deepStrictEqual(result, { interactive: true, cancelled: true });
+		});
+
+		test("a divider separates the list from the submit button", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ENTER);
+			await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+			assert.match(stripVTControlCharacters(io.text()), /─{10,}/);
+		});
+
+		test("the button shows the selection count", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ENTER);
+			await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/Submit — 2 of 3 selected/,
+			);
+		});
+
+		test("the focused submit button is rendered in inverse video", async () => {
+			const io = fakeTTY();
+			const done = multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				io,
+			});
+			type(io, TAB);
+			for (
+				let i = 0;
+				i < 1000 && !io.text().includes("\x1b[7m[ Submit"); // focused button
+				i++
+			) {
+				await new Promise((resolveSpin) => setImmediate(resolveSpin));
+			}
+			assert.ok(
+				io.text().includes("\x1b[7m[ Submit — 2 of 3 selected ]\x1b[0m"),
+				"focused button is not inverse",
+			);
+			setImmediate(() => io.input.write(ENTER));
+			await done;
+		});
+
+		test("a custom submitLabel is used on the button", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				submitLabel: "Start setup",
+				io,
+			});
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/Start setup — 2 of 3 selected/,
 			);
 		});
 	});
