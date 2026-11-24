@@ -671,6 +671,36 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	for (const quiet of [false, true]) {
+		test(`a Modeler update warning prints as it happens, not replayed under the step${quiet ? " with --quiet" : ""}`, async () => {
+			const stub = stubbedExecution();
+			stub.options.env.C8CTL_SETUP_STUB_MODELER_WARN = "1";
+			try {
+				const result = await c8WithOptions(
+					stub.options,
+					"setup",
+					"--yes",
+					...(quiet ? ["--quiet"] : []),
+				);
+				assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+				const err = stripVTControlCharacters(result.stderr);
+				stepLine(
+					stripVTControlCharacters(result.stdout + result.stderr),
+					"Install Desktop Modeler",
+					"SUCCESS",
+				);
+				const warnings = err.match(/^.*Run `c8ctl modeler update`.*$/gm);
+				assert.deepStrictEqual(warnings, [
+					"Camunda Modeler 5.51.0 is installed, but 5.52.0 is available. Run `c8ctl modeler update` to update it.",
+				]);
+				// Routine child stderr is still replayed below the status line.
+				assert.match(err, /^ {4}routine modeler stderr$/m);
+			} finally {
+				stub.cleanup();
+			}
+		});
+	}
+
 	test("a failed step reports [ERROR] with its buffered output, skips dependents, and the rest still runs", async () => {
 		const stub = stubbedExecution({ failStep: "start-cluster" });
 		try {

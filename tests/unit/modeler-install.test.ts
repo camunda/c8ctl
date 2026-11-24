@@ -213,7 +213,8 @@ syncBuiltinESMExports();
  * Loaded into the CLI subprocess on Linux: maps /usr/bin and /bin filesystem
  * lookups into temp roots, runs root commands without sudo and records them in
  * TOOL_LOG (FAIL_AT=<tool> makes that tool fail), fakes the user id and
- * architecture, and serves ARCHIVE as the 5.52.0 release.
+ * architecture, and serves ARCHIVE as the 5.52.0 release
+ * (FAIL_RELEASE_INDEX=1 makes the release index unavailable).
  */
 const LINUX_PRELOAD = `
 import childProcess from "node:child_process";
@@ -306,6 +307,9 @@ globalThis.fetch = async (input, init) => {
 	const url = String(input);
 	if (url === releaseUrl) {
 ${STALLED_RELEASE_INDEX}
+		if (process.env.FAIL_RELEASE_INDEX === "1") {
+			return new Response("unavailable", { status: 503 });
+		}
 		return new Response('<a href="' + releaseVersion + '/">' + releaseVersion + '/</a>');
 	}
 	return url === releaseUrl + releaseVersion + "/camunda-modeler-" + releaseVersion + "-linux-x64.tar.gz"
@@ -777,7 +781,8 @@ describe("CLI behavioural: modeler install", () => {
 				'  "--version") exit 0 ;;',
 				'  "list --cask --versions camunda-modeler") exit 0 ;;',
 				'  "outdated --cask --quiet camunda-modeler")',
-				'    if [ "$BREW_OUTDATED" = "1" ]; then printf "camunda-modeler\\n"; fi ;;',
+				// Like real brew, a named outdated cask makes `brew outdated` exit 1.
+				'    if [ "$BREW_OUTDATED" = "1" ]; then printf "camunda-modeler\\n"; exit 1; fi ;;',
 				'  "upgrade --cask camunda-modeler") exit 0 ;;',
 				"  *) exit 1 ;;",
 				"esac",
@@ -1102,6 +1107,76 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("warns when a skipped installation is older than the latest release", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		try {
+			const appPath = join(sandbox.home, "Applications", MODELER_BUNDLE);
+			writeMacApp(appPath, "5.52.0");
+
+			const current = await sandbox.install();
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.strictEqual(current.stderr, "");
+
+			writeMacApp(appPath, "5.51.0");
+			const outdated = await sandbox.install({}, "--quiet");
+			assert.strictEqual(outdated.status, 0, outdated.stderr);
+			assert.match(
+				outdated.stderr,
+				/Camunda Modeler 5\.51\.0 is installed, but 5\.52\.0 is available\. Run `c8ctl modeler update` to update it\./,
+			);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("asks Homebrew about updates for a cask app in /Applications", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		try {
+			// Homebrew moves cask apps into /Applications, so the bundle
+			// path alone does not reveal that Homebrew owns it.
+			writeMacApp(join(sandbox.applicationsRoot, MODELER_BUNDLE), "5.51.0");
+			sandbox.fakeTool(
+				"brew",
+				[
+					'case "$*" in',
+					"  --version) exit 0 ;;",
+					'  "list --cask --versions camunda-modeler") exit 0 ;;',
+					'  "outdated --cask --quiet camunda-modeler")',
+					'    if [ "$BREW_OUTDATED" = "1" ]; then printf "camunda-modeler\\n"; exit 1; fi ;;',
+					"  *) exit 1 ;;",
+					"esac",
+				].join("\n"),
+			);
+			const checks = [
+				"brew --version",
+				"brew list --cask --versions camunda-modeler",
+				"brew outdated --cask --quiet camunda-modeler",
+			];
+
+			const current = await sandbox.install({ BREW_OUTDATED: "0" });
+			assert.strictEqual(current.status, 0, current.stderr);
+			assert.match(current.stdout, /already installed at .*; skipping/);
+			assert.strictEqual(current.stderr, "");
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+
+			sandbox.resetToolCalls();
+			const outdated = await sandbox.install({ BREW_OUTDATED: "1" });
+			assert.strictEqual(outdated.status, 0, outdated.stderr);
+			assert.match(
+				outdated.stderr,
+				/A newer Camunda Modeler is available with Homebrew\. Run `c8ctl modeler update` to update it\./,
+			);
+			assert.deepStrictEqual(sandbox.toolCalls(), checks);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	for (const homebrew of [true, false]) {
 		test(`emits a JSON dry-run preview for ${homebrew ? "Homebrew" : "direct download"}`, {
 			skip: !isMac,
@@ -1155,6 +1230,8 @@ describe("CLI behavioural: modeler install", () => {
 				'case "$1" in',
 				"  --version) exit 0 ;;",
 				'  list) exit "$BREW_INSTALLED" ;;',
+				// Like real brew, a named outdated cask makes `brew outdated` exit 1.
+				'  outdated) printf "%s" "$BREW_OUTDATED"; [ -z "$BREW_OUTDATED" ] ;;',
 				'  install) /bin/mkdir -p "$APPLICATIONS_ROOT/Camunda Modeler.app" ;;',
 				"  *) exit 1 ;;",
 				"esac",
@@ -1191,7 +1268,21 @@ describe("CLI behavioural: modeler install", () => {
 			const alreadyInstalled = await sandbox.install({ BREW_INSTALLED: "0" });
 			assert.strictEqual(alreadyInstalled.status, 0, alreadyInstalled.stderr);
 			assert.match(alreadyInstalled.stdout, /already installed with Homebrew/);
-			assert.deepStrictEqual(sandbox.toolCalls(), brewChecks);
+			assert.strictEqual(alreadyInstalled.stderr, "");
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				...brewChecks,
+				"brew outdated --cask --quiet camunda-modeler",
+			]);
+
+			const outdated = await sandbox.install({
+				BREW_INSTALLED: "0",
+				BREW_OUTDATED: "camunda-modeler",
+			});
+			assert.strictEqual(outdated.status, 0, outdated.stderr);
+			assert.match(
+				outdated.stderr,
+				/A newer Camunda Modeler is available with Homebrew\. Run `c8ctl modeler update` to update it\./,
+			);
 		} finally {
 			sandbox.cleanup();
 		}
@@ -1415,7 +1506,53 @@ describe("CLI behavioural: modeler install", () => {
 
 			assert.strictEqual(result.status, 0, result.stderr);
 			assert.match(result.stdout, /already installed at .*; skipping/);
-			assert.deepStrictEqual(sandbox.toolCalls(), []);
+			assert.strictEqual(result.stderr, "");
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				"winget list --upgrade-available --id Camunda.Modeler --exact --source winget",
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	for (const quiet of [false, true]) {
+		test(`warns when a skipped Windows installation is outdated${quiet ? " with --quiet" : ""}`, {
+			skip: !isWindows,
+		}, async () => {
+			const sandbox = createWindowsSandbox();
+			try {
+				mkdirSync(sandbox.installDir, { recursive: true });
+				writeFileSync(join(sandbox.installDir, MODELER_EXECUTABLE), "");
+
+				const result = await sandbox.install(
+					{ WINGET: "installed", WINGET_UPGRADE: "available" },
+					...(quiet ? ["--quiet"] : []),
+				);
+
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(
+					result.stderr,
+					/A newer Camunda Modeler is available with winget\. Run `c8ctl modeler update` to update it\./,
+				);
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
+
+	test("skips an existing installation when the update check fails", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		try {
+			mkdirSync(sandbox.installDir, { recursive: true });
+			writeFileSync(join(sandbox.installDir, MODELER_EXECUTABLE), "");
+
+			const result = await sandbox.install({ WINGET: "missing" });
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /already installed at .*; skipping/);
+			assert.strictEqual(result.stderr, "");
 		} finally {
 			sandbox.cleanup();
 		}
@@ -1515,7 +1652,10 @@ describe("CLI behavioural: modeler install", () => {
 			const alreadyInstalled = await sandbox.install({ WINGET: "installed" });
 			assert.strictEqual(alreadyInstalled.status, 0, alreadyInstalled.stderr);
 			assert.match(alreadyInstalled.stdout, /already installed with winget/);
-			assert.deepStrictEqual(sandbox.toolCalls(), wingetChecks);
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				...wingetChecks,
+				"winget list --upgrade-available --id Camunda.Modeler --exact --source winget",
+			]);
 		} finally {
 			sandbox.cleanup();
 		}
@@ -1731,6 +1871,59 @@ describe("CLI behavioural: modeler install", () => {
 				/already installed at \S+\/bin\/camunda-modeler; skipping/,
 			);
 			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	for (const quiet of [false, true]) {
+		test(`warns when a skipped managed Linux installation is outdated${quiet ? " with --quiet" : ""}`, {
+			skip: !isLinux,
+		}, async () => {
+			const sandbox = createLinuxSandbox();
+			addLinuxInstall(sandbox, "5.51.0");
+			try {
+				const result = await sandbox.install({}, ...(quiet ? ["--quiet"] : []));
+
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(
+					result.stderr,
+					/Camunda Modeler 5\.51\.0 is installed, but 5\.52\.0 is available\. Run `c8ctl modeler update` to update it\./,
+				);
+				assert.deepStrictEqual(sandbox.toolCalls(), []);
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
+
+	test("does not warn when a skipped managed Linux installation is current", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.52.0");
+		try {
+			const result = await sandbox.install();
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /already installed at .*; skipping/);
+			assert.doesNotMatch(result.stderr, /is available/);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("skips a managed Linux installation when the update check fails", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		addLinuxInstall(sandbox, "5.51.0");
+		try {
+			const result = await sandbox.install({ FAIL_RELEASE_INDEX: "1" });
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /already installed at .*; skipping/);
+			assert.doesNotMatch(result.stderr, /is available/);
 		} finally {
 			sandbox.cleanup();
 		}
@@ -2479,6 +2672,16 @@ describe("CLI behavioural: modeler install", () => {
 	for (const scenario of [
 		{ name: "macOS", skip: !isMac, create: createSandbox },
 		{ name: "Linux", skip: !isLinux, create: createLinuxSandbox },
+		{
+			// The update check of a skipped install fetches the index too.
+			name: "Skipped managed Linux",
+			skip: !isLinux,
+			create: () => {
+				const sandbox = createLinuxSandbox();
+				addLinuxInstall(sandbox, "5.51.0");
+				return sandbox;
+			},
+		},
 	]) {
 		for (const signal of ["SIGINT", "SIGTERM"] as const) {
 			test(`${scenario.name} release-index downloads abort on ${signal}`, {

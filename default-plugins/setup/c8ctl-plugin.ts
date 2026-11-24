@@ -47,6 +47,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	ProcessDefinitionId,
 	type ProcessInstanceKey,
@@ -190,7 +191,7 @@ async function runPrerequisites(ctx: PluginCtx): Promise<void> {
  * take the first candidate that exists.
  */
 const CLI_ENTRY = (() => {
-	const dir = realpathSync(import.meta.dirname);
+	const dir = realpathSync(fileURLToPath(new URL(".", import.meta.url)));
 	const candidates = [
 		resolve(dir, "..", "..", "index.js"),
 		resolve(dir, "..", "..", "src", "index.ts"),
@@ -212,7 +213,8 @@ const CLI_ENTRY = (() => {
  * buffers the same way by default, so a step's failure diagnostics print
  * after its closed title line; `stderrPassthrough` opts into immediate
  * printing for the cluster children, whose warnings are actionable while
- * the cluster keeps starting. The child is pinned to text mode so its
+ * the cluster keeps starting, and `promoteStderrLine` does the same for
+ * individual actionable lines. The child is pinned to text mode so its
  * lines stay plain and filterable no matter the session's output mode.
  */
 function spawnC8ctl(
@@ -221,11 +223,13 @@ function spawnC8ctl(
 	{
 		skipStdoutLine,
 		promoteStdoutLine,
+		promoteStderrLine,
 		stderrPassthrough = false,
 		extraEnv,
 	}: {
 		skipStdoutLine?: (line: string) => boolean;
 		promoteStdoutLine?: (line: string) => boolean;
+		promoteStderrLine?: (line: string) => boolean;
 		stderrPassthrough?: boolean;
 		extraEnv?: Record<string, string>;
 	} = {},
@@ -257,7 +261,7 @@ function spawnC8ctl(
 			write: (line) =>
 				ctx.logger.info(line, {
 					stream: "stderr",
-					essential: stderrPassthrough,
+					essential: stderrPassthrough || promoteStderrLine?.(line) === true,
 				}),
 			skip: () => false,
 		});
@@ -420,8 +424,11 @@ async function runModelerInstall(ctx: PluginCtx): Promise<void> {
 	// The modeler plugin owns the installation; setup runs it as a child
 	// process. Always quiet: the installer's progress chatter is noise next
 	// to the step report — the step's status line is the signal. Failures
-	// still surface with the child's diagnostics.
-	await spawnC8ctl(ctx, ["modeler", "install", "--quiet"]);
+	// still surface with the child's diagnostics. An outdated existing
+	// installation is the exception: its update advice is actionable.
+	await spawnC8ctl(ctx, ["modeler", "install", "--quiet"], {
+		promoteStderrLine: (line) => line.includes("c8ctl modeler update"),
+	});
 }
 
 async function runBlueprintScaffold(

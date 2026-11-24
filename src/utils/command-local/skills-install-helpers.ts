@@ -624,7 +624,7 @@ function requireSuccessfulSkillCommand(
 				: undefined;
 		if (errorCode === "ENOENT") {
 			throw new Error(
-				"GitHub CLI was not found. Install GitHub CLI 2.90 or later from https://cli.github.com/.",
+				"GitHub CLI was not found. Install GitHub CLI 2.95 or later from https://cli.github.com/.",
 			);
 		}
 		throw new Error(`Could not run GitHub CLI: ${result.error.message}`);
@@ -635,9 +635,12 @@ function requireSuccessfulSkillCommand(
 	const details = [result.stderr.trim(), result.stdout.trim()]
 		.filter((output) => output.length > 0)
 		.join("\n");
-	if (/unknown command\s+["']?skill\b/i.test(details)) {
+	// `gh skill list` (2.94), `install --all` (2.94) and non-interactive
+	// discovery (2.95) are missing from older releases and fail as unknown
+	// commands, subcommands or flags.
+	if (/unknown (command\s+["']?(skill|list)\b|flag:)/i.test(details)) {
 		throw new Error(
-			"`gh skill` requires GitHub CLI 2.90 or later. Upgrade GitHub CLI from https://cli.github.com/.",
+			"`gh skill` requires GitHub CLI 2.95 or later. Upgrade GitHub CLI from https://cli.github.com/.",
 		);
 	}
 	throw new Error(

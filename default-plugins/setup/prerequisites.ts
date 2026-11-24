@@ -9,6 +9,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import semver from "semver";
 
 export type PrerequisiteId = "node" | "platform" | "network";
@@ -62,9 +63,10 @@ function readRequiredNodeRange(): string | undefined {
 		// (default-plugins/setup/, two levels below the repo root) and the
 		// bundled package (dist/default-plugins/setup/, three levels below
 		// the package root) — take the first candidate that exists.
+		const dir = fileURLToPath(new URL(".", import.meta.url));
 		const packageJson = [
-			join(import.meta.dirname, "..", "..", "package.json"),
-			join(import.meta.dirname, "..", "..", "..", "package.json"),
+			join(dir, "..", "..", "package.json"),
+			join(dir, "..", "..", "..", "package.json"),
 		].find((candidate) => existsSync(candidate));
 		if (!packageJson) return undefined;
 		const pkg: unknown = JSON.parse(readFileSync(packageJson, "utf-8"));

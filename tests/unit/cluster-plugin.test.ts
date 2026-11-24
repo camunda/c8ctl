@@ -6,10 +6,12 @@ import assert from "node:assert";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -1503,7 +1505,152 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 		);
 	});
 
-	test("does not persist alias mapping (start remains deterministic)", async () => {
+	test("advances alias mapping when the newer version is already installed", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+		try {
+			plugin.storeLocalAliasMapping(tempDir, "stable", "8.9");
+			// 8.10 installed explicitly (e.g. `cluster install 8.10`) as a pinned patch
+			const binaryDir = join(tempDir, "c8run-8.10.4", "c8run-8.10.4");
+			mkdirSync(binaryDir, { recursive: true });
+			writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+
+			// @ts-expect-error — mock fetch: remote says stable is 8.10
+			globalThis.fetch = async () => ({
+				ok: true,
+				text: async () => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.4/">8.10.4</a>
+        `,
+			});
+
+			await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+
+			const cached = readFileSync(
+				join(tempDir, "alias-stable.resolved"),
+				"utf-8",
+			).trim();
+			assert.strictEqual(cached, "8.10");
+			assert.ok(
+				loggedMessages.some(
+					(m: string) =>
+						m.includes("8.10") &&
+						m.includes("already installed") &&
+						m.includes('"c8ctl cluster start stable"') &&
+						!m.includes("cluster install"),
+				),
+				`Should report the promotion, got: ${loggedMessages.join("; ")}`,
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	for (const { layout, dir, alphaResolves } of [
+		{
+			layout: "pinned",
+			dir: ["c8run-8.10.0-alpha1", "c8run-8.10.0-alpha1"],
+			alphaResolves: "8.10.0-alpha1",
+		},
+		{
+			// `install alpha` while 8.10 was the alpha train fills the rolling dir with an alpha build
+			layout: "rolling dir holding an alpha build",
+			dir: ["c8run-8.10", "c8run-8.10.0-alpha1"],
+			alphaResolves: "8.10",
+		},
+	]) {
+		test(`stable never advances to or resolves a prerelease install (${layout})`, async () => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+			const listing = (stableMinor: string) => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+          ${stableMinor === "8.10" ? '<a href="8.10.4/">8.10.4</a>' : ""}
+        `;
+			try {
+				plugin.storeLocalAliasMapping(tempDir, "stable", "8.9");
+				for (const segments of [["c8run-8.9", "c8run-8.9.29"], dir]) {
+					const binaryDir = join(tempDir, ...segments);
+					mkdirSync(binaryDir, { recursive: true });
+					writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+				}
+
+				// @ts-expect-error — mock fetch: remote says stable is 8.10
+				globalThis.fetch = async () => ({
+					ok: true,
+					text: async () => listing("8.10"),
+				});
+				await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+				assert.strictEqual(
+					readFileSync(join(tempDir, "alias-stable.resolved"), "utf-8").trim(),
+					"8.9",
+					"only an alpha build of 8.10 is installed",
+				);
+
+				// A stable mapping already at 8.10 must not be satisfied by the alpha
+				// build either: resolution falls through to remote (stable = 8.9 here).
+				plugin.storeLocalAliasMapping(tempDir, "stable", "8.10");
+				plugin.storeLocalAliasMapping(tempDir, "alpha", "8.10");
+				// @ts-expect-error — mock fetch: 8.10 still alpha-only
+				globalThis.fetch = async () => ({
+					ok: true,
+					text: async () => listing("8.9"),
+				});
+				plugin._resetDynamicAliasCache();
+				assert.strictEqual(
+					await plugin.resolveVersion("stable", {
+						preferLocal: true,
+						cacheDir: tempDir,
+					}),
+					"8.9",
+				);
+				// alpha keeps accepting prerelease builds of its minor.
+				assert.strictEqual(
+					await plugin.resolveVersion("alpha", {
+						preferLocal: true,
+						cacheDir: tempDir,
+					}),
+					alphaResolves,
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("reports, rather than claims, a promotion it could not persist", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+		try {
+			const binaryDir = join(tempDir, "c8run-8.10.4", "c8run-8.10.4");
+			mkdirSync(binaryDir, { recursive: true });
+			writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+			// A directory in place of the alias file makes the write fail.
+			mkdirSync(join(tempDir, "alias-stable.resolved"));
+
+			// @ts-expect-error — mock fetch: remote says stable is 8.10
+			globalThis.fetch = async () => ({
+				ok: true,
+				text: async () => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.4/">8.10.4</a>
+        `,
+			});
+
+			await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+
+			assert.ok(
+				loggedMessages.some(
+					(m: string) =>
+						m.includes("could not be updated") &&
+						/cluster start 8\.10\.4$/.test(m),
+				),
+				`got: ${loggedMessages.join("; ")}`,
+			);
+			assert.ok(!loggedMessages.some((m: string) => m.includes("will use it")));
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not persist alias mapping when the newer version is not installed", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
 		try {
 			// Seed a cached alias file pointing to 8.8
@@ -1518,7 +1665,7 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
         `,
 			});
 
-			await plugin.checkBackgroundAliasFreshness("stable", "8.8");
+			await plugin.checkBackgroundAliasFreshness("stable", "8.8", tempDir);
 
 			// The alias file should still point to 8.8 — not overwritten to 8.9
 			const cached = readFileSync(
@@ -1562,6 +1709,43 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 			loggedMessages.length,
 			0,
 			"should not log anything on non-OK response",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// flushStartHints
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – flushStartHints", () => {
+	test("waits for pending start hints before a failed start exits", async () => {
+		const printed: string[] = [];
+		const config = {
+			_aliasHintPromise: new Promise<void>((resolve) =>
+				setTimeout(() => {
+					printed.push("alias hint");
+					resolve();
+				}, 20),
+			),
+			_hintPromise: Promise.resolve().then(() => {
+				printed.push("rolling hint");
+			}),
+		};
+
+		await plugin.flushStartHints(config, 1000);
+
+		assert.deepStrictEqual(printed.sort(), ["alias hint", "rolling hint"]);
+	});
+
+	test("gives up after the timeout when a hint never settles", async () => {
+		const config = { _aliasHintPromise: new Promise(() => {}) };
+		const started = Date.now();
+
+		await plugin.flushStartHints(config, 50);
+
+		assert.ok(
+			Date.now() - started < 1000,
+			"must not block the failed start beyond the timeout",
 		);
 	});
 });
@@ -2587,6 +2771,188 @@ describe("Cluster Plugin – streamLogs", () => {
 		assert.ok(
 			output.includes("No log files found"),
 			"Should warn about missing log files",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// followLogFiles — the in-process `tail -f` used on Windows
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – followLogFiles", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-follow-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	/**
+	 * Start following, run `act` while following, then stop. Stopping polls
+	 * once more before resolving, so whatever `act` wrote is always read; the
+	 * long interval keeps the timer out of it, making the output deterministic.
+	 */
+	async function follow(files: string[], act: () => void): Promise<string> {
+		const chunks: string[] = [];
+		const controller = new AbortController();
+		const done = plugin.followLogFiles(files, {
+			signal: controller.signal,
+			write: (chunk: string) => chunks.push(chunk),
+			intervalMs: 60_000,
+		});
+		act();
+		controller.abort();
+		await done;
+		return chunks.join("");
+	}
+
+	test("prints the last 10 lines of each file with headers, then appended lines", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const connectors = join(tempDir, "connectors.log");
+		writeFileSync(
+			camunda,
+			`${Array.from({ length: 15 }, (_, i) => `c${i + 1}`).join("\n")}\n`,
+		);
+		writeFileSync(connectors, "k1\n");
+
+		const output = await follow([camunda, connectors], () => {
+			writeFileSync(connectors, "k1\nk2\n");
+		});
+
+		const expectedInitial = Array.from(
+			{ length: 10 },
+			(_, i) => `c${i + 6}\n`,
+		).join("");
+		assert.strictEqual(
+			output,
+			`==> ${camunda} <==\n${expectedInitial}` +
+				`\n==> ${connectors} <==\nk1\n` +
+				"k2\n",
+		);
+	});
+
+	test("omits headers when following a single file", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "first\nsecond\n");
+		});
+
+		assert.strictEqual(output, "first\nsecond\n");
+	});
+
+	test("re-reads a truncated file from the start", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "old line one\nold line two\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "new\n");
+		});
+
+		assert.strictEqual(output, "old line one\nold line two\nnew\n");
+	});
+
+	test("reads a file rotated in place from the start, even when it is not smaller", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const rotated = join(tempDir, "camunda.log.new");
+		writeFileSync(camunda, "old\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(rotated, "new one\nnew two\n");
+			renameSync(rotated, camunda);
+		});
+
+		assert.strictEqual(output, "old\nnew one\nnew two\n");
+	});
+
+	test("prints the last lines in full however long they are", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		// Longer than any fixed read-back window, e.g. a large stack trace.
+		const longLine = "é".repeat(100_000);
+		writeFileSync(camunda, `before\nlast but one\n${longLine}\n`);
+
+		const output = await follow([camunda], () => {});
+
+		const expected = `before\nlast but one\n${longLine}\n`;
+		// Keep a failure readable rather than diffing 100,000 characters.
+		assert.ok(
+			output === expected,
+			`expected all ${expected.length} characters, got ${output.length}: ${JSON.stringify(output.slice(0, 40))}`,
+		);
+	});
+
+	test("keeps an unterminated last line as-is so appends continue it", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "one\ntwo");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "one\ntwo more\n");
+		});
+
+		assert.strictEqual(output, "one\ntwo more\n");
+	});
+
+	test("keeps following while a file is briefly missing", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			rmSync(camunda);
+		});
+
+		assert.strictEqual(output, "first\n");
+	});
+
+	test("prints appends while following and stops cleanly on Ctrl+C", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+		const chunks: string[] = [];
+		const output = () => chunks.join("");
+		let abandoned = false;
+
+		const before = new Set(process.listeners("SIGINT"));
+		const done = plugin.followLogsUntilInterrupted([camunda], {
+			write: (chunk: string) => {
+				// Lets a failing test end following when no handler was registered.
+				if (abandoned) throw new Error("test abandoned following");
+				chunks.push(chunk);
+			},
+			intervalMs: 20,
+		});
+		// Called directly: emitting SIGINT would also reach the test runner's handler.
+		const handlers = process.listeners("SIGINT").filter((l) => !before.has(l));
+		try {
+			assert.strictEqual(handlers.length, 1, "registers one SIGINT handler");
+			assert.strictEqual(output(), "first\n");
+
+			appendFileSync(camunda, "second\n");
+			const seen = await pollUntil(
+				async () => output() === "first\nsecond\n",
+				10_000,
+				10,
+			);
+			assert.ok(
+				seen,
+				`appended line not printed while following: ${JSON.stringify(output())}`,
+			);
+		} finally {
+			if (handlers.length === 0) {
+				abandoned = true;
+				appendFileSync(camunda, "end\n");
+				await done.catch(() => {});
+			}
+			for (const handler of handlers) handler("SIGINT");
+		}
+
+		await done;
+		assert.deepStrictEqual(
+			process.listeners("SIGINT").filter((l) => !before.has(l)),
+			[],
+			"removes its SIGINT handler",
 		);
 	});
 });

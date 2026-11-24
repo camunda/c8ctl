@@ -7,7 +7,8 @@ Default c8ctl plugin that manages Camunda Desktop Modeler.
 - `c8ctl modeler install` — install the latest stable Desktop Modeler on
   macOS (Homebrew or the Camunda-signed release into `/Applications`),
   Windows (winget), or Linux (x64, into `/usr/bin` via sudo). Skips the
-  installation when Modeler is already installed.
+  installation when Modeler is already installed, and warns when a newer
+  release is available.
 - `c8ctl modeler update` — update through Homebrew, winget, or the direct
   release installation method. Reports when the installation is already up to
   date.

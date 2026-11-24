@@ -10,21 +10,26 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import {
+  closeSync,
   createWriteStream,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   writeFileSync,
   renameSync,
   rmSync,
   readdirSync,
   readFileSync,
+  readSync,
   statSync,
 } from 'node:fs';
 import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, dirname, isAbsolute, resolve } from 'node:path';
+import { join, dirname, basename, isAbsolute, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -210,37 +215,57 @@ function readLocalAliasMapping(cacheDir, alias) {
   const filePath = getAliasMappingPath(cacheDir, alias);
   if (!existsSync(filePath)) return null;
   try {
-    const value = readFileSync(filePath, 'utf-8').trim();
     // Only use the cached mapping if the version is actually installed
-    const config = { cacheDir, version: value };
-    if (isC8RunInstalled(config)) return value;
-
-    // For rolling versions (minor version patterns like "8.9"), check if any
-    // installed version matches the minor version prefix (e.g. "8.9" matches
-    // "8.9.5"). This prevents re-downloading a rolling alias when a compatible
-    // pinned version is already installed locally (#431).
-    if (isMinorVersionPattern(value)) {
-      const installedVersions = getInstalledVersionsList(cacheDir)
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      const match = installedVersions
-        .filter((v) => v.startsWith(value + '.'))
-        .reverse()
-        .find((v) => isC8RunInstalled({ cacheDir, version: v }));
-      if (match) return match;
-    }
-
-    return null;
+    return findInstalledAliasTarget(cacheDir, readFileSync(filePath, 'utf-8').trim(), alias);
   } catch {
     return null;
   }
 }
 
+/**
+ * Return the installed version that satisfies an alias target, or null.
+ * An exact install wins; for a rolling minor pattern ("8.9") the highest
+ * installed pin in that minor line ("8.9.5") also counts, so a compatible
+ * pinned install is not re-downloaded (#431). For `stable`, an install whose
+ * build is a prerelease never counts — whether pinned ("c8run-8.10.0-alpha1")
+ * or a rolling dir that still holds an alpha build ("c8run-8.10/c8run-8.10.0-alpha1").
+ */
+function findInstalledAliasTarget(cacheDir, value, alias) {
+  const accepts = (version) => {
+    const binaryPath = findC8RunBinaryPath({ cacheDir, version });
+    if (!binaryPath) return false;
+    return alias !== 'stable' || !isPrereleaseBuild(basename(dirname(binaryPath)));
+  };
+
+  if (accepts(value)) return value;
+
+  if (isMinorVersionPattern(value)) {
+    const installedVersions = getInstalledVersionsList(cacheDir)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const match = installedVersions
+      .filter((v) => v.startsWith(value + '.'))
+      .reverse()
+      .find(accepts);
+    if (match) return match;
+  }
+
+  return null;
+}
+
+/** True for a build dir like "c8run-8.10.0-alpha1" (anything with a semver prerelease suffix). */
+function isPrereleaseBuild(buildDirName) {
+  return /^c8run-\d+\.\d+(\.\d+)?-/.test(buildDirName);
+}
+
+/** Persist an alias mapping. Returns false if it could not be written. */
 export function storeLocalAliasMapping(cacheDir, alias, resolved) {
   try {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(getAliasMappingPath(cacheDir, alias), resolved);
+    return true;
   } catch {
     // Best-effort — don't break the command if we can't persist
+    return false;
   }
 }
 
@@ -265,16 +290,21 @@ export function _resetDynamicAliasCache() {
 }
 
 /**
- * Non-blocking background check: query the remote download server and print
- * a hint if the remote alias resolves to a different (newer) version.
+ * Non-blocking background check: query the remote download server and act
+ * if the remote alias resolves to a newer minor than the one being started.
  *
- * Important: does NOT update the persisted alias mapping. The mapping is only
- * updated when the user explicitly runs `cluster install`, keeping `start`
- * deterministic across runs.
+ * - Newer version already installed (e.g. via `cluster install 8.10`): the
+ *   persisted alias mapping is advanced to it, so the *next* `start` uses it.
+ *   Nothing is downloaded — the user already chose to install that version.
+ * - Newer version not installed: only a hint is printed; the mapping is left
+ *   alone so `start` never silently switches to a version it would have to
+ *   download.
+ *
+ * The current run is never affected: it has already resolved its version.
  *
  * Returns the fire-and-forget promise (for testing).
  */
-export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
+export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion, cacheDir) {
   const logger = getLogger();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -285,7 +315,22 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
         if (html) {
           const remote = parseVersionsFromHtml(html);
           const remoteVersion = remote?.[versionSpec];
-          if (remoteVersion && isRemoteMinorNewer(remoteVersion, resolvedVersion)) {
+          if (!remoteVersion || !isRemoteMinorNewer(remoteVersion, resolvedVersion)) return;
+          const installed = cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion, versionSpec);
+          if (installed) {
+            if (storeLocalAliasMapping(cacheDir, versionSpec, remoteVersion)) {
+              logger.info(
+                `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed. ` +
+                `The next "c8ctl cluster start ${versionSpec}" will use it.`,
+              );
+            } else {
+              // Name the exact install: a plain "8.10" would look for c8run-8.10 and download it.
+              logger.info(
+                `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed, ` +
+                `but the cached alias could not be updated. Start it with: c8ctl cluster start ${installed}`,
+              );
+            }
+          } else {
             logger.info(
               `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
               `Install it with: c8ctl cluster install ${versionSpec}`,
@@ -308,6 +353,25 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
  */
 function fireAndForget(promise) {
   return promise.catch(() => {});
+}
+
+/**
+ * Give the background `start` hints (alias freshness, rolling update) a short,
+ * bounded chance to print before a failed start calls process.exit(), which
+ * would otherwise drop them mid-flight. A failed start is when a newer version
+ * is most worth knowing about.
+ */
+export async function flushStartHints(config, timeoutMs = 1000) {
+  const pending = [config?._aliasHintPromise, config?._hintPromise].filter(Boolean);
+  if (pending.length === 0) return;
+  let timer;
+  await Promise.race([
+    Promise.all(pending),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  clearTimeout(timer);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1711,9 +1775,13 @@ async function startC8Run(config, debug = false, startArgs = []) {
   });
 
   if (typeof proc.pid !== 'number') {
+    // spawn() reports this failure via an async 'error' event; without a
+    // listener it would crash the process while the hints are flushed below.
+    proc.on('error', (err) => logger.error(`Failed to spawn c8run: ${err.message}`));
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
     logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
+    await flushStartHints(config);
     process.exit(1);
   }
 
@@ -1767,6 +1835,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     logger.error(
       `c8run start exited with code ${exitCode ?? 'unknown'}${exitSignal ? ` (signal: ${exitSignal})` : ''}. Cluster will not be marked as running.`,
     );
+    await flushStartHints(config);
     process.exit(typeof exitCode === 'number' && exitCode > 0 ? exitCode : 1);
   }
 
@@ -3265,6 +3334,164 @@ export async function purgeClusterData(cacheDir, versionSpec) {
 
 const LOG_FILES = ['camunda.log', 'connectors.log'];
 
+// Like `tail -f`: show the last lines of each file, then follow appends.
+const FOLLOW_INITIAL_LINES = 10;
+// Logs can be large, so the initial lines are found by scanning back in blocks.
+const TAIL_BLOCK_BYTES = 64 * 1024;
+const NEWLINE = 0x0a;
+
+function readRange(file, start, end) {
+  const fd = openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(end - start);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, start);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Byte offset at which the last `count` lines of `file` start. Scans back
+ * from the end until enough newlines are found, so a single entry longer
+ * than any fixed window is still shown in full. The offset is always at a
+ * line start, so decoding from it never splits a UTF-8 character. Also
+ * returns the identity of the scanned file, to detect a later replacement.
+ */
+function tailStart(file, count) {
+  const fd = openSync(file, 'r');
+  try {
+    const stats = fstatSync(fd, { bigint: true });
+    const id = fileIdentity(stats);
+    const size = Number(stats.size);
+    const buffer = Buffer.alloc(TAIL_BLOCK_BYTES);
+    let newlines = 0;
+    for (let end = size; end > 0;) {
+      const start = Math.max(0, end - buffer.length);
+      const bytesRead = readSync(fd, buffer, 0, end - start, start);
+      for (let i = bytesRead - 1; i >= 0; i--) {
+        // A trailing newline ends the last line rather than starting a new one.
+        if (buffer[i] !== NEWLINE || start + i === size - 1) continue;
+        if (++newlines === count) return { offset: start + i + 1, id };
+      }
+      end = start;
+    }
+    return { offset: 0, id };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const isMissingFile = error => error?.code === 'ENOENT';
+
+const fileIdentity = stats => `${stats.dev}:${stats.ino}`;
+
+/**
+ * Follow log files without `tail`, which Windows does not ship. Prints the
+ * last lines of each file (with `==> file <==` headers when there are several,
+ * as `tail` does), then polls for appended bytes until `signal` aborts.
+ * A file that shrinks or is replaced (truncated or rotated) is re-read from the start.
+ */
+export async function followLogFiles(files, {
+  signal,
+  write = chunk => process.stdout.write(chunk),
+  intervalMs = 500,
+} = {}) {
+  const multiple = files.length > 1;
+  let current = null;
+  const emit = (file, text) => {
+    if (multiple && current !== file) {
+      write(`${current === null ? '' : '\n'}==> ${file} <==\n`);
+      current = file;
+    }
+    if (text) write(text);
+  };
+
+  // Reads whatever was appended since the last read. A file can vanish at
+  // any point while it is rotated, so a missing file just yields nothing
+  // and is picked up again on a later poll.
+  const readAppended = (file, entry) => {
+    try {
+      const stats = statSync(file, { bigint: true });
+      const size = Number(stats.size);
+      const id = fileIdentity(stats);
+      // A replaced file can be as large as the one it rotated out.
+      const replaced = entry.id !== undefined && entry.id !== id;
+      entry.id = id;
+      if (replaced || size < entry.offset) {
+        entry.offset = 0;
+        entry.decoder = new StringDecoder('utf8');
+      }
+      if (size === entry.offset) return '';
+      const chunk = readRange(file, entry.offset, size);
+      entry.offset += chunk.length;
+      return entry.decoder.write(chunk);
+    } catch (error) {
+      if (isMissingFile(error)) return '';
+      throw error;
+    }
+  };
+
+  const state = new Map();
+  for (const file of files) {
+    let start = { offset: 0, id: undefined };
+    try {
+      start = tailStart(file, FOLLOW_INITIAL_LINES);
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    const entry = { ...start, decoder: new StringDecoder('utf8') };
+    state.set(file, entry);
+    // Emitted even when empty, so every file gets its header up front.
+    emit(file, readAppended(file, entry));
+  }
+
+  const poll = () => {
+    for (const file of files) {
+      const text = readAppended(file, state.get(file));
+      if (text) emit(file, text);
+    }
+  };
+
+  await new Promise((resolve, reject) => {
+    let timer;
+    const settle = error => {
+      clearInterval(timer);
+      signal?.removeEventListener('abort', stop);
+      if (error) reject(error);
+      else resolve();
+    };
+    // An unexpected read error ends following instead of escaping the timer.
+    const tick = () => {
+      try {
+        poll();
+        return true;
+      } catch (error) {
+        settle(error);
+        return false;
+      }
+    };
+    function stop() {
+      if (tick()) settle();
+    }
+    timer = setInterval(tick, intervalMs);
+    if (signal?.aborted) stop();
+    else signal?.addEventListener('abort', stop, { once: true });
+  });
+}
+
+/** Follows log files until Ctrl+C, which ends the command cleanly. */
+export async function followLogsUntilInterrupted(files, options = {}) {
+  const controller = new AbortController();
+  const sigintHandler = () => controller.abort();
+  process.on('SIGINT', sigintHandler);
+  try {
+    await followLogFiles(files, { ...options, signal: controller.signal });
+  } finally {
+    process.removeListener('SIGINT', sigintHandler);
+  }
+}
+
 export async function streamLogs(cacheDir) {
   const logger = getLogger();
   const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
@@ -3309,6 +3536,12 @@ export async function streamLogs(cacheDir) {
 
   logger.info(`Streaming logs from ${logDir} (Ctrl+C to stop)...`);
   logger.info('');
+
+  if (osPlatform() === 'win32') {
+    // Windows has no `tail`, so follow the files in-process.
+    await followLogsUntilInterrupted(existingLogs);
+    return;
+  }
 
   // Use tail -f to follow all log files
   const tailArgs = ['-f', ...existingLogs];
@@ -3652,11 +3885,6 @@ export const commands = {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }
 
-    // For start with a named alias, check in the background whether the
-    // remote resolves to a different (newer) version and hint if so.
-    if (isStart && isVersionAlias(versionSpec)) {
-      checkBackgroundAliasFreshness(versionSpec, version);
-    }
     const rolling = isRollingVersion(versionSpec);
     const config = {
       cacheDir: theCacheDir,
@@ -3670,12 +3898,19 @@ export const commands = {
       verbose: ctx?.verbose === true,
     };
 
+    // For start with a named alias, check in the background whether the
+    // remote resolves to a different (newer) version and hint if so.
+    if (isStart && isVersionAlias(versionSpec)) {
+      config._aliasHintPromise = checkBackgroundAliasFreshness(versionSpec, version, theCacheDir);
+    }
+
     if (parsed.subcommand === 'start') {
       try {
         await ensureC8RunInstalled(config);
         await startC8Run(config, parsed.debug, parsed.startArgs);
       } catch (error) {
         logger.error(`Failed to start cluster: ${formatErrorWithCause(error)}`);
+        await flushStartHints(config);
         process.exit(1);
       }
     } else if (parsed.subcommand === 'stop') {

@@ -346,28 +346,6 @@ function runCommand(
 	}
 }
 
-function runCommandCapture(
-	command: string,
-	args: string[],
-	failureMessage: string,
-): string {
-	const result = spawnSync(command, args, {
-		encoding: "utf8",
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	const diagnostics = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-	const details = diagnostics ? `\n${diagnostics}` : "";
-	if (result.error) {
-		throw new Error(`${failureMessage}: ${result.error.message}${details}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(
-			`${failureMessage} (exit code ${formatExitCode(result.status)}).${details}`,
-		);
-	}
-	return result.stdout ?? "";
-}
-
 function registerWithLaunchServices(appPath: string, logger: Logger): void {
 	const result = spawnSync(LAUNCH_SERVICES_REGISTER, ["-f", appPath], {
 		stdio: "ignore",
@@ -505,6 +483,47 @@ async function fetchReleaseIndex(signal: AbortSignal): Promise<string> {
 			`Could not read Camunda Modeler releases: ${errorMessage(error)}`,
 		);
 	}
+}
+
+/**
+ * Warn when an existing installation has an update available, so a skipped
+ * install does not silently keep an outdated Modeler. Advisory only: the
+ * installation works either way, so a failed check never fails the install.
+ */
+async function warnIfUpdateAvailable(
+	logger: Logger,
+	findUpdate: () => string | undefined | Promise<string | undefined>,
+): Promise<void> {
+	try {
+		const update = await findUpdate();
+		if (update) {
+			logger.warn(`${update} Run \`c8ctl modeler update\` to update it.`);
+		}
+	} catch (error) {
+		logger.debug(
+			`Could not check for a newer Camunda Modeler: ${errorMessage(error)}`,
+		);
+	}
+}
+
+/** Describes the newer stable release, if `installedVersion` is behind it. */
+async function newerReleaseThan(
+	installedVersion: string,
+): Promise<string | undefined> {
+	const interrupts = registerDownloadInterrupts("Modeler update check");
+	let latestVersion: string;
+	try {
+		latestVersion = latestStableModelerVersion(
+			await fetchReleaseIndex(
+				AbortSignal.any([interrupts.signal, AbortSignal.timeout(10_000)]),
+			),
+		);
+	} finally {
+		interrupts.cleanup();
+	}
+	return isNewerModelerVersion(latestVersion, installedVersion)
+		? `Camunda Modeler ${installedVersion} is installed, but ${latestVersion} is available.`
+		: undefined;
 }
 
 async function downloadArchive({
@@ -828,16 +847,24 @@ function registerWithWindows(executable: string, logger: Logger): void {
 	}
 }
 
-function installOnWindows({
+const WINGET_UPDATE_NOTICE =
+	"A newer Camunda Modeler is available with winget.";
+
+async function installOnWindows({
 	isDryRun,
 	logger,
 	quiet,
-}: ModelerInstallContext): ModelerInstallResult {
+}: ModelerInstallContext): Promise<ModelerInstallResult> {
 	const localAppData =
 		process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
 	const installDir = join(localAppData, "Programs", "Camunda Modeler");
 	const executable = join(installDir, WINDOWS_EXECUTABLE);
 	if (existsSync(executable)) {
+		// `modeler update` only updates winget installations, so only those
+		// are checked.
+		await warnIfUpdateAvailable(logger, () =>
+			wingetUpgradeAvailable() ? WINGET_UPDATE_NOTICE : undefined,
+		);
 		return {
 			kind: "info",
 			message: `Camunda Modeler is already installed at ${installDir}; skipping installation.`,
@@ -860,6 +887,9 @@ function installOnWindows({
 				description: "the winget Modeler package",
 			})
 		) {
+			await warnIfUpdateAvailable(logger, () =>
+				wingetUpgradeAvailable() ? WINGET_UPDATE_NOTICE : undefined,
+			);
 			return {
 				kind: "info",
 				message:
@@ -1020,6 +1050,13 @@ async function installOnLinux({
 }: ModelerInstallContext): Promise<ModelerInstallResult> {
 	const installedPath = findOnPath(LINUX_EXECUTABLE);
 	if (installedPath) {
+		// `modeler update` only updates installations c8ctl manages.
+		const managed = findManagedLinuxModeler();
+		if (managed) {
+			await warnIfUpdateAvailable(logger, () =>
+				newerReleaseThan(managed.version),
+			);
+		}
 		return {
 			kind: "info",
 			message: `Camunda Modeler is already installed at ${installedPath}; skipping installation.`,
@@ -1130,6 +1167,14 @@ export async function installDesktopModeler(
 
 	const installedPath = findInstalledModeler();
 	if (installedPath) {
+		await warnIfUpdateAvailable(ctx.logger, async () => {
+			// Homebrew moves cask apps into the app folders, so ask Homebrew
+			// whether it owns the bundle rather than inferring it from the path.
+			if (hasPackageManager("brew", "Homebrew") && homebrewModelerInstalled()) {
+				return homebrewModelerOutdated() ? HOMEBREW_UPDATE_NOTICE : undefined;
+			}
+			return newerReleaseThan(readMacModelerVersion(installedPath));
+		});
 		return {
 			kind: "info",
 			message: `Camunda Modeler is already installed at ${installedPath}; skipping installation.`,
@@ -1137,14 +1182,10 @@ export async function installDesktopModeler(
 	}
 
 	if (hasPackageManager("brew", "Homebrew")) {
-		if (
-			isInstalledWith({
-				command: "brew",
-				args: ["list", "--cask", "--versions", "camunda-modeler"],
-				notInstalledStatus: 1,
-				description: "the Homebrew Modeler cask",
-			})
-		) {
+		if (homebrewModelerInstalled()) {
+			await warnIfUpdateAvailable(ctx.logger, () =>
+				homebrewModelerOutdated() ? HOMEBREW_UPDATE_NOTICE : undefined,
+			);
 			return {
 				kind: "info",
 				message:
@@ -1264,15 +1305,44 @@ function homebrewModelerInstalled(): boolean {
 	});
 }
 
+const HOMEBREW_UPDATE_NOTICE =
+	"A newer Camunda Modeler is available with Homebrew.";
+
+/**
+ * Whether Homebrew has a newer Modeler cask. `brew outdated` exits with 1
+ * when a named cask is outdated, so that status is a result, not a failure.
+ */
+function homebrewModelerOutdated(): boolean {
+	const failureMessage = "Could not check Homebrew for Camunda Modeler updates";
+	const result = spawnSync(
+		"brew",
+		["outdated", "--cask", "--quiet", "camunda-modeler"],
+		{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+	);
+	const stdout = (result.stdout ?? "").trim();
+	const diagnostics = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+	const details = diagnostics ? `\n${diagnostics}` : "";
+	if (result.error) {
+		throw new Error(`${failureMessage}: ${result.error.message}${details}`);
+	}
+	if (result.status === 0 && stdout === "") return false;
+	if (
+		(result.status === 0 || result.status === 1) &&
+		stdout
+			.split(/\r?\n/)
+			.some((line) => /(^|\/)camunda-modeler$/.test(line.trim()))
+	) {
+		return true;
+	}
+	throw new Error(
+		`${failureMessage} (exit code ${formatExitCode(result.status)}).${details}`,
+	);
+}
+
 function updateHomebrewModeler(
 	ctx: ModelerInstallContext,
 ): ModelerInstallResult {
-	const outdated = runCommandCapture(
-		"brew",
-		["outdated", "--cask", "--quiet", "camunda-modeler"],
-		"Could not check Homebrew for Camunda Modeler updates",
-	).trim();
-	if (!outdated) {
+	if (!homebrewModelerOutdated()) {
 		return {
 			kind: "info",
 			message: "Camunda Modeler is already up to date with Homebrew.",

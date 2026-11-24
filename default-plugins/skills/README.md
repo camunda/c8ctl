@@ -21,7 +21,7 @@ harnesses.
   `--skill-path` value in the same order. Unknown name/path pairs fail before
   anything is deleted.
 
-Requires GitHub CLI 2.90 or later; its skill commands are in preview.
+Requires GitHub CLI 2.95 or later; its skill commands are in preview.
 Re-run to update the same skill directories without duplicates when upstream
 changes.
 
