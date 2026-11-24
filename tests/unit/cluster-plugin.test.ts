@@ -1535,6 +1535,7 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 					(m: string) =>
 						m.includes("8.10") &&
 						m.includes("already installed") &&
+						m.includes('"c8ctl cluster start stable"') &&
 						!m.includes("cluster install"),
 				),
 				`Should report the promotion, got: ${loggedMessages.join("; ")}`,
@@ -1544,15 +1545,85 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 		}
 	});
 
-	test("stable never advances to or resolves a prerelease pin", async () => {
+	for (const { layout, dir, alphaResolves } of [
+		{
+			layout: "pinned",
+			dir: ["c8run-8.10.0-alpha1", "c8run-8.10.0-alpha1"],
+			alphaResolves: "8.10.0-alpha1",
+		},
+		{
+			// `install alpha` while 8.10 was the alpha train fills the rolling dir with an alpha build
+			layout: "rolling dir holding an alpha build",
+			dir: ["c8run-8.10", "c8run-8.10.0-alpha1"],
+			alphaResolves: "8.10",
+		},
+	]) {
+		test(`stable never advances to or resolves a prerelease install (${layout})`, async () => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+			const listing = (stableMinor: string) => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+          ${stableMinor === "8.10" ? '<a href="8.10.4/">8.10.4</a>' : ""}
+        `;
+			try {
+				plugin.storeLocalAliasMapping(tempDir, "stable", "8.9");
+				for (const segments of [["c8run-8.9", "c8run-8.9.29"], dir]) {
+					const binaryDir = join(tempDir, ...segments);
+					mkdirSync(binaryDir, { recursive: true });
+					writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+				}
+
+				// @ts-expect-error — mock fetch: remote says stable is 8.10
+				globalThis.fetch = async () => ({
+					ok: true,
+					text: async () => listing("8.10"),
+				});
+				await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+				assert.strictEqual(
+					readFileSync(join(tempDir, "alias-stable.resolved"), "utf-8").trim(),
+					"8.9",
+					"only an alpha build of 8.10 is installed",
+				);
+
+				// A stable mapping already at 8.10 must not be satisfied by the alpha
+				// build either: resolution falls through to remote (stable = 8.9 here).
+				plugin.storeLocalAliasMapping(tempDir, "stable", "8.10");
+				plugin.storeLocalAliasMapping(tempDir, "alpha", "8.10");
+				// @ts-expect-error — mock fetch: 8.10 still alpha-only
+				globalThis.fetch = async () => ({
+					ok: true,
+					text: async () => listing("8.9"),
+				});
+				plugin._resetDynamicAliasCache();
+				assert.strictEqual(
+					await plugin.resolveVersion("stable", {
+						preferLocal: true,
+						cacheDir: tempDir,
+					}),
+					"8.9",
+				);
+				// alpha keeps accepting prerelease builds of its minor.
+				assert.strictEqual(
+					await plugin.resolveVersion("alpha", {
+						preferLocal: true,
+						cacheDir: tempDir,
+					}),
+					alphaResolves,
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("reports, rather than claims, a promotion it could not persist", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
 		try {
-			plugin.storeLocalAliasMapping(tempDir, "stable", "8.9");
-			for (const v of ["8.9", "8.10.0-alpha1"]) {
-				const binaryDir = join(tempDir, `c8run-${v}`, `c8run-${v}`);
-				mkdirSync(binaryDir, { recursive: true });
-				writeFileSync(join(binaryDir, C8RUN_BINARY), "");
-			}
+			const binaryDir = join(tempDir, "c8run-8.10.4", "c8run-8.10.4");
+			mkdirSync(binaryDir, { recursive: true });
+			writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+			// A directory in place of the alias file makes the write fail.
+			mkdirSync(join(tempDir, "alias-stable.resolved"));
 
 			// @ts-expect-error — mock fetch: remote says stable is 8.10
 			globalThis.fetch = async () => ({
@@ -1564,35 +1635,16 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 			});
 
 			await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
-			const cached = readFileSync(
-				join(tempDir, "alias-stable.resolved"),
-				"utf-8",
-			).trim();
-			assert.strictEqual(cached, "8.9", "only an alpha of 8.10 is installed");
 
-			// Even with stable already mapped to 8.10, the alpha pin must not satisfy it.
-			plugin.storeLocalAliasMapping(tempDir, "stable", "8.10");
-			globalThis.fetch = async () => {
-				throw new Error("offline");
-			};
-			plugin._resetDynamicAliasCache();
-			assert.notStrictEqual(
-				await plugin.resolveVersion("stable", {
-					preferLocal: true,
-					cacheDir: tempDir,
-				}),
-				"8.10.0-alpha1",
+			assert.ok(
+				loggedMessages.some(
+					(m: string) =>
+						m.includes("could not be updated") &&
+						m.includes("cluster start 8.10"),
+				),
+				`got: ${loggedMessages.join("; ")}`,
 			);
-
-			// alpha keeps accepting prerelease pins of its minor.
-			plugin.storeLocalAliasMapping(tempDir, "alpha", "8.10");
-			assert.strictEqual(
-				await plugin.resolveVersion("alpha", {
-					preferLocal: true,
-					cacheDir: tempDir,
-				}),
-				"8.10.0-alpha1",
-			);
+			assert.ok(!loggedMessages.some((m: string) => m.includes("will use it")));
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}

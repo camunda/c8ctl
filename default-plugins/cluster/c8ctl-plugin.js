@@ -27,7 +27,7 @@ import {
 import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, dirname, isAbsolute, resolve } from 'node:path';
+import { join, dirname, basename, isAbsolute, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
@@ -226,32 +226,46 @@ function readLocalAliasMapping(cacheDir, alias) {
  * Return the installed version that satisfies an alias target, or null.
  * An exact install wins; for a rolling minor pattern ("8.9") the highest
  * installed pin in that minor line ("8.9.5") also counts, so a compatible
- * pinned install is not re-downloaded (#431). For `stable`, prerelease pins
- * ("8.10.0-alpha1") never count, so the stable alias can't land on an alpha.
+ * pinned install is not re-downloaded (#431). For `stable`, an install whose
+ * build is a prerelease never counts — whether pinned ("c8run-8.10.0-alpha1")
+ * or a rolling dir that still holds an alpha build ("c8run-8.10/c8run-8.10.0-alpha1").
  */
 function findInstalledAliasTarget(cacheDir, value, alias) {
-  if (isC8RunInstalled({ cacheDir, version: value })) return value;
+  const accepts = (version) => {
+    const binaryPath = findC8RunBinaryPath({ cacheDir, version });
+    if (!binaryPath) return false;
+    return alias !== 'stable' || !isPrereleaseBuild(basename(dirname(binaryPath)));
+  };
+
+  if (accepts(value)) return value;
 
   if (isMinorVersionPattern(value)) {
     const installedVersions = getInstalledVersionsList(cacheDir)
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const match = installedVersions
       .filter((v) => v.startsWith(value + '.'))
-      .filter((v) => alias !== 'stable' || !v.includes('-'))
       .reverse()
-      .find((v) => isC8RunInstalled({ cacheDir, version: v }));
+      .find(accepts);
     if (match) return match;
   }
 
   return null;
 }
 
+/** True for a build dir like "c8run-8.10.0-alpha1" (anything with a semver prerelease suffix). */
+function isPrereleaseBuild(buildDirName) {
+  return /^c8run-\d+\.\d+(\.\d+)?-/.test(buildDirName);
+}
+
+/** Persist an alias mapping. Returns false if it could not be written. */
 export function storeLocalAliasMapping(cacheDir, alias, resolved) {
   try {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(getAliasMappingPath(cacheDir, alias), resolved);
+    return true;
   } catch {
     // Best-effort — don't break the command if we can't persist
+    return false;
   }
 }
 
@@ -303,11 +317,17 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion, cach
           const remoteVersion = remote?.[versionSpec];
           if (!remoteVersion || !isRemoteMinorNewer(remoteVersion, resolvedVersion)) return;
           if (cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion, versionSpec)) {
-            storeLocalAliasMapping(cacheDir, versionSpec, remoteVersion);
-            logger.info(
-              `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed. ` +
-              `The next "c8ctl cluster start" will use it.`,
-            );
+            if (storeLocalAliasMapping(cacheDir, versionSpec, remoteVersion)) {
+              logger.info(
+                `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed. ` +
+                `The next "c8ctl cluster start ${versionSpec}" will use it.`,
+              );
+            } else {
+              logger.info(
+                `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed, ` +
+                `but the cached alias could not be updated. Start it with: c8ctl cluster start ${remoteVersion}`,
+              );
+            }
           } else {
             logger.info(
               `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
