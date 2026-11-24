@@ -8,8 +8,8 @@
  * lived in index.ts.
  */
 
-import type { AnyCommandHandler } from "./command-framework.ts";
 import { completionCommand } from "./commands/completion.ts";
+import { deployCommand } from "./commands/deploy.ts";
 import { getFormCommand } from "./commands/forms.ts";
 import {
 	assignFallbackCommand,
@@ -63,12 +63,8 @@ import {
 	completeJobCommand,
 	failJobCommand,
 	listJobsCommand,
+	updateJobCommand,
 } from "./commands/jobs.ts";
-import {
-	mcpInstallCommand,
-	mcpListCommand,
-	mcpUninstallCommand,
-} from "./commands/mcp.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
 	correlateMessageCommand,
@@ -95,6 +91,10 @@ import {
 	createProcessInstanceCommand,
 	getProcessInstanceCommand,
 	listProcessInstancesCommand,
+	migrateProcessInstanceCommand,
+	modifyProcessInstanceCommand,
+	resumeProcessInstanceCommand,
+	suspendProcessInstanceCommand,
 } from "./commands/process-instances.ts";
 import {
 	addProfileCommand,
@@ -110,6 +110,7 @@ import {
 	searchProcessInstancesCommand,
 	searchUserTasksCommand,
 	searchVariablesCommand,
+	searchWaitStatesCommand,
 } from "./commands/search.ts";
 import {
 	outputCommand,
@@ -124,7 +125,7 @@ import {
 } from "./commands/user-tasks.ts";
 import { setVariableCommand } from "./commands/variables.ts";
 import { watchCommand } from "./commands/watch.ts";
-import { deployCommand } from "./deployments.ts";
+import type { AnyCommandHandler } from "./framework/index.ts";
 
 /**
  * Dispatch map keyed by "verb:resource".
@@ -159,6 +160,10 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["get:process-instance", getProcessInstanceCommand],
 	["create:process-instance", createProcessInstanceCommand],
 	["cancel:process-instance", cancelProcessInstanceCommand],
+	["suspend:process-instance", suspendProcessInstanceCommand],
+	["resume:process-instance", resumeProcessInstanceCommand],
+	["migrate:process-instance", migrateProcessInstanceCommand],
+	["modify:process-instance", modifyProcessInstanceCommand],
 	["await:process-instance", awaitProcessInstanceCommand],
 
 	// ── Process definitions ────────────────────────────────────────────
@@ -179,6 +184,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["activate:jobs", activateJobsCommand],
 	["complete:job", completeJobCommand],
 	["fail:job", failJobCommand],
+	["update:job", updateJobCommand],
 
 	// ── Messages ───────────────────────────────────────────────────────
 	["publish:message", publishMessageCommand],
@@ -201,6 +207,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["search:tenant", searchIdentityTenantsCommand],
 	["search:authorization", searchIdentityAuthorizationsCommand],
 	["search:mapping-rule", searchIdentityMappingRulesCommand],
+	["search:wait-state", searchWaitStatesCommand],
 
 	// ── Identity: list ─────────────────────────────────────────────────
 	["list:user", listUsersCommand],
@@ -267,7 +274,4 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["open:optimize", openAppCommand],
 	["feedback:", feedbackCommand],
 	["mcp-proxy:", mcpProxyCommand],
-	["mcp:install", mcpInstallCommand],
-	["mcp:uninstall", mcpUninstallCommand],
-	["mcp:list", mcpListCommand],
 ]);

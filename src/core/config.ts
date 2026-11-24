@@ -1,0 +1,1765 @@
+/**
+ * Configuration and session state management for c8ctl
+ *
+ * c8ctl stores its own profiles in DATA_DIR/c8ctl/profiles.json
+ * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
+ */
+
+import { createHash, randomUUID } from "node:crypto";
+import {
+	closeSync,
+	constants,
+	existsSync,
+	fchmodSync,
+	fstatSync,
+	linkSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
+import { resolveEnvBaseUrl, resolveEnvBasicAuth } from "./env-address.ts";
+import type { OutputMode } from "./logger.ts";
+import { getLogger, isRecord } from "./logger.ts";
+import { c8ctl } from "./runtime.ts";
+
+// ============================================================================
+// Constants - matching Camunda Modeler exactly
+// ============================================================================
+
+export const TARGET_TYPES = {
+	CAMUNDA_CLOUD: "camundaCloud",
+	SELF_HOSTED: "selfHosted",
+} as const;
+
+export type TargetType = (typeof TARGET_TYPES)[keyof typeof TARGET_TYPES];
+
+export const AUTH_TYPES = {
+	NONE: "none",
+	BASIC: "basic",
+	OAUTH: "oauth",
+} as const;
+
+export type AuthType = (typeof AUTH_TYPES)[keyof typeof AUTH_TYPES];
+
+// ============================================================================
+// Connection Types - matching Camunda Modeler's connection-manager-plugin
+// ============================================================================
+
+/**
+ * Connection structure matching Camunda Modeler's ConnectionManagerSettingsProperties
+ * @see https://github.com/camunda/camunda-modeler/blob/main/client/src/plugins/zeebe-plugin/connection-manager-plugin/ConnectionManagerSettingsProperties.js
+ */
+export interface Connection {
+	/** Unique identifier (UUID) */
+	id: string;
+	/** Human-readable connection name */
+	name?: string;
+	/** Target environment type */
+	targetType: TargetType;
+
+	// Camunda Cloud (SaaS) properties
+	/** Camunda Cloud cluster URL (e.g., https://xxx.bru-2.zeebe.camunda.io/xxx) */
+	camundaCloudClusterUrl?: string;
+	/** Camunda Cloud client ID */
+	camundaCloudClientId?: string;
+	/** Camunda Cloud client secret */
+	camundaCloudClientSecret?: string;
+
+	// Self-Hosted properties
+	/** Self-hosted cluster URL (e.g., http://localhost:8080/v2) */
+	contactPoint?: string;
+	/** Authentication type for self-hosted */
+	authType?: AuthType;
+	/** Tenant ID (optional) */
+	tenantId?: string;
+	/** Operate URL (optional) */
+	operateUrl?: string;
+
+	// Basic Auth (self-hosted)
+	basicAuthUsername?: string;
+	basicAuthPassword?: string;
+
+	// OAuth (self-hosted)
+	clientId?: string;
+	clientSecret?: string;
+	oauthURL?: string;
+	audience?: string;
+	scope?: string;
+}
+
+/**
+ * c8ctl Profile interface - stored in DATA_DIR/c8ctl/profiles.json
+ * This is c8ctl's native profile format
+ */
+export interface Profile {
+	name: string;
+	baseUrl: string;
+	clientId?: string;
+	clientSecret?: string;
+	audience?: string;
+	oAuthUrl?: string;
+	scope?: string;
+	username?: string;
+	password?: string;
+	defaultTenantId?: string;
+	/**
+	 * Custom HTTP headers attached to every REST request made under this
+	 * profile (e.g. a gateway API key or correlation ID). Keyed by header
+	 * name.
+	 */
+	headers?: Record<string, string>;
+	/**
+	 * When true, `baseUrl` is used exactly as given for every request —
+	 * c8ctl does not append `/v2`. For gateway-fronted clusters whose base
+	 * path does not match c8ctl's assumed suffixing.
+	 */
+	exactBaseUrl?: boolean;
+	/**
+	 * Explicit SDK authentication strategy (from `CAMUNDA_AUTH_STRATEGY` on
+	 * `--from-file` / `--from-env` import). When set it wins over the
+	 * strategy derived from whichever credentials the profile carries.
+	 */
+	authStrategy?: CamundaAuthStrategy;
+}
+
+export interface SessionState {
+	activeProfile?: string;
+	activeTenant?: string;
+	outputMode: OutputMode;
+	/** When true, deploy skips the profile-selection prompt and uses the active profile. */
+	skipDeployConfirm?: boolean;
+}
+
+/**
+ * The output mode persisted on disk in `session.json`.
+ *
+ * Tracked separately from `c8ctl.outputMode` (which reflects the *effective*
+ * mode for this invocation) so that per-invocation overrides like `--json`
+ * or `C8CTL_OUTPUT_MODE` do not leak into `saveSessionState()` when other
+ * commands (e.g. `use profile`, `use tenant`) write the file. See #356.
+ *
+ * Initialised by `loadSessionState()`; updated by `setOutputMode()` (the
+ * persistent setter behind `c8ctl output json|text`).
+ */
+let persistedOutputMode: OutputMode = "text";
+
+export interface ClusterConfig {
+	baseUrl: string;
+	clientId?: string;
+	clientSecret?: string;
+	audience?: string;
+	oAuthUrl?: string;
+	scope?: string;
+	username?: string;
+	password?: string;
+	/**
+	 * Explicit SDK authentication strategy from `CAMUNDA_AUTH_STRATEGY`
+	 * (NONE/BASIC/OAUTH). When set, `createClient` uses it verbatim instead
+	 * of deriving the strategy from whichever credentials are present.
+	 */
+	authStrategy?: CamundaAuthStrategy;
+	/** See `Profile.headers`. */
+	headers?: Record<string, string>;
+	/** See `Profile.exactBaseUrl`. */
+	exactBaseUrl?: boolean;
+}
+
+// ============================================================================
+// Validation - matching Camunda Modeler's validation rules
+// ============================================================================
+
+const VALIDATION_PATTERNS = {
+	URL: /^https?:\/\//,
+	CAMUNDA_CLOUD_REST_URL:
+		/^https:\/\/[a-z]+-\d+\.zeebe\.camunda\.io(:443|)\/[a-z\d-]+\/?$/,
+};
+
+// Cloud URLs must be REST URLs (HTTP-based)
+const CAMUNDA_CLOUD_URL_PATTERN = VALIDATION_PATTERNS.CAMUNDA_CLOUD_REST_URL;
+
+/**
+ * Validate a connection configuration
+ * Returns array of error messages (empty if valid)
+ */
+export function validateConnection(conn: Partial<Connection>): string[] {
+	const errors: string[] = [];
+
+	if (!conn) {
+		errors.push("Connection configuration is required");
+		return errors;
+	}
+
+	if (!conn.id) {
+		errors.push("Connection must have an ID");
+	}
+
+	if (!conn.targetType) {
+		errors.push("Target type is required (camundaCloud or selfHosted)");
+		return errors;
+	}
+
+	if (conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD) {
+		if (!conn.camundaCloudClusterUrl) {
+			errors.push("Cluster URL is required for Camunda Cloud");
+		} else if (!CAMUNDA_CLOUD_URL_PATTERN.test(conn.camundaCloudClusterUrl)) {
+			errors.push("Cluster URL must be a valid Camunda 8 SaaS URL");
+		}
+		if (!conn.camundaCloudClientId) {
+			errors.push("Client ID is required for Camunda Cloud");
+		}
+		if (!conn.camundaCloudClientSecret) {
+			errors.push("Client Secret is required for Camunda Cloud");
+		}
+	} else if (conn.targetType === TARGET_TYPES.SELF_HOSTED) {
+		if (!conn.contactPoint) {
+			errors.push("Cluster URL (contactPoint) is required for Self-Hosted");
+		} else if (!VALIDATION_PATTERNS.URL.test(conn.contactPoint)) {
+			errors.push("Cluster URL must start with http:// or https://");
+		}
+
+		if (conn.authType === AUTH_TYPES.BASIC) {
+			if (!conn.basicAuthUsername) {
+				errors.push("Username is required for Basic authentication");
+			}
+			if (!conn.basicAuthPassword) {
+				errors.push("Password is required for Basic authentication");
+			}
+		} else if (conn.authType === AUTH_TYPES.OAUTH) {
+			if (!conn.clientId) {
+				errors.push("Client ID is required for OAuth authentication");
+			}
+			if (!conn.clientSecret) {
+				errors.push("Client Secret is required for OAuth authentication");
+			}
+			if (!conn.oauthURL) {
+				errors.push("OAuth URL is required for OAuth authentication");
+			}
+			if (!conn.audience) {
+				errors.push("Audience is required for OAuth authentication");
+			}
+		}
+	} else {
+		errors.push(`Unknown target type: ${conn.targetType}`);
+	}
+
+	return errors;
+}
+
+// ============================================================================
+// Directory and Path Utilities
+// ============================================================================
+
+/**
+ * Get platform-specific user data directory for c8ctl
+ */
+export function getUserDataDir(): string {
+	if (process.env.C8CTL_DATA_DIR) {
+		return process.env.C8CTL_DATA_DIR;
+	}
+
+	const plat = platform();
+	const home = homedir();
+
+	switch (plat) {
+		case "win32":
+			return join(
+				process.env.APPDATA || join(home, "AppData", "Roaming"),
+				"c8ctl",
+			);
+		case "darwin":
+			return join(home, "Library", "Application Support", "c8ctl");
+		default:
+			return join(
+				process.env.XDG_CONFIG_HOME || join(home, ".config"),
+				"c8ctl",
+			);
+	}
+}
+
+/**
+ * Get platform-specific Camunda Modeler data directory
+ * Modeler stores connections in settings.json
+ */
+export function getModelerDataDir(): string {
+	// Allow override for testing
+	if (process.env.C8CTL_MODELER_DIR) {
+		return process.env.C8CTL_MODELER_DIR;
+	}
+
+	const plat = platform();
+	const home = homedir();
+
+	switch (plat) {
+		case "win32":
+			return join(
+				process.env.APPDATA || join(home, "AppData", "Roaming"),
+				"camunda-modeler",
+			);
+		case "darwin":
+			return join(home, "Library", "Application Support", "camunda-modeler");
+		default:
+			return join(
+				process.env.XDG_CONFIG_HOME || join(home, ".config"),
+				"camunda-modeler",
+			);
+	}
+}
+
+function ensureUserDataDir(): string {
+	const dir = getUserDataDir();
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+	return dir;
+}
+
+/**
+ * Get the global plugins directory for c8ctl
+ * This is where plugins are installed globally, independent of any project
+ */
+export function getPluginsDir(): string {
+	return join(getUserDataDir(), "plugins");
+}
+
+/**
+ * Ensure plugins directory exists
+ */
+export function ensurePluginsDir(): string {
+	const dir = getPluginsDir();
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+	return dir;
+}
+
+function getSessionStatePath(): string {
+	return join(ensureUserDataDir(), "session.json");
+}
+
+function getProfilesPath(): string {
+	return join(ensureUserDataDir(), "profiles.json");
+}
+
+function getModelerSettingsPath(): string {
+	return join(getModelerDataDir(), "settings.json");
+}
+
+// ============================================================================
+// c8ctl Profile Management - stored in DATA_DIR/c8ctl/profiles.json
+// ============================================================================
+
+interface ProfilesFile {
+	profiles: Profile[];
+}
+
+/**
+ * The permission bits (0oNNN) of an existing file, or `undefined` if it cannot
+ * be stat'd. Used to carry a user-protected `profiles.json` mode (e.g. 0600 —
+ * it holds client secrets and passwords) onto its backups and atomic-replace
+ * temp files, so persistence never silently widens the file to the umask
+ * default and exposes credentials to other local users.
+ */
+function fileMode(path: string): number | undefined {
+	try {
+		return statSync(path).mode & 0o777;
+	} catch {
+		return undefined;
+	}
+}
+
+/** True on native Windows, where POSIX permission bits do not apply. */
+const isWindows = platform() === "win32";
+
+/**
+ * Re-tighten an open fd to `mode` THROUGH THE FD — but only where the platform
+ * implements it. `fchmodSync` throws `ERR_METHOD_NOT_IMPLEMENTED` on Windows
+ * (access there is governed by ACLs, not POSIX mode bits), so an unconditional
+ * call would throw on every profile save and corrupt-file recovery on the
+ * Windows CI leg — the catch would then delete the staged temp and report that
+ * no backup was written. The create-time `mode` already covers the only bit
+ * Windows honours (read-only), so skipping the fd chmod there loses nothing.
+ */
+function pinFdMode(fd: number, mode: number): void {
+	if (!isWindows) fchmodSync(fd, mode);
+}
+
+/** The optional, string-typed fields of a `Profile`. */
+const OPTIONAL_STRING_PROFILE_FIELDS = [
+	"clientId",
+	"clientSecret",
+	"audience",
+	"oAuthUrl",
+	"scope",
+	"username",
+	"password",
+	"defaultTenantId",
+] as const;
+
+/** A `Record<string, string>` — every value is a string. */
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return (
+		isRecord(value) && Object.values(value).every((v) => typeof v === "string")
+	);
+}
+
+/**
+ * A well-formed `Profile`. Validates the required `name`/`baseUrl` AND every
+ * optional field's runtime type: a syntactically valid file whose optional
+ * fields have the wrong type (a non-string credential, a non-map `headers`, a
+ * non-boolean `exactBaseUrl`) is schema corruption, not a healthy profile —
+ * accepting it would let `profileToClusterConfig`/the request layer later
+ * mishandle authentication, headers, or URL suffixing instead of the file
+ * being rejected up front.
+ */
+function isValidProfile(value: unknown): value is Profile {
+	if (
+		!isRecord(value) ||
+		typeof value.name !== "string" ||
+		typeof value.baseUrl !== "string"
+	) {
+		return false;
+	}
+	for (const field of OPTIONAL_STRING_PROFILE_FIELDS) {
+		if (value[field] !== undefined && typeof value[field] !== "string") {
+			return false;
+		}
+	}
+	if (
+		value.exactBaseUrl !== undefined &&
+		typeof value.exactBaseUrl !== "boolean"
+	) {
+		return false;
+	}
+	if (value.headers !== undefined && !isStringRecord(value.headers)) {
+		return false;
+	}
+	if (
+		value.authStrategy !== undefined &&
+		!CAMUNDA_AUTH_STRATEGIES.some((s) => s === value.authStrategy)
+	) {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Runtime schema validation for a parsed profiles.json. A compile-time
+ * `ProfilesFile` annotation is erased at runtime, so a syntactically valid but
+ * schema-corrupt file (`{}`, `{"profiles": null}`, `[]`, or entries missing a
+ * name/baseUrl) would otherwise slip through `profilesFile.profiles || []` as
+ * an "empty" store and reopen the silent-wipe path. Returns the validated
+ * profiles array, or `null` when the value is not a valid profiles file.
+ */
+function extractValidProfiles(parsed: unknown): Profile[] | null {
+	if (!isRecord(parsed)) return null;
+	const rawProfiles = parsed.profiles;
+	if (!Array.isArray(rawProfiles)) return null;
+	if (!rawProfiles.every(isValidProfile)) return null;
+	return rawProfiles;
+}
+
+/**
+ * Preserve the original bytes of a corrupt profiles.json in a content-addressed,
+ * mode-preserving backup (best-effort). Returns the backup path and whether it
+ * actually exists on disk afterwards.
+ *
+ * - Deduplicates: `loadProfiles` runs on virtually every CLI startup (via
+ *   `loadSessionState`), so leaving the corrupt file in place would otherwise
+ *   spew a fresh full copy on every command and eventually fill the disk. The
+ *   backup name is the SHA-256 of the corrupt bytes, so a
+ *   `profiles.json.corrupt-<sha256>` backup already holding the exact same
+ *   bytes is reused instead of writing another.
+ * - Restrictive mode: the backup carries credentials, so it inherits the source
+ *   file's permission bits (e.g. 0600) rather than the umask default — and is
+ *   CREATED with that mode (or a 0600 fallback), never briefly world-readable.
+ * - Byte-exact: takes the raw `Buffer` read off disk (never a UTF-8-decoded
+ *   string), so a torn write ending mid-multibyte-sequence is backed up and
+ *   deduplicated by its true bytes, not lossily re-encoded replacement chars.
+ */
+function backupCorruptProfiles(
+	profilesPath: string,
+	data: Buffer,
+): { backup: string; backedUp: boolean } {
+	// The mode a credential backup must carry: the source file's bits (e.g.
+	// 0600) or a restrictive 0600 fallback. Computed up front so a REUSED
+	// backup can be re-tightened too, not just a freshly created one.
+	const mode = fileMode(profilesPath) ?? 0o600;
+
+	// CONTENT-ADDRESSED canonical name: the backup filename is a pure function
+	// of the corrupt BYTES (their SHA-256), so identical corruption always maps
+	// to exactly ONE file. This is what bounds the credential copies across
+	// processes: N c8ctl children racing on the same corrupt profiles.json all
+	// derive the same name, and an EXCLUSIVE (`wx`) create lets exactly one win
+	// — every other loses with EEXIST and REUSES that single canonical backup,
+	// instead of each writing its own random-suffixed copy. A cross-process
+	// readdir/dedup scan could NOT prevent that fan-out (every child can finish
+	// scanning empty before any has written); a content-addressed name closes
+	// the race deterministically with no lock, and subsumes the old dedup scan
+	// for free (same bytes → same name).
+	const hash = createHash("sha256").update(data).digest("hex");
+	const backup = `${profilesPath}.corrupt-${hash}`;
+
+	// Stage the bytes in a private temp file FIRST, fully written and mode-pinned,
+	// then publish the canonical name with an atomic `link()`. This is what makes
+	// the canonical backup safe to reuse under concurrency: `link()` only ever
+	// exposes `backup` once it points at fully written content, so a losing racer
+	// that observes EEXIST reads COMPLETE bytes (never a half-finished write that
+	// would fail the equality check and fan out into a second copy). `link()`
+	// also refuses to follow or overwrite a pre-existing symlink at the canonical
+	// name, and the reuse read below opens with O_NOFOLLOW — so a symlink
+	// squatting the canonical path can neither redirect the reused read nor a
+	// chmod outside the profile store.
+	const tmp = `${profilesPath}.corrupt-tmp-${randomUUID()}`;
+	let stagedFd: number | undefined;
+	try {
+		// Create-exclusive (O_EXCL) + no-follow (O_NOFOLLOW) with a restrictive
+		// mode up front (never the 0666 umask default), so a credential temp is
+		// never briefly world-readable and a symlink can neither be followed nor
+		// pre-created at the temp path. Then write and re-tighten the exact mode
+		// (create mode is umask-masked) THROUGH THE FD via `fchmodSync` — never a
+		// pathname `chmodSync`, which a symlink swapped in after the file closed
+		// could redirect to a target outside the profile store.
+		stagedFd = openSync(
+			tmp,
+			constants.O_WRONLY |
+				constants.O_CREAT |
+				constants.O_EXCL |
+				constants.O_NOFOLLOW,
+			mode,
+		);
+		writeFileSync(stagedFd, data);
+		pinFdMode(stagedFd, mode);
+	} catch {
+		// Could not even stage the temp copy — best-effort, give up cleanly.
+		if (stagedFd !== undefined) closeQuietly(stagedFd);
+		removeQuietly(tmp);
+		return { backup, backedUp: false };
+	}
+	closeQuietly(stagedFd);
+
+	try {
+		// Publish under a BOUNDED, DETERMINISTIC set of content-addressed names:
+		// the canonical name first, then a single `.dup` fallback for the
+		// (astronomically unlikely) case where the canonical name is squatted by
+		// a non-matching or symlinked file. Both names are pure functions of the
+		// corrupt bytes, so repeated recoveries of the same corruption always map
+		// to the SAME (at most two) files and REUSE them — never a fresh
+		// random-suffixed copy per run. If BOTH names are unusable (e.g. an
+		// attacker squatting both with symlinks), we stop after preserving the
+		// original on disk rather than accumulate unbounded credential copies.
+		for (const name of [backup, `${backup}.dup`]) {
+			if (publishBackup(tmp, name, data, mode)) {
+				return { backup: name, backedUp: true };
+			}
+		}
+		return { backup, backedUp: false };
+	} finally {
+		// Drop the temp NAME. Whether we linked (content also at a published
+		// name) or gave up, unlinking the temp name never removes the
+		// hard-linked content it published elsewhere.
+		removeQuietly(tmp);
+	}
+}
+
+/**
+ * Publish the mode-pinned `tmp` under content-addressed `name` via an atomic
+ * `link()`, or REUSE `name` if it already holds these exact bytes. Returns
+ * `true` when `name` ends up as a usable regular-file backup of `data`, `false`
+ * when `name` is unusable (squatted by a symlink / non-matching file, or a
+ * non-EEXIST link error) so the caller can try the next name.
+ *
+ * `link()` never follows or overwrites a pre-existing symlink at `name`, and the
+ * hard link inherits `tmp`'s already-pinned mode — so no post-publish
+ * pathname-based chmod (which a symlink swap could redirect outside the store)
+ * is needed.
+ */
+function publishBackup(
+	tmp: string,
+	name: string,
+	data: Buffer,
+	mode: number,
+): boolean {
+	try {
+		linkSync(tmp, name);
+		return true;
+	} catch (err) {
+		// EEXIST: the name already exists. Reuse it iff it is a regular file with
+		// these exact bytes (and a repairable mode); otherwise it is unusable.
+		if (isRecord(err) && err.code === "EEXIST") {
+			return reuseCanonicalBackup(name, data, mode);
+		}
+		return false;
+	}
+}
+
+/** Best-effort unlink that swallows ENOENT and any other error. */
+function removeQuietly(path: string): void {
+	try {
+		rmSync(path, { force: true });
+	} catch {
+		/* best-effort cleanup */
+	}
+}
+
+/**
+ * Does the path ENTRY itself exist, without following a final symlink? Uses
+ * `lstatSync`, so a DANGLING symlink (link present, target absent) counts as
+ * "exists" — distinguishing a broken/unreadable profiles path from a genuinely
+ * absent one when a `readFileSync` returns ENOENT.
+ */
+function pathEntryExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch (err) {
+		// Only an ENOENT from `lstatSync` PROVES the entry is genuinely absent.
+		// Any OTHER failure (ENOTDIR, EACCES, EIO…) means the path is present but
+		// unstattable — e.g. on Windows a data-directory path that is a regular
+		// file can yield ENOENT from `readFileSync` yet ENOTDIR from `lstatSync`.
+		// Treat those as "exists/unreadable" so `loadProfiles` routes them to the
+		// protected throw path instead of seeding over an unreadable store.
+		if (isRecord(err) && err.code === "ENOENT") return false;
+		return true;
+	}
+}
+
+/**
+ * Reuse an existing content-addressed canonical backup iff it is a REGULAR file
+ * whose bytes match `data`. Opens with O_NOFOLLOW and operates on the resulting
+ * fd (fstat/read/fchmod), so a symlink squatting the canonical name is rejected
+ * (ELOOP) and can never redirect the read or a chmod to a target outside the
+ * profile store. Re-tightens a stale/world-readable mode on the same fd (an
+ * older run may have created it 0644 before profiles.json was locked to 0600).
+ */
+function reuseCanonicalBackup(
+	backup: string,
+	data: Buffer,
+	mode: number,
+): boolean {
+	let fd: number | undefined;
+	try {
+		// O_NONBLOCK so a canonical name pre-created as a FIFO (or other blocking
+		// special file) can NEVER hang this open indefinitely waiting for a peer
+		// — with O_NONBLOCK the open returns at once, `fstatSync` sees a
+		// non-regular entry, and we reject it below. For a regular file
+		// O_NONBLOCK is a no-op (reads are unaffected), and we never `readFileSync`
+		// a candidate that failed the `isFile()` gate, so a FIFO is never read.
+		fd = openSync(
+			backup,
+			constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+		);
+		const st = fstatSync(fd);
+		if (!st.isFile()) return false; // reject symlink target / non-regular / FIFO
+		// Reject a HARD-LINK squat: O_NOFOLLOW blocks symlinks but not a
+		// pre-existing hard link to a same-byte file OUTSIDE this directory —
+		// reusing it would report a foreign inode as our backup and let the
+		// `fchmodSync` below change that outside inode's permissions. A backup we
+		// published (link → unlink temp) settles at nlink === 1, so anything with
+		// extra links is not an independently owned copy. (A racer reusing the
+		// canonical name in the microscopic window before the publisher unlinks
+		// its temp may see nlink === 2 and fall through to the bounded `.dup`
+		// name — a spurious second file at worst, never an unbounded fan-out.)
+		if (st.nlink !== 1) return false;
+		if (!readFileSync(fd).equals(data)) return false;
+		if ((st.mode & 0o777) !== mode) {
+			try {
+				pinFdMode(fd, mode);
+			} catch {
+				// Could not re-tighten a stale/world-readable candidate. Do NOT
+				// claim it as a safe backup — reporting it as reused would leave
+				// credentials at a wider mode than promised. Return false so the
+				// caller publishes a freshly mode-pinned copy under the next name.
+				return false;
+			}
+		}
+		return true;
+	} catch {
+		// ELOOP (symlink, blocked by O_NOFOLLOW), ENOENT, unreadable, etc.
+		return false;
+	} finally {
+		if (fd !== undefined) closeQuietly(fd);
+	}
+}
+
+/** Best-effort fd close that swallows any error. */
+function closeQuietly(fd: number): void {
+	try {
+		closeSync(fd);
+	} catch {
+		/* best-effort close */
+	}
+}
+
+/** Back up the corrupt file (best-effort) and throw a recoverable error. */
+function throwCorruptProfiles(
+	profilesPath: string,
+	data: Buffer,
+	detail: string,
+): never {
+	const { backup, backedUp } = backupCorruptProfiles(profilesPath, data);
+	const backupNote = backedUp
+		? `Its contents were backed up to ${backup}. `
+		: `A backup could not be written, but the original file is still on disk untouched. `;
+	throw new Error(
+		`profiles.json at ${profilesPath} is corrupt (${detail}). ${backupNote}` +
+			`Refusing to overwrite it to avoid destroying your saved profiles — ` +
+			`fix or remove the file, then re-run.`,
+	);
+}
+
+/**
+ * Load c8ctl profiles from profiles.json.
+ *
+ * A MISSING file legitimately means "no profiles yet" → `[]`. But a file that
+ * exists and cannot be read/parsed is NOT empty — it is corrupt or transiently
+ * unreadable (e.g. a torn write from a crash or two c8ctl processes racing).
+ * Returning `[]` in that case is catastrophic: the very next `saveProfiles`
+ * (via `addProfile`/`ensureDefaultProfile`/`removeProfile`) would overwrite the
+ * file with a truncated set, silently DESTROYING every saved profile. So we
+ * distinguish the two: absent → `[]`; present-but-unreadable → THROW (after
+ * preserving the original bytes in a content-addressed backup), so no caller can
+ * mistake corruption for emptiness and clobber the user's profiles.
+ */
+export function loadProfiles(): Profile[] {
+	const profilesPath = getProfilesPath();
+
+	let data: Buffer;
+	let fd: number | undefined;
+	try {
+		// Open the PRIMARY profiles path NON-BLOCKING before reading: a
+		// profiles.json pre-created as a FIFO (or other blocking special file)
+		// would make a plain `readFileSync` hang startup FOREVER waiting for a
+		// writer. With O_NONBLOCK the open returns at once and the `fstatSync`
+		// gate below rejects a non-regular entry before any read — mirroring the
+		// canonical-backup reuse path. O_NONBLOCK is a no-op for regular files
+		// (reads are unaffected). We deliberately DO follow symlinks here (no
+		// O_NOFOLLOW): reading THROUGH a valid symlink to a regular file is the
+		// documented behaviour, and a DANGLING symlink still surfaces as ENOENT
+		// and is handled below.
+		fd = openSync(profilesPath, constants.O_RDONLY | constants.O_NONBLOCK);
+		const st = fstatSync(fd);
+		if (!st.isFile()) {
+			// A non-regular entry (FIFO, device, socket, directory) squats the
+			// profiles path. This is NOT "no profiles yet" — refuse to proceed so
+			// a later save cannot replace it and silently lose the user's intent.
+			throw new Error(
+				`profiles file at ${profilesPath} is not a regular file (e.g. a ` +
+					`FIFO, device, or directory). Refusing to treat it as empty (that ` +
+					`would overwrite your saved profiles) — fix or remove it, then ` +
+					`re-run.`,
+			);
+		}
+		data = readFileSync(fd);
+	} catch (err) {
+		// A MISSING file (ENOENT) legitimately means "no profiles yet" → [].
+		// Any OTHER read error (permissions, a transiently inaccessible parent,
+		// an I/O fault) is NOT emptiness: `existsSync` can't tell these apart —
+		// it returns false for an unstattable path too — so we key strictly on
+		// ENOENT and route every other failure to the protected throw path, so
+		// seeding can never proceed from a false "empty" state and clobber the
+		// user's saved profiles.
+		if (isRecord(err) && err.code === "ENOENT") {
+			// `openSync` also returns ENOENT for a DANGLING symlink (the link
+			// exists, its target does not). That is NOT "no profiles yet": a
+			// later `saveProfiles` rename would replace the link and the user's
+			// intended target is lost. `lstatSync` inspects the path entry
+			// ITSELF without following it — if it succeeds, something is present
+			// (a broken symlink or other non-regular entry) and we must NOT treat
+			// it as empty. Only a genuinely absent entry (lstat also ENOENT)
+			// means "no profiles yet".
+			if (pathEntryExists(profilesPath)) {
+				throw new Error(
+					`profiles file at ${profilesPath} exists but its contents could not ` +
+						`be read (e.g. a dangling symlink). Refusing to treat it as empty ` +
+						`(that would overwrite your saved profiles) — fix or remove it, ` +
+						`then re-run.`,
+				);
+			}
+			return [];
+		}
+		// A well-formed error we threw ourselves (the non-regular-entry gate
+		// above) carries no fs `code` — surface it verbatim rather than
+		// re-wrapping it as a raw read failure.
+		if (!(isRecord(err) && typeof err.code === "string")) {
+			throw err;
+		}
+		throw new Error(
+			`Failed to read profiles at ${profilesPath}: ${err instanceof Error ? err.message : String(err)}. ` +
+				`Refusing to treat an unreadable profiles file as empty (that would ` +
+				`overwrite your saved profiles).`,
+		);
+	} finally {
+		if (fd !== undefined) closeQuietly(fd);
+	}
+
+	try {
+		// Decode with FATAL UTF-8: a lenient `Buffer.toString("utf-8")` silently
+		// replaces malformed bytes with U+FFFD, so invalid bytes inside a quoted
+		// JSON value would still `JSON.parse` and validate as a healthy profile —
+		// letting a later save rewrite the file and lose the original bytes with
+		// no `.corrupt-*` backup. Route a decode failure through the same backup
+		// + throw path as a parse failure.
+		let text: string;
+		try {
+			text = new TextDecoder("utf-8", { fatal: true }).decode(data);
+		} catch {
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				"contains invalid UTF-8 byte sequences",
+			);
+		}
+		const parsed: unknown = JSON.parse(text);
+		const profiles = extractValidProfiles(parsed);
+		if (profiles === null) {
+			// Syntactically valid JSON, but not a valid profiles file. Treating
+			// this as "no profiles" would let a subsequent save clobber it, so
+			// back it up and throw exactly as for an unparseable file.
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				'does not contain a valid "profiles" array',
+			);
+		}
+		return profiles;
+	} catch (err) {
+		if (err instanceof SyntaxError) {
+			// The file exists but is corrupt/torn. Preserve the original bytes in
+			// a backup (best-effort) so nothing is lost, then throw — never treat
+			// corruption as "no profiles", which would let a subsequent save
+			// clobber the file.
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				`could not be parsed: ${err.message}`,
+			);
+		}
+		throw err;
+	}
+}
+
+/**
+ * Save c8ctl profiles to profiles.json ATOMICALLY.
+ *
+ * A bare `writeFileSync` truncates the target and then streams the new bytes, so
+ * a crash, a full disk, or a second c8ctl process reading mid-write can observe
+ * a TORN file — which `loadProfiles` then can't parse, and (pre-fix) treated as
+ * "no profiles", cascading into a total wipe. Writing to a same-directory temp
+ * file and `rename`-ing over the target makes the swap atomic: a reader sees
+ * either the whole old file or the whole new one, never a partial one.
+ */
+export function saveProfiles(profiles: Profile[]): void {
+	const profilesPath = getProfilesPath();
+	const profilesFile: ProfilesFile = { profiles };
+	// Randomise the temp name and open it EXCLUSIVE + no-follow (O_EXCL |
+	// O_NOFOLLOW) below. The old `<pid>.<ms>.tmp` name was predictable, so in a
+	// writable/shared data directory an attacker could pre-create a symlink at
+	// that path; a default truncating open would then FOLLOW it and redirect the
+	// serialized credentials outside the profile store. A random name is
+	// unguessable and O_EXCL|O_NOFOLLOW refuses to open an existing entry
+	// (symlink included), so the temp file can neither be redirected nor
+	// clobbered by another entry.
+	const tmp = `${profilesPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+	// Preserve the existing file's permission bits (e.g. 0600) so an atomic
+	// replace never silently widens a user-protected profiles.json — it holds
+	// client secrets and passwords — to the umask default.
+	const mode = fileMode(profilesPath);
+	let fd: number | undefined;
+	try {
+		// Create-exclusive (O_EXCL) + no-follow (O_NOFOLLOW) with a restrictive
+		// mode up front (never the 0666 umask default): a crash between write and
+		// rename otherwise leaves a `.tmp` holding credentials with broader
+		// permissions, and O_EXCL never truncates/follows a pre-existing entry
+		// (symlink included). Write and re-tighten the exact source mode THROUGH
+		// THE FD via `fchmodSync` (create mode is umask-masked) — never a pathname
+		// `chmodSync`, which a symlink swapped in after the file closed could
+		// redirect outside the profile store. Close before the rename so Windows
+		// (which refuses to rename an open file) can swap it atomically.
+		fd = openSync(
+			tmp,
+			constants.O_WRONLY |
+				constants.O_CREAT |
+				constants.O_EXCL |
+				constants.O_NOFOLLOW,
+			mode ?? 0o600,
+		);
+		writeFileSync(fd, JSON.stringify(profilesFile, null, 2));
+		if (mode !== undefined) pinFdMode(fd, mode);
+		closeSync(fd);
+		fd = undefined;
+		renameSync(tmp, profilesPath);
+	} catch (err) {
+		// Any failure — including the initial write (e.g. a full disk) — must not
+		// leave the temp file (or its fd) behind.
+		if (fd !== undefined) closeQuietly(fd);
+		try {
+			rmSync(tmp, { force: true });
+		} catch {
+			/* best effort */
+		}
+		throw err;
+	}
+}
+
+/**
+ * Get a c8ctl profile by name
+ */
+export function getProfile(name: string): Profile | undefined {
+	const profiles = loadProfiles();
+	return profiles.find((p) => p.name === name);
+}
+
+/**
+ * Add a c8ctl profile
+ */
+export function addProfile(profile: Profile): void {
+	const profiles = loadProfiles();
+
+	// Check if profile already exists
+	const existingIndex = profiles.findIndex((p) => p.name === profile.name);
+	if (existingIndex >= 0) {
+		profiles[existingIndex] = profile;
+	} else {
+		profiles.push(profile);
+	}
+
+	saveProfiles(profiles);
+}
+
+/**
+ * Remove a c8ctl profile by name
+ */
+export function removeProfile(name: string): boolean {
+	const profiles = loadProfiles();
+	const filtered = profiles.filter((p) => p.name !== name);
+
+	if (filtered.length === profiles.length) {
+		return false;
+	}
+
+	saveProfiles(filtered);
+
+	// If the removed profile was the active session profile, clear it
+	// so `which profile` doesn't report a ghost profile.
+	if (c8ctl.activeProfile === name) {
+		clearActiveProfile();
+	}
+
+	return true;
+}
+
+// ============================================================================
+// Modeler Connection Management - READ-ONLY from settings.json
+// ============================================================================
+
+export const MODELER_PREFIX = "modeler:";
+
+interface ModelerSettingsFile {
+	"connectionManagerPlugin.c8connections"?: Connection[];
+	[key: string]: unknown;
+}
+
+/**
+ * Load connections from Modeler's settings.json (read-only)
+ * These are NOT modified by c8ctl
+ */
+export function loadModelerConnections(): Connection[] {
+	const settingsPath = getModelerSettingsPath();
+
+	if (!existsSync(settingsPath)) {
+		return [];
+	}
+
+	try {
+		const data = readFileSync(settingsPath, "utf-8");
+		const settings: ModelerSettingsFile = JSON.parse(data);
+		const connections = settings["connectionManagerPlugin.c8connections"];
+
+		if (!connections || !Array.isArray(connections)) {
+			return [];
+		}
+
+		// Filter out invalid connections (must have id)
+		return connections.filter((c) => c?.id);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Get all profiles including c8ctl profiles and Modeler connections
+ * Modeler connections are prefixed with "modeler:"
+ */
+export function getAllProfiles(): Profile[] {
+	const c8ctlProfiles = loadProfiles();
+	const modelerConnections = loadModelerConnections();
+
+	// Convert Modeler connections to Profile format with "modeler:" prefix
+	const modelerProfiles = modelerConnections
+		.map(connectionToProfile)
+		.map((p) => ({
+			...p,
+			name: `${MODELER_PREFIX}${p.name}`,
+		}));
+
+	return [...c8ctlProfiles, ...modelerProfiles];
+}
+
+/**
+ * Get a profile by name, checking both c8ctl and Modeler sources
+ * For Modeler profiles, accepts name with or without "modeler:" prefix
+ */
+export function getProfileOrModeler(name: string): Profile | undefined {
+	// Try c8ctl profiles first
+	const c8ctlProfile = getProfile(name);
+	if (c8ctlProfile) {
+		return c8ctlProfile;
+	}
+
+	// Try Modeler connections (with or without prefix)
+	const modelerName = name.startsWith(MODELER_PREFIX)
+		? name.slice(MODELER_PREFIX.length)
+		: name;
+	const modelerConnections = loadModelerConnections();
+	const modelerConnection = modelerConnections.find(
+		(c) => c.name === modelerName || c.id === modelerName,
+	);
+
+	if (modelerConnection) {
+		const profile = connectionToProfile(modelerConnection);
+		return {
+			...profile,
+			name: `${MODELER_PREFIX}${profile.name}`,
+		};
+	}
+
+	return undefined;
+}
+
+// ============================================================================
+// Conversion Utilities
+// ============================================================================
+
+/**
+ * Convert a Connection to ClusterConfig for API client use
+ */
+export function connectionToClusterConfig(conn: Connection): ClusterConfig {
+	if (conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD) {
+		const audience = conn.audience?.trim();
+		const oAuthUrl = conn.oauthURL?.trim();
+		const scope = conn.scope?.trim();
+
+		return {
+			baseUrl: conn.camundaCloudClusterUrl || "",
+			clientId: conn.camundaCloudClientId,
+			clientSecret: conn.camundaCloudClientSecret,
+			audience: audience || undefined,
+			oAuthUrl: oAuthUrl || "https://login.cloud.camunda.io/oauth/token",
+			scope: scope || undefined,
+		};
+	}
+
+	// Self-hosted
+	const config: ClusterConfig = {
+		baseUrl: conn.contactPoint || "http://localhost:8080/v2",
+	};
+
+	if (conn.authType === AUTH_TYPES.BASIC) {
+		config.username = conn.basicAuthUsername;
+		config.password = conn.basicAuthPassword;
+	} else if (conn.authType === AUTH_TYPES.OAUTH) {
+		config.clientId = conn.clientId;
+		config.clientSecret = conn.clientSecret;
+		config.oAuthUrl = conn.oauthURL;
+		config.audience = conn.audience;
+		config.scope = conn.scope;
+	}
+
+	return config;
+}
+
+/**
+ * Convert Connection to Profile format
+ * Used to convert read-only Modeler connections to c8ctl Profile format
+ */
+export function connectionToProfile(conn: Connection): Profile {
+	const config = connectionToClusterConfig(conn);
+
+	return {
+		name: conn.name || conn.id,
+		baseUrl: config.baseUrl,
+		clientId: config.clientId,
+		clientSecret: config.clientSecret,
+		audience: config.audience,
+		oAuthUrl: config.oAuthUrl,
+		scope: config.scope,
+		username: config.username,
+		password: config.password,
+		defaultTenantId: conn.tenantId,
+	};
+}
+
+/**
+ * Convert Profile to ClusterConfig for API client use
+ */
+export function profileToClusterConfig(profile: Profile): ClusterConfig {
+	return {
+		baseUrl: profile.baseUrl,
+		clientId: profile.clientId,
+		clientSecret: profile.clientSecret,
+		audience: profile.audience,
+		oAuthUrl: profile.oAuthUrl,
+		scope: profile.scope,
+		username: profile.username,
+		password: profile.password,
+		headers: profile.headers,
+		exactBaseUrl: profile.exactBaseUrl,
+		authStrategy: profile.authStrategy,
+	};
+}
+
+/**
+ * Get display label for a connection
+ */
+export function getConnectionLabel(conn: Connection): string {
+	if (conn.name) {
+		return conn.name;
+	}
+
+	// Fallback to URL-based label like Modeler does
+	const url =
+		conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD
+			? conn.camundaCloudClusterUrl
+			: conn.contactPoint;
+
+	return url ? `Unnamed (${url})` : "Unnamed connection";
+}
+
+/**
+ * Get auth type label for display
+ */
+export function getAuthTypeLabel(conn: Connection): string {
+	if (conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD) {
+		return "OAuth (Cloud)";
+	}
+
+	switch (conn.authType) {
+		case AUTH_TYPES.BASIC:
+			return "Basic";
+		case AUTH_TYPES.OAUTH:
+			return "OAuth";
+		default:
+			return "None";
+	}
+}
+
+/**
+ * Get target type label for display
+ */
+export function getTargetTypeLabel(conn: Connection): string {
+	return conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD
+		? "Camunda Cloud"
+		: "Self-Hosted";
+}
+
+// ============================================================================
+// Session State Management
+// ============================================================================
+
+/** The default profile used when no profile has been explicitly selected */
+export const DEFAULT_PROFILE = "local";
+
+/** The default profile configuration that matches the previous localhost fallback */
+export const DEFAULT_PROFILE_CONFIG: Profile = {
+	name: DEFAULT_PROFILE,
+	baseUrl: "http://localhost:8080/v2",
+	username: "demo",
+	password: "demo",
+};
+
+/**
+ * Ensure the default 'local' profile exists in profiles.json.
+ * If no 'local' profile is configured, creates one with the localhost defaults.
+ *
+ * Runs on virtually every command (via `loadSessionState`). It MUST NOT be the
+ * thing that destroys a user's profiles: if `getProfile` throws because
+ * profiles.json is present but unreadable/corrupt, seeding here would reload the
+ * (still-unreadable) file, see zero profiles, and overwrite it — wiping every
+ * saved profile. So on a read failure we warn and leave the file untouched
+ * rather than reseed. `loadProfiles` already preserved the original bytes.
+ */
+export function ensureDefaultProfile(): void {
+	let existing: Profile | undefined;
+	try {
+		existing = getProfile(DEFAULT_PROFILE);
+	} catch (err) {
+		getLogger().warn(
+			`Skipping default-profile seeding: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return;
+	}
+	if (!existing) {
+		addProfile({ ...DEFAULT_PROFILE_CONFIG });
+	}
+}
+
+/**
+ * Load session state from disk and populate c8ctl runtime object.
+ *
+ * activeProfile is left undefined when the user has not explicitly selected
+ * one (via `c8ctl use profile`).  resolveClusterConfig() will then fall
+ * through to env vars before using the default 'local' profile.
+ */
+export function loadSessionState(): SessionState {
+	// Always make sure the 'local' profile exists in profiles.json
+	ensureDefaultProfile();
+
+	const path = getSessionStatePath();
+
+	if (!existsSync(path)) {
+		return {
+			activeProfile: c8ctl.activeProfile,
+			activeTenant: c8ctl.activeTenant,
+			outputMode: c8ctl.outputMode,
+		};
+	}
+
+	try {
+		const data = readFileSync(path, "utf-8");
+		const state: Record<string, unknown> = JSON.parse(data);
+
+		c8ctl.activeProfile =
+			typeof state.activeProfile === "string" ? state.activeProfile : undefined;
+		c8ctl.activeTenant =
+			typeof state.activeTenant === "string" ? state.activeTenant : undefined;
+		c8ctl.outputMode = state.outputMode === "json" ? "json" : "text";
+		persistedOutputMode = c8ctl.outputMode;
+
+		return {
+			activeProfile: c8ctl.activeProfile,
+			activeTenant: c8ctl.activeTenant,
+			outputMode: c8ctl.outputMode,
+			skipDeployConfirm: state.skipDeployConfirm === true,
+		};
+	} catch {
+		return {
+			activeProfile: c8ctl.activeProfile,
+			activeTenant: c8ctl.activeTenant,
+			outputMode: c8ctl.outputMode,
+		};
+	}
+}
+
+/**
+ * Read `skipDeployConfirm` from the persisted session file.
+ *
+ * Unlike `loadSessionState()` this does NOT update `c8ctl.*` or
+ * `persistedOutputMode`, so it is safe to call mid-handler without
+ * clobbering per-invocation overrides like `--json`.
+ *
+ * Note: calls `getSessionStatePath()` which may create the user
+ * data directory as a side effect via `ensureUserDataDir()`.
+ */
+export function readSkipDeployConfirm(): boolean {
+	try {
+		const data = readFileSync(getSessionStatePath(), "utf-8");
+		const state: Record<string, unknown> = JSON.parse(data);
+		return state.skipDeployConfirm === true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Write `skipDeployConfirm` to the session file without clobbering
+ * any other field.  Reads the existing session file, patches the
+ * flag, and writes it back.  Creates the file if it does not exist.
+ */
+export function saveSkipDeployConfirm(value: boolean): void {
+	const path = getSessionStatePath();
+	try {
+		const data = readFileSync(path, "utf-8");
+		const parsed: unknown = JSON.parse(data);
+		const state = isRecord(parsed) ? parsed : {};
+		state.skipDeployConfirm = value;
+		writeFileSync(path, JSON.stringify(state, null, 2), "utf-8");
+	} catch (err: unknown) {
+		// Missing file — create with the flag. Any other IO or parse
+		// error is unexpected and must not silently clobber the file.
+		if (isRecord(err) && err.code === "ENOENT") {
+			writeFileSync(
+				path,
+				JSON.stringify({ skipDeployConfirm: value }, null, 2),
+				"utf-8",
+			);
+			return;
+		}
+		throw err;
+	}
+}
+
+/**
+ * Save session state from c8ctl runtime object to disk
+ */
+export function saveSessionState(
+	state?: SessionState,
+	overrides?: { skipDeployConfirm?: boolean },
+): void {
+	// Use persistedOutputMode (the on-disk value) by default, NOT
+	// c8ctl.outputMode — the latter may carry a per-invocation override
+	// from --json or C8CTL_OUTPUT_MODE that must not leak to disk (#356).
+	//
+	// When called without explicit state (e.g. from setActiveProfile),
+	// preserve skipDeployConfirm from disk rather than silently dropping it.
+	const stateToSave: SessionState = {
+		activeProfile: state?.activeProfile ?? c8ctl.activeProfile,
+		activeTenant: state?.activeTenant ?? c8ctl.activeTenant,
+		outputMode: state?.outputMode ?? persistedOutputMode,
+		skipDeployConfirm:
+			overrides?.skipDeployConfirm ??
+			state?.skipDeployConfirm ??
+			readSkipDeployConfirm(),
+	};
+
+	if (state) {
+		c8ctl.activeProfile = state.activeProfile;
+		c8ctl.activeTenant = state.activeTenant;
+		c8ctl.outputMode = state.outputMode;
+		persistedOutputMode = state.outputMode;
+	}
+
+	const path = getSessionStatePath();
+	writeFileSync(
+		path,
+		JSON.stringify(
+			stateToSave,
+			(_, value) => (value === undefined ? null : value),
+			2,
+		),
+		"utf-8",
+	);
+}
+
+/**
+ * Set active profile/connection in session and persist to disk.
+ *
+ * Clears `skipDeployConfirm` so the deploy profile selector re-appears
+ * after a profile switch (the user told the prompt "always use X", but
+ * now the active profile has changed).
+ */
+export function setActiveProfile(name: string): void {
+	c8ctl.activeProfile = name;
+	saveSessionState(undefined, { skipDeployConfirm: false });
+}
+
+/**
+ * Set active tenant in session and persist to disk
+ */
+export function setActiveTenant(tenantId: string): void {
+	c8ctl.activeTenant = tenantId;
+	saveSessionState();
+}
+
+/**
+ * Set output mode in session and persist to disk
+ */
+export function setOutputMode(mode: OutputMode): void {
+	c8ctl.outputMode = mode;
+	persistedOutputMode = mode;
+	saveSessionState();
+}
+
+// ============================================================================
+// Cluster Configuration Resolution
+// ============================================================================
+
+/**
+ * Check whether CAMUNDA_* credential env vars are set in the current environment.
+ */
+export function hasCamundaEnvVars(): boolean {
+	return !!(
+		process.env.CAMUNDA_BASE_URL ||
+		process.env.CAMUNDA_REST_ADDRESS ||
+		process.env.CAMUNDA_CLIENT_ID ||
+		process.env.CAMUNDA_CLIENT_SECRET ||
+		process.env.CAMUNDA_USERNAME ||
+		process.env.CAMUNDA_PASSWORD
+	);
+}
+
+/**
+ * Profile fields whose value is a plain string — the only fields
+ * `ENV_VAR_PROFILE_MAP` may target, since every CAMUNDA_* env var maps to a
+ * single string value. `headers` (a map) and `exactBaseUrl` (a boolean)
+ * have no env-var equivalent and are deliberately excluded; `authStrategy`
+ * (a validated union) is set by `envVarsToProfile` after validation.
+ */
+type StringProfileField = {
+	[K in keyof Profile]-?: string extends NonNullable<Profile[K]> ? K : never;
+}[keyof Profile];
+
+/**
+ * The env var → profile field mapping used by --from-file and --from-env.
+ *
+ * `CAMUNDA_REST_ADDRESS` is intentionally absent: it is an alias for
+ * `CAMUNDA_BASE_URL` (which wins when both are set), resolved by
+ * `envVarsToProfile` after this map is applied.
+ */
+export const ENV_VAR_PROFILE_MAP: Record<string, StringProfileField> = {
+	CAMUNDA_BASE_URL: "baseUrl",
+	CAMUNDA_CLIENT_ID: "clientId",
+	CAMUNDA_CLIENT_SECRET: "clientSecret",
+	CAMUNDA_OAUTH_URL: "oAuthUrl",
+	CAMUNDA_TOKEN_AUDIENCE: "audience",
+	CAMUNDA_OAUTH_SCOPE: "scope",
+	CAMUNDA_USERNAME: "username",
+	CAMUNDA_PASSWORD: "password",
+	CAMUNDA_DEFAULT_TENANT_ID: "defaultTenantId",
+};
+
+/**
+ * Parse a .env file into a key-value map.
+ * Handles # comments, blank lines, optional `export` prefix, single/double quotes.
+ */
+export function parseEnvFile(content: string): Record<string, string> {
+	const result: Record<string, string> = {};
+	for (const raw of content.split("\n")) {
+		const line = raw.trim();
+		if (!line || line.startsWith("#")) continue;
+		// Strip optional `export ` prefix
+		const stripped = line.startsWith("export ") ? line.slice(7) : line;
+		const eqIdx = stripped.indexOf("=");
+		if (eqIdx === -1) continue;
+		const key = stripped.slice(0, eqIdx).trim();
+		let value = stripped.slice(eqIdx + 1).trim();
+		// Strip surrounding quotes
+		if (
+			(value.startsWith('"') && value.endsWith('"')) ||
+			(value.startsWith("'") && value.endsWith("'"))
+		) {
+			value = value.slice(1, -1);
+		}
+		result[key] = value;
+	}
+	return result;
+}
+
+/**
+ * Set one header on `target`, replacing any existing key that differs only
+ * in case rather than adding a second, differently-cased entry. HTTP
+ * header names are case-insensitive; a plain `Record<string, string>` is
+ * not, so this normalizes that for any code merging header maps built from
+ * user input (e.g. `parseHeaderFlags`, `resolveAuthHeaders`).
+ */
+export function setHeaderCaseInsensitive(
+	target: Record<string, string>,
+	name: string,
+	value: string,
+): void {
+	const existingKey = Object.keys(target).find(
+		(k) => k.toLowerCase() === name.toLowerCase(),
+	);
+	if (existingKey !== undefined && existingKey !== name) {
+		delete target[existingKey];
+	}
+	target[name] = value;
+}
+
+/**
+ * RFC 7230 `token` grammar — the only characters a valid HTTP header name
+ * may contain. Rejects e.g. a space in the name early, rather than letting
+ * it reach `Headers.set()` at request time.
+ */
+const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * Parse repeatable `--header "Name: value"` flags into a header map.
+ * Splits each entry on the first colon; the name and value are trimmed.
+ * Throws with a message describing the problem when a header is missing
+ * its colon separator, has an empty or malformed name, or has a value
+ * containing CR/LF — validating this at parse time surfaces a clean
+ * `Invalid --header` error immediately, rather than persisting the
+ * profile successfully and only failing later, at request time, when
+ * `Headers.set()` itself rejects the same input.
+ *
+ * Error messages never include the raw entry or its value: a header value
+ * is typically a secret (an API key, a bearer token), and echoing it back
+ * would leak it into logs or CI output on a typo. Only the header *name*
+ * is ever quoted, since it identifies which `--header` was malformed
+ * without exposing what it was carrying.
+ *
+ * Repeating the same header name — even differing only in case, since HTTP
+ * header names are case-insensitive — replaces the earlier value (last
+ * `--header` wins) rather than persisting both under separate keys.
+ */
+export function parseHeaderFlags(entries: string[]): Record<string, string> {
+	const headers: Record<string, string> = {};
+	for (const entry of entries) {
+		const colonIndex = entry.indexOf(":");
+		if (colonIndex === -1) {
+			throw new Error('Invalid --header — expected format "Name: value"');
+		}
+		const name = entry.slice(0, colonIndex).trim();
+		const value = entry.slice(colonIndex + 1).trim();
+		if (!name) {
+			throw new Error("Invalid --header — header name must not be empty");
+		}
+		if (!HTTP_HEADER_NAME_RE.test(name)) {
+			throw new Error(
+				`Invalid --header "${name}" — not a valid HTTP token (letters, digits, and !#$%&'*+-.^_\`|~ only)`,
+			);
+		}
+		if (/[\r\n]/.test(value)) {
+			throw new Error(
+				`Invalid --header "${name}" — value must not contain a line break`,
+			);
+		}
+		setHeaderCaseInsensitive(headers, name, value);
+	}
+	return headers;
+}
+
+/**
+ * Build a partial Profile from an env-var map (either from a .env file or process.env).
+ * Only keys present in ENV_VAR_PROFILE_MAP are considered, plus the
+ * `CAMUNDA_REST_ADDRESS` alias for `CAMUNDA_BASE_URL` (the SDK-standard name;
+ * `CAMUNDA_BASE_URL` wins when both are set).
+ */
+export function envVarsToProfile(
+	name: string,
+	vars: Record<string, string | undefined>,
+): Profile {
+	const profile: Profile = { name, baseUrl: "" };
+	for (const envKey of Object.keys(ENV_VAR_PROFILE_MAP)) {
+		const profileField = ENV_VAR_PROFILE_MAP[envKey];
+		const value = vars[envKey];
+		if (value) {
+			profile[profileField] = value;
+		}
+	}
+	// Address and basic-auth credentials go through the same alias-aware,
+	// trimming resolvers as live env resolution, so importing an environment
+	// saves exactly the target and credentials that environment would use.
+	profile.baseUrl = resolveEnvBaseUrl(vars) ?? "";
+	const basic = resolveEnvBasicAuth(vars);
+	if (basic.username) profile.username = basic.username;
+	if (basic.password) profile.password = basic.password;
+	// CAMUNDA_AUTH_STRATEGY is validated (not string-mapped) so an imported
+	// profile keeps an explicit NONE/BASIC/OAUTH choice instead of silently
+	// re-deriving it from whatever credentials sit alongside it.
+	const authStrategy = resolveAuthStrategy(vars.CAMUNDA_AUTH_STRATEGY);
+	if (authStrategy) profile.authStrategy = authStrategy;
+	return profile;
+}
+
+/**
+ * Clear the active session profile and persist to disk.
+ * Also clears `skipDeployConfirm` (same rationale as `setActiveProfile`).
+ */
+export function clearActiveProfile(): void {
+	c8ctl.activeProfile = undefined;
+	saveSessionState(undefined, { skipDeployConfirm: false });
+}
+
+/**
+ * Resolve cluster configuration from session, flags, env vars, or defaults
+ * Priority: profileFlag → session profile → env vars → default 'local' profile
+ */
+export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
+	const config = _resolveClusterConfig(profileFlag);
+	c8ctl.resolvedBaseUrl = config.baseUrl;
+	return config;
+}
+
+export const CAMUNDA_AUTH_STRATEGIES = ["NONE", "BASIC", "OAUTH"] as const;
+
+/**
+ * The values `CAMUNDA_AUTH_STRATEGY` accepts, matching the Camunda SDK.
+ */
+export type CamundaAuthStrategy = (typeof CAMUNDA_AUTH_STRATEGIES)[number];
+
+/**
+ * Normalize a raw `CAMUNDA_AUTH_STRATEGY` value to the SDK's canonical
+ * upper-case form. Throws with an actionable message on an unsupported value
+ * — silently ignoring a misspelled strategy would authenticate (or not)
+ * against the user's intent.
+ */
+export function resolveAuthStrategy(
+	raw: string | undefined,
+): CamundaAuthStrategy | undefined {
+	if (!raw?.trim()) return undefined;
+	const strategy = raw.trim().toUpperCase();
+	const match = CAMUNDA_AUTH_STRATEGIES.find(
+		(candidate) => candidate === strategy,
+	);
+	if (!match) {
+		throw new Error(
+			`Unsupported CAMUNDA_AUTH_STRATEGY '${raw.trim()}' — expected one of ${CAMUNDA_AUTH_STRATEGIES.join(", ")}.`,
+		);
+	}
+	return match;
+}
+
+/**
+ * Credential-style CAMUNDA_* variables that are silently dropped when no
+ * cluster address variable is set (resolution falls through to the default
+ * `local` profile). Listing them by name in the warning is what turns a
+ * "connection refused on localhost" mystery into an actionable hint.
+ */
+const SDK_ONLY_ENV_VARS = [
+	"CAMUNDA_CLIENT_ID",
+	"CAMUNDA_CLIENT_SECRET",
+	"CAMUNDA_OAUTH_URL",
+	"CAMUNDA_TOKEN_AUDIENCE",
+	"CAMUNDA_OAUTH_SCOPE",
+	"CAMUNDA_USERNAME",
+	"CAMUNDA_PASSWORD",
+	"CAMUNDA_BASIC_AUTH_USERNAME",
+	"CAMUNDA_BASIC_AUTH_PASSWORD",
+	"CAMUNDA_AUTH_STRATEGY",
+] as const;
+
+/**
+ * Warn when CAMUNDA_* variables are present but cannot take effect because
+ * neither address variable is set — the classic case being an SDK project's
+ * `.env` that sets credentials while c8ctl quietly connects to localhost.
+ */
+function warnOnIgnoredSdkEnvVars(fallbackBaseUrl: string): void {
+	const ignored = SDK_ONLY_ENV_VARS.filter((name) => process.env[name]?.trim());
+	if (ignored.length === 0) return;
+	const logger = getLogger();
+	logger.warn(
+		`${ignored.join(", ")} ${ignored.length === 1 ? "is" : "are"} set but no cluster address variable is — set CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) to use them. Falling back to the default 'local' profile (${fallbackBaseUrl}).`,
+	);
+}
+
+/**
+ * Resolve a profile the user explicitly selected (via `--profile` or the
+ * session). An unknown name is an error: silently falling back to another
+ * cluster would run the command against the wrong target.
+ */
+function requireExplicitProfile(name: string): Profile {
+	if (name.trim() === "") {
+		throw new Error(
+			"Profile name must not be empty. Check that the value passed to --profile is set.",
+		);
+	}
+	const profile = getProfileOrModeler(name);
+	if (!profile) {
+		throw new Error(
+			`Profile '${name}' not found. Run 'c8 list profiles' to see available profiles` +
+				(c8ctl.activeProfile === name
+					? ", or 'c8 use profile --none' to clear the active profile."
+					: "."),
+		);
+	}
+	return profile;
+}
+
+function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
+	// 1. Try profile flag (profile name, including modeler: prefix)
+	if (profileFlag !== undefined) {
+		return profileToClusterConfig(requireExplicitProfile(profileFlag));
+	}
+
+	// 2. Try session profile (only when user explicitly selected one)
+	if (c8ctl.activeProfile) {
+		const profile = requireExplicitProfile(c8ctl.activeProfile);
+		// Warn when env vars are also present — avoids silent surprise
+		// Only warn when a cluster address env var is set, since
+		// resolveClusterConfig only uses env vars when one is present
+		if (resolveEnvBaseUrl()) {
+			const logger = getLogger();
+			logger.warn(
+				`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,
+			);
+			// stderr explicitly: this runs during client construction, including
+			// in `mcp-proxy`, where stdout carries the MCP protocol stream.
+			logger.info("  To use env vars instead, run: c8 use profile --none", {
+				essential: true,
+				stream: "stderr",
+			});
+			logger.info(
+				"  To create a profile from env vars: c8 add profile <name> --from-env",
+				{ essential: true, stream: "stderr" },
+			);
+		}
+		return profileToClusterConfig(profile);
+	}
+
+	// 3. Try environment variables
+	const baseUrl = resolveEnvBaseUrl();
+	const clientId = process.env.CAMUNDA_CLIENT_ID;
+	const clientSecret = process.env.CAMUNDA_CLIENT_SECRET;
+	const audience = process.env.CAMUNDA_TOKEN_AUDIENCE;
+	const oAuthUrl = process.env.CAMUNDA_OAUTH_URL;
+	const scope = process.env.CAMUNDA_OAUTH_SCOPE;
+	const { username, password } = resolveEnvBasicAuth();
+	const authStrategy = resolveAuthStrategy(process.env.CAMUNDA_AUTH_STRATEGY);
+
+	if (baseUrl) {
+		return {
+			baseUrl,
+			clientId,
+			clientSecret,
+			audience,
+			oAuthUrl,
+			scope,
+			username,
+			password,
+			authStrategy,
+		};
+	}
+
+	// 4. Default 'local' profile (manifested by ensureDefaultProfile at startup)
+	const localProfile = getProfile(DEFAULT_PROFILE);
+	if (localProfile) {
+		warnOnIgnoredSdkEnvVars(localProfile.baseUrl);
+		return profileToClusterConfig(localProfile);
+	}
+
+	// 5. Hardcoded fallback (safety net, should not be reached)
+	const hardcodedBaseUrl = "http://localhost:8080/v2";
+	warnOnIgnoredSdkEnvVars(hardcodedBaseUrl);
+	return {
+		baseUrl: hardcodedBaseUrl,
+		username: "demo",
+		password: "demo",
+	};
+}
+
+/**
+ * Resolve tenant ID from session, profile, env vars, or default
+ * Priority: session tenant → profile tenant → env var → '<default>'
+ */
+export function resolveTenantId(profileFlag?: string): string {
+	// 1. Try session tenant
+	if (c8ctl.activeTenant) {
+		return c8ctl.activeTenant;
+	}
+
+	// 2. Try profile default tenant (from flag or session)
+	const profileName = profileFlag ?? c8ctl.activeProfile;
+	if (profileName !== undefined) {
+		const profile = requireExplicitProfile(profileName);
+		if (profile.defaultTenantId) {
+			return profile.defaultTenantId;
+		}
+	}
+
+	// 3. Try environment variable
+	const envTenant = process.env.CAMUNDA_DEFAULT_TENANT_ID;
+	if (envTenant) {
+		return envTenant;
+	}
+
+	// 4. Default tenant
+	return "<default>";
+}

@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { createClient } from "../../src/client.ts";
+import { createClient } from "../../src/core/client.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 

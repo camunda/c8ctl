@@ -2,16 +2,18 @@
  * Session management commands (use profile, use tenant, output mode)
  */
 
-import { defineCommand } from "../command-framework.ts";
 import {
+	c8ctl,
 	clearActiveProfile,
+	getAllProfiles,
+	getLogger,
 	getProfileOrModeler,
+	MODELER_PREFIX,
 	setActiveProfile,
 	setActiveTenant,
 	setOutputMode,
-} from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+} from "../core/index.ts";
+import { defineCommand, select } from "../framework/index.ts";
 
 /**
  * Set active profile
@@ -68,23 +70,26 @@ export function setOutputFormat(mode: string): void {
  */
 export function showSessionState(): void {
 	const logger = getLogger();
+	const say = (message: string) => logger.info(message, { essential: true });
 
-	logger.info("\nCurrent Session State:");
-	logger.info(`  Active Profile: ${c8ctl.activeProfile || "(none)"}`);
-	logger.info(`  Active Tenant: ${c8ctl.activeTenant || "(none)"}`);
-	logger.info(`  Output Mode: ${c8ctl.outputMode}`);
-	logger.info("");
+	say("\nCurrent Session State:");
+	say(`  Active Profile: ${c8ctl.activeProfile || "(none)"}`);
+	say(`  Active Tenant: ${c8ctl.activeTenant || "(none)"}`);
+	say(`  Output Mode: ${c8ctl.outputMode}`);
+	say("");
 }
 
 // ─── defineCommand wrappers ──────────────────────────────────────────────────
 
 export const outputCommand = defineCommand("output", "", async (ctx) => {
 	if (!ctx.resource) {
-		ctx.logger.info(`Current output mode: ${c8ctl.outputMode}`);
+		const say = (message: string) =>
+			ctx.logger.info(message, { essential: true });
+		say(`Current output mode: ${c8ctl.outputMode}`);
 		if (c8ctl.outputMode === "text") {
-			ctx.logger.info("");
+			say("");
 		}
-		ctx.logger.info("Available modes: json|text");
+		say("Available modes: json|text");
 		return { kind: "none" };
 	}
 	setOutputFormat(ctx.resource);
@@ -100,7 +105,38 @@ export const useProfileCommand = defineCommand(
 			return { kind: "none" };
 		}
 		if (!args.name) {
-			throw new Error("Profile name required. Usage: c8 use profile <name>");
+			// No name provided — show interactive picker
+			const profiles = getAllProfiles();
+			if (profiles.length === 0) {
+				throw new Error(
+					"No profiles configured. Add one with: c8 add profile <name> --url <cluster-url>",
+				);
+			}
+
+			const activeProfile = c8ctl.activeProfile;
+			const defaultIndex = Math.max(
+				0,
+				profiles.findIndex((p) => p.name === activeProfile),
+			);
+
+			const result = await select({
+				message: "Which profile do you want to use?",
+				options: profiles.map((p) => ({
+					label: p.name,
+					description: `${p.baseUrl || "(no URL)"}${p.name.startsWith(MODELER_PREFIX) ? " (Modeler)" : ""}`,
+					value: p.name,
+				})),
+				initialIndex: defaultIndex,
+			});
+
+			if (result.cancelled) {
+				return { kind: "none" };
+			}
+			if (!result.interactive) {
+				throw new Error("Profile name required. Usage: c8 use profile <name>");
+			}
+			useProfile(result.value);
+			return { kind: "none" };
 		}
 		useProfile(args.name);
 		return { kind: "none" };
@@ -118,6 +154,6 @@ export const useTenantCommand = defineCommand(
 
 export const whichOutputCommand = defineCommand("which", "output", async () => {
 	const logger = getLogger();
-	logger.info(c8ctl.outputMode);
+	logger.info(c8ctl.outputMode, { essential: true });
 	return { kind: "none" };
 });

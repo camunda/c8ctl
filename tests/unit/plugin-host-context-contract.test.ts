@@ -31,8 +31,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { GLOBAL_FLAGS } from "../../src/command-registry.ts";
-import { isRecord } from "../../src/logger.ts";
+import { isRecord } from "../../src/core/logger.ts";
+import { GLOBAL_FLAGS } from "../../src/framework/command-registry.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 const FIXTURE_DIR = join(
@@ -159,12 +159,80 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 		assert.strictEqual(parsed.ctx.verbose, true);
 	});
 
+	test("ctx.quiet reflects --quiet", async () => {
+		const result = await c8Plugin("echo-ctx", "--quiet");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.quiet, true);
+	});
+
+	test("ctx.quiet is false when --quiet is omitted", async () => {
+		const result = await c8Plugin("echo-ctx");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.quiet, false);
+	});
+
+	// `-lq` is `-l` with the value "q", not `-l` plus `-q`. Only the parse
+	// that knows the plugin's flags can tell, so quiet must follow it.
+	test("an attached string value that looks like -q does not enable quiet", async () => {
+		const result = await c8Plugin("echo-ctx", "-lq");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx) && isRecord(parsed.flags));
+		assert.strictEqual(parsed.flags.label, "q");
+		assert.strictEqual(parsed.ctx.quiet, false);
+	});
+
+	for (const args of [
+		["echo-ctx", "-l", "x", "-q"],
+		["-q", "echo-ctx", "-lq"],
+	]) {
+		test(`a real -q still enables quiet: ${args.join(" ")}`, async () => {
+			const result = await c8Plugin(...args);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const parsed = lastJsonRecord(result.stdout);
+			assert.ok(isRecord(parsed.ctx));
+			assert.strictEqual(parsed.ctx.quiet, true);
+		});
+	}
+
 	test("ctx.profile reflects --profile", async () => {
 		const result = await c8Plugin("echo-ctx", "--profile", "myprofile");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const parsed = lastJsonRecord(result.stdout);
 		assert.ok(isRecord(parsed.ctx));
 		assert.strictEqual(parsed.ctx.profile, "myprofile");
+	});
+
+	test("ctx.profile is undefined when no --profile or session profile is set", async () => {
+		// Built-in commands pass `undefined` so resolveClusterConfig() can
+		// fall through to CAMUNDA_* env vars. The plugin host must do the
+		// same — defaulting to "default" would silently pin every plugin to
+		// the local default profile and skip env-var resolution entirely.
+		const result = await c8Plugin("echo-ctx");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.profile, undefined);
+	});
+
+	test("ctx.yes reflects --yes", async () => {
+		const result = await c8Plugin("echo-ctx", "--yes");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.yes, true);
+	});
+
+	test("ctx.yes is false when --yes is omitted", async () => {
+		const result = await c8Plugin("echo-ctx");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.yes, false);
 	});
 
 	test("ctx.outputMode is 'json' when --json is set", async () => {
@@ -220,8 +288,10 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 			["profile", "profile"],
 			["dry-run", "dryRun"],
 			["verbose", "verbose"],
+			["quiet", "quiet"],
 			["fields", "fields"],
 			["json", "outputMode"], // --json toggles outputMode
+			["yes", "yes"],
 		]);
 		const missing: string[] = [];
 		for (const name of Object.keys(GLOBAL_FLAGS)) {
@@ -335,5 +405,47 @@ describe("plugin host context: backward compatibility for 2-arg handlers", () =>
 		const parsed = lastJsonRecord(result.stdout);
 		assert.deepStrictEqual(parsed.args, ["pos1"]);
 		assert.strictEqual(parsed.sawCtx, false);
+	});
+});
+
+describe("plugin host context: a string global cannot swallow a plugin flag", () => {
+	test("`echo-ctx --profile --flag1 x` keeps --flag1 as the plugin flag and leaves profile unset", async () => {
+		const result = await c8Plugin("echo-ctx", "--profile", "--flag1", "x");
+		assert.strictEqual(result.status, 0, result.stderr);
+		const out = lastJsonRecord(result.stdout);
+		assert.ok(
+			isRecord(out.flags) && out.flags.flag1 === "x",
+			JSON.stringify(out),
+		);
+		assert.ok(isRecord(out.ctx));
+		assert.notStrictEqual(out.ctx.profile, "--flag1");
+		assert.ok(
+			out.ctx.profile === undefined || out.ctx.profile === null,
+			`profile must not be taken from the plugin flag: ${JSON.stringify(out.ctx)}`,
+		);
+	});
+
+	test("`echo-ctx --fields --flag1 x` does not turn --flag1 into the fields list", async () => {
+		const result = await c8Plugin("echo-ctx", "--fields", "--flag1", "x");
+		assert.strictEqual(result.status, 0, result.stderr);
+		const out = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(out.ctx));
+		assert.ok(
+			!(Array.isArray(out.ctx.fields) && out.ctx.fields.includes("--flag1")),
+		);
+		assert.ok(isRecord(out.flags) && out.flags.flag1 === "x");
+	});
+
+	test("a string global given a real value still reaches ctx", async () => {
+		const result = await c8Plugin(
+			"echo-ctx",
+			"--profile",
+			"dev",
+			"--flag1",
+			"x",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const out = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(out.ctx) && out.ctx.profile === "dev");
 	});
 });

@@ -4,7 +4,10 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { buildDateFilter, parseBetween } from "../../src/date-filter.ts";
+import {
+	buildDateFilter,
+	parseBetween,
+} from "../../src/utils/shared/date-filter.ts";
 
 describe("parseBetween", () => {
 	test("parses full ISO 8601 datetime range", () => {

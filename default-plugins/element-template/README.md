@@ -1,0 +1,566 @@
+# c8ctl-plugin-element-template
+
+A default [c8ctl](https://github.com/camunda/c8ctl) plugin for applying
+Camunda element templates to BPMN diagrams, inspecting their properties,
+and exporting raw template JSON. Supports out-of-the-box (OOTB)
+connector templates by id (cached from the Camunda npm package), plus
+arbitrary local paths and URLs.
+
+## Subcommands
+
+The verb is organized as a workflow: discover → inspect → act → export → maintain.
+
+| Subcommand | Purpose |
+|------------|---------|
+| `search <query>` | Find OOTB templates by keyword (deprecated entries hidden). `--engine-version` narrows to compatible versions. |
+| `info <template>` | Show the template metadata card (id, version, applies-to, engines, docs). `--engine-version` resolves the latest compatible version. |
+| `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. `--engine-version` resolves the latest compatible version. |
+| `apply <template> <element-id> [<file.bpmn>]` | Apply a template to a BPMN element (in place, or to stdout). |
+| `update <template-id> [<element-id>] [<file.bpmn>]` | Move all elements that use a template to its latest version, or to another template with `--to`, migrating their values. |
+| `get <template>` | Print the raw template JSON to stdout (pipe-friendly). |
+| `sync` | Populate / refresh the local OOTB template cache. **Run this once before any other OOTB subcommand.** |
+
+`<template>` is a local path, an `https://` URL, or an OOTB template id
+(optionally pinned: `<id>@<version>`). GitHub blob URLs are
+auto-rewritten to raw content URLs — paste straight from the address bar.
+
+> **First-run setup:** OOTB-id subcommands (`search`, `info`,
+> `get-properties`, `apply <id>`, `get <id>`) need a populated cache.
+> Run `c8ctl element-template sync` once per machine; subsequent commands
+> read from it. A missing cache surfaces a one-line error pointing back
+> at `sync`.
+
+## Usage
+
+```bash
+# Search OOTB templates
+c8ctl element-template search "AWS S3"
+c8ctl element-template search "http"
+c8ctl element-template search "AWS" --limit 5      # cap results (default 20)
+c8ctl element-template search "http" --engine-version 8.8.0
+
+# Show the template metadata card
+c8ctl element-template info io.camunda.connectors.HttpJson.v2
+c8ctl element-template info io.camunda.connectors.HttpJson.v2 --engine-version 8.8
+
+# List every settable property as a condensed name + description row
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --engine-version 8.8.0
+
+# Filter by name (positional, supports shell-style globs — quote them)
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 url method
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 'authentication.*'
+
+# Filter by group id (repeatable; ids come from `get-properties` group headings)
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --group authentication --group endpoint
+
+# Drill into specific properties as full detail cards
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --detailed authentication.token url
+
+# Apply by OOTB id — version is auto-resolved against the BPMN's
+# modeler:executionPlatformVersion (highest compatible version wins)
+c8ctl element-template apply io.camunda.connectors.HttpJson.v2 \
+  ServiceTask_1 process.bpmn
+
+# Pin a specific version
+c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 \
+  ServiceTask_1 process.bpmn
+
+# Apply from a local file or URL
+c8ctl element-template apply ./templates/my-task.json ServiceTask_1 process.bpmn
+c8ctl element-template apply https://example.com/template.json ServiceTask_1 process.bpmn
+
+# GitHub blob URLs are auto-rewritten to the raw content URL
+c8ctl element-template apply \
+  https://github.com/camunda/connectors/blob/main/connectors/http/rest/element-templates/http-json-connector.json \
+  ServiceTask_1 process.bpmn
+
+# Modify the BPMN file in place (default writes the result to stdout)
+c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
+  ServiceTask_1 process.bpmn
+
+# Stream BPMN through stdin, get the modified BPMN on stdout. Works
+# with slow upstream producers (lint, apply chained together, etc.) —
+# stdin is consumed asynchronously and waits for the writer to finish.
+cat process.bpmn | c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 \
+  > out.bpmn
+
+# Chain with bpmn lint
+c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
+  | c8ctl bpmn lint
+
+# Save a template's raw JSON to a file (works for ids, URLs, and local paths)
+c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json
+c8ctl element-template get https://example.com/template.json > template.json
+c8ctl element-template get ./template.json > copy.json    # passthrough — bytes preserved
+c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop the base64 icon blob
+
+# Refresh the local OOTB template cache
+c8ctl element-template sync
+c8ctl element-template sync --prune    # also drop entries absent from the installed package
+```
+
+`sync` installs `@camunda/connectors-element-templates` into a temporary
+directory using npm's user, global, and environment registry, authentication,
+proxy, and CA settings. A project `.npmrc` in the invoking directory is not
+read, because npm runs the install in the temporary directory. Set
+`C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL, or local
+package path for pinned or offline use. Every sync installs afresh, so changes
+to a local source are picked up.
+The override must resolve to one package that ships `src/element-templates`; a
+package that depends on another template package is not supported.
+
+## Migrating to a newer template
+
+`update <template-id>` moves every element that uses that template to a newer
+version of it, or to a different template. Values the new template binds under
+another key are moved along instead of being dropped, and a report lists what
+happened.
+
+```bash
+# Preview moving all elements to the latest compatible version of their template
+c8ctl element-template update io.camunda.connectors.HttpJson.v2 process.bpmn --dry-run
+
+# Update one element, pinned to a version
+c8ctl element-template update io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn \
+  --to io.camunda.connectors.HttpJson.v2@15 --in-place
+
+# Move all elements to another template (its embedded recipe moves renamed values)
+c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn \
+  --to io.camunda.connectors.agenticai.ai-agent-task.v2 --in-place
+
+# Same, with a recipe from a file, or a single value moved by hand
+c8ctl element-template update old.id process.bpmn --to new.json --recipe recipe.json -i
+c8ctl element-template update old.id process.bpmn --to new.json --map maxTokens=limit -i
+
+# The report as data (needs --in-place or --dry-run, because stdout carries the BPMN otherwise)
+c8ctl element-template update old.id process.bpmn --dry-run --json
+```
+
+- The first argument is the applied template ID (never a path or `id@n`).
+  An optional element ID limits the update to one element; a run that selects
+  no element fails. For several files, loop in the shell.
+- Without `--to`, the target is the newest version of the same template ID
+  compatible with the BPMN's `modeler:executionPlatformVersion`. The command
+  never changes the template ID unless `--to` names another template
+  (`<id>[@<n>]`, path or URL). Elements already on a newer version are skipped.
+  An id resolves like everywhere else: local templates (`.camunda/element-templates/`
+  from the BPMN file's directory up, then Desktop Modeler's user-data dir) first,
+  the cache only when no local version fits.
+- `--map <from>=<to>` moves the original value of one binding to another on every
+  selected element, after the recipe steps. A moved value does not count as
+  dropped. Prefixes such as `input:` work as in `apply --set`.
+- Values the engine cannot read, such as message, called-element or form
+  bindings, are not diffed. Unless the target binds such an editable field
+  identically and not as Hidden, `report.skipped.unchecked` lists it and the
+  migration counts as lossy. Without the source template's definition, every such
+  value set on the element counts.
+- A value whose field survives can still be lost. A Hidden target property that
+  resets an editable source value, and a move or set that overwrites a different
+  populated value, both list the old value in `dropped` with `cause` `hidden` or
+  `displaced`, and the migration counts as lossy.
+- All selected elements migrate in memory and the file is written once, only if
+  every element succeeds. A dry run exits 1 when an element would fail to migrate or the write would
+  need `--allow-lossy`. It does not serialize the BPMN. JSON output is one document:
+  `{dryRun, command, results, summary, deprecation}`.
+- Each JSON result carries `elementId` and, when the element has a name,
+  `elementName`. An updated result carries `recipe` (with `path` for a
+  `--recipe` file, as given, and `owner`, the template carrying an embedded recipe), `counts` and `report` with `moved`, `added`,
+  `changed`, `dropped` and `kept`. Fields use template IDs: `group` is the group
+  ID, `groupLabel` its label, `propertyId` the property `id`. `moved` and
+  `added` items carry the stored `value`; `moved`, `added` and `changed` items
+  carry `source`: `recipe`, `map` or `default` (target template default).
+  `kept` lists unchanged values without their values. Items follow the group
+  and property order of the target template; `dropped` follows the source
+  template. `deprecation` is `{templateId, successors}` for a deprecated
+  selected template, else `null`. A failed result carries `hint` when a next
+  step exists.
+- Without `--in-place` the BPMN goes to stdout and the report to stderr.
+- Lossy in-place writes and refused embedded-recipe fallbacks require `--allow-lossy`.
+  Preview with `--dry-run` first. Unusable explicit `--recipe` files always fail,
+  even with authorization; correct the source entry. A floor that no compatible
+  source version reaches also fails, and `--allow-lossy` does not override it.
+- In-place migrations take a sibling `.migration.lock` and check original input
+  contents before temporary-file preparation and again immediately before rename.
+  Changes observed during preparation are rejected. Replacement uses a sibling
+  temporary file and rename; rename failures, including EXDEV, fail without a
+  direct overwrite.
+  `apply --in-place` and `edit --in-place` do not take the lock, but refuse to
+  replace a file whose contents changed since they read it, so they never
+  overwrite a migration that committed in between.
+  In-place writes follow symlinks: the link stays and its target receives the new
+  XML. The lock and temporary file sit beside the real file, so links to one file
+  share a lock. Relative local template lookup starts at the directory of the
+  path you pass, not of the link's target. Hard links are not preserved; the file gets a new inode.
+  A killed writer can leave a stale lock and temporary file; confirm no writer is
+  active before inspecting and removing them. Recovery is manual. External edits
+  between the final comparison and rename are not covered by the cooperative
+  lock; this design has no atomic compare-and-swap. Tests cover
+  injected ENOSPC/EIO before and after actual partial bytes and real SIGINT/SIGTERM
+  termination during paused split writes, preserving original bytes. Physical
+  disk exhaustion and interruption of an executing kernel syscall are not proven.
+  The unit suite runs on Windows; POSIX signal, permission and EPIPE cases skip it. Cleanup attempts preserve
+  the primary operation error; failed cleanup can leave artifacts for manual recovery.
+- Migration requires `executionPlatform="Camunda Cloud"` and
+  `executionPlatformVersion` in the Modeler namespace
+  `http://camunda.org/schema/modeler/1.0` (the usual prefix is `modeler`; aliases
+  are accepted). Exactly one of each attribute is required. Versions accept strict
+  `major.minor` or full semantic versions, including standard prerelease/build
+  syntax; arbitrary coercible strings are rejected. Standard semver prerelease
+  matching applies. Incompatible explicit targets and malformed declared engine
+  constraints are rejected; automatic selection uses compatible source versions.
+  Missing template engine constraints retain legacy eligibility. Every required
+  intermediate version must also be compatible and available.
+- No-op XML output preserves the original BPMN bytes and sends its message to
+  stderr. JSON emits the migration-report envelope with `noop: true` and empty
+  change collections. In-place no-ops do not rewrite the BPMN, and dry-run emits
+  no XML and writes no BPMN files. Supplied recipes are still validated.
+- Colour and emoji markers are used in text mode. Colour follows the terminal
+  and honours `NO_COLOR` and `FORCE_COLOR`.
+- Report values with credential-like keys, labels or template property/group
+  metadata are redacted in text and JSON, including dry-run. Known sensitive
+  values are also scrubbed from notes and CLI diagnostics. This does not change
+  migration decisions or BPMN values. Custom secrets without recognizable identity,
+  unknown secret text and alternate encodings cannot be identified reliably.
+  **Raw BPMN XML retains secrets**, including no-op stdout; avoid logging it.
+
+### Migration recipes
+
+A recipe describes how values of older templates map onto the template that
+carries it. It lives in the target template as `metadata.migratesFrom`, or in
+a file passed with `--recipe`, which replaces the embedded one. Without a recipe,
+values are carried over by binding identity and the rest is dropped; the report
+lists each drop with its old value, subject to sensitivity redaction. Unusable
+explicit recipes fail even with `--allow-lossy`; refused embedded recipes require
+authorization except when previewing. Diagnostics distinguish malformed recipes,
+coverage refusal and wrong source IDs. A source-version floor that cannot be reached
+fails the element instead (see below). Coverage
+covers every step, including the change to another template: an entry that reads
+a path the reached source version does not define refuses the recipe. Guard
+paths count as reads, including `exists` and negated guards. An empty
+`--recipe` value is an error, not a request for ordinary carry-over.
+
+```json
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "kind": "change",
+      "sourceTemplateId": "io.example.connector.v1",
+      "minSourceVersion": 3,
+      "paths": [
+        { "from": "provider", "to": "backend.provider",
+          "valueMap": { "rules": [{ "match": "azure", "value": "openai" }] } },
+        { "to": "backend.type", "set": "foundry",
+          "when": { "path": "provider", "equals": "azure" },
+          "note": { "level": "warning", "message": "Azure now runs on the Foundry backend." } }
+      ]
+    }
+  ]
+}
+```
+
+| Entry | Effect |
+|-------|--------|
+| `{ from, to, valueMap? }` | Moves a value to another key, optionally translating it (`*` globs, first match wins, optional `default`). |
+| `{ to, set }` | Writes a static value, for example a new discriminator. |
+| `{ to, template }` | Composes a value from source values with `${path}`. |
+| `{ when, rules: [...] }` | Applies the nested entries only when the guard holds. |
+
+Any entry can carry `when` (`equals`, `matches`, `in`, `exists`, optionally negated with `not`).
+Entries other than `rules` groups can also carry `note`: a message shown in the report when the entry took effect, either a string or
+`{ "level": "info" | "warning", "message": "..." }`. Paths are binding keys; prefix one with
+`input:`, `output:`, `header:`, `property:`, `taskDefinition:`, `agentDefinition:` or `adHoc:` when the
+same key is bound by several binding types.
+Unqualified rename sources, guards and interpolation references reject ambiguous
+binding types. Duplicate backing entries/containers also fail rather than choosing
+an arbitrary value. Simultaneously active writes to the same resolved destination
+fail even when one uses a qualified alias; mutually exclusive guarded writes and
+qualified writes to distinct binding types remain valid. A destination bound only by
+Hidden properties with a fixed `value` is rejected. A rename whose guard
+fails is reported as not moved only when no active entry moved the same source.
+
+Migration validates resolved writes and populated non-Hidden carry-over against
+active destination properties, including conditional duplicates. Supported checks
+are choices, `notEmpty` and patterns. Optional/required FEEL expressions bypass
+literal choices/patterns, but empty required expressions fail. Unsupported active
+constraints, cyclic conditions and conditions without a known operator fail
+closed. A condition is not checked for extra keys: `allMatch` and the first
+known operator (`isActive`, `equals`, `oneOf`, `isEmpty`) decide. This does not validate
+FEEL expression syntax. Reports reconcile surviving writes with actual stored
+values, including FEEL normalization, rather than claiming planner intent as success.
+
+A source with `kind: "upgrade"` requires `toVersion` and the recipe owner's ID: an element climbs
+each destination above its applied version in ascending order. A `kind: "change"` source must name
+a different ID and may require `minSourceVersion`, a floor on the source version. When the element
+is below the best floor, the plan adds one implicit version step, with no recipe
+entries; values are carried by binding. The step lands on the lowest compatible version at or above the best floor. The best floor is the highest one at most the newest source
+version compatible with the BPMN's `modeler:executionPlatformVersion`; the plan never goes above
+it. An omitted floor is the fallback entry: it never causes a bump itself and applies only when no declared floor is reachable. When a declared floor is reachable, an element below it is bumped to that floor and the fallback entry is not used. The element fails (no file is
+written, and `--allow-lossy` does not override it) when the newest compatible version is below
+the lowest floor. The report marks
+the step: `The element is on vA, which is too old for this recipe. Updating it to vN first.` (vN is the version landed on) in text and `implicit: true` on the
+step in `report.steps` of `--json`. File recipes replace only the target recipe and follow the
+same rules.
+This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` recipes and requires
+`kind` on every source. Older strict readers reject the new fields. See
+[`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
+Recipes are validated strictly: an unknown key or an unsupported `schemaVersion` fails the command
+instead of being ignored. `schemaVersion` is checked first, so a recipe with a newer version always
+reports that c8ctl must be updated, whatever other keys it has. An unusable recipe embedded in the
+target template, or in the latest version of the source template, fails the whole `update` run and
+names that template. `metadata.migratesFrom` is not part of the official element template schema.
+Draft07 validation alone is insufficient: the parser also rejects duplicate source markers/floors,
+and owner validation checks source IDs and upgrade destinations against the template carrying the recipe.
+An optional `$schema` accepts any string, including blank strings. Paths, IDs, notes, templates,
+and match patterns require a non-whitespace character; surrounding whitespace is preserved.
+Scalar values accept strings (including blank strings), finite numbers, and booleans. An omitted
+note level defaults to `info`; explicit `null` is invalid. Empty `paths` and guard `in` lists are valid,
+but sources, groups, guard lists, and value-map rules must be non-empty.
+
+#### AI Agent v1 to v2
+
+c8ctl ships no connector recipes. The AI Agent v2 templates in
+`camunda/connectors` embed their v1 recipes as `metadata.migratesFrom`,
+so `update` picks them up after syncing the npm package.
+
+## Inspecting a template
+
+`info` and `get-properties` separate the two questions an agent or human
+typically asks of a template — *what is this thing?* (metadata) and
+*what knobs can I turn?* (properties).
+
+### `info` — metadata card
+
+```bash
+c8ctl element-template info io.camunda.connectors.HttpJson.v2
+```
+
+```
+REST Outbound Connector
+  ID           io.camunda.connectors.HttpJson.v2
+  Version      13  (latest; @<n> to pin)
+  Applies to   bpmn:Task → bpmn:ServiceTask
+  Engines      ^8.9
+  Description  Invoke REST API
+  Docs         https://docs.camunda.io/docs/components/connectors/protocol/rest/
+
+For settable properties, run:
+  c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
+```
+
+When you give an OOTB id without `@<version>`, the auto-resolved version
+is annotated with a dim `(latest; @<n> to pin)` parenthetical so you
+know what was picked.
+
+### `get-properties` — condensed listing
+
+The default density is one row per property: name + description, grouped
+by template group. Group headings include the `id` for use with `--group`.
+
+```bash
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
+```
+
+```
+Showing 28 of 28 properties.
+
+Authentication (authentication)
+  authentication.type                  Choose the authentication type. Select 'None' if no authentication is necessary
+  authentication.token                 Bearer token
+  ...
+
+HTTP endpoint (endpoint)
+  method                               Method
+  url                                  URL
+  ...
+
+Filter by name (supports globs):
+  c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 'auth*' url
+For full details on each property:
+  c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --detailed
+```
+
+Positional names filter the listing — pass one or more names, with
+optional shell-style globs. `--group <id>` (repeatable) intersects with
+the name filter. Both filters error on no-match instead of silently
+empty so typos surface.
+
+### `get-properties --detailed` — full cards
+
+Same filter semantics, but every property is rendered as a keyed card
+with its full descriptor:
+
+```bash
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --detailed authentication.token
+```
+
+```
+Showing 1 of 28 properties.
+
+authentication.token (Authentication)
+  Id           authentication.token
+  Type         String
+  Required     yes
+  FEEL         optional
+  Binding      zeebe:input
+  Description  Bearer token
+  Active when  authentication.type = "bearer"
+```
+
+Cards surface everything `--set` needs to pick a value — type, required,
+FEEL support, binding, full active-when expression, pattern + error
+message, and the choice list for dropdowns.
+
+### Machine-readable output
+
+Switch the session into JSON mode and the same commands emit shapes
+that mirror the text output (and use upstream
+[element-templates JSON schema](https://unpkg.com/@camunda/zeebe-element-templates-json-schema)
+field names verbatim — no invented names like `bindingType` or
+`required`):
+
+```bash
+c8ctl output json
+c8ctl element-template info io.camunda.connectors.HttpJson.v2
+# → {"name":"REST Outbound Connector","id":"io.camunda.connectors.HttpJson.v2",
+#    "version":13,"description":"Invoke REST API",
+#    "documentationRef":"https://docs.camunda.io/...",
+#    "appliesTo":["bpmn:Task"],"elementType":{"value":"bpmn:ServiceTask"},
+#    "engines":{"camunda":"^8.9"}}
+
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 url
+# → {"count":1,"total":28,"groups":[{"id":"authentication","label":"Authentication"}, ...],
+#    "properties":[{"id":"url","binding":{"name":"url","type":"zeebe:input"},
+#      "label":"URL","group":"endpoint"}]}
+
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --detailed authentication.token
+# → {"count":1,"total":28,"groups":[...],
+#    "properties":[{"id":"authentication.token",
+#      "binding":{"name":"authentication.token","type":"zeebe:input"},
+#      "type":"String","optional":false,"feel":"optional","group":"authentication",
+#      "condition":{"property":"authentication.type","equals":"bearer","type":"simple"},
+#      "label":"Bearer token","constraints":{"notEmpty":true}}]}
+```
+
+`get-properties` JSON keeps the same `{ count, total, groups, properties }`
+envelope across both density modes — `count` is rendered properties,
+`total` is the unfiltered count, `groups` is the full group table so
+consumers can resolve any group id (not just those of rendered properties).
+
+## Setting input mappings with `--set`
+
+`apply` supports repeatable `--set key=value` flags to populate
+template properties at apply time — input mappings, output mappings,
+task headers, task definitions, and arbitrary template properties.
+Use it to wire up a connector in one shot from the CLI:
+
+```bash
+# Apply the HTTP JSON connector and configure the request inline
+c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
+  ServiceTask_1 process.bpmn \
+  --set authentication.type=noAuth \
+  --set method=POST \
+  --set url=https://api.example.com/v1/orders \
+  --set body='={ "orderId": orderId, "amount": 42 }' \
+  --set resultExpression='={ "status": response.statusCode }'
+```
+
+### How `--set` resolves a name
+
+`key` is matched against the template's settable property
+**binding names** (the field a template property writes to in the
+resulting BPMN). Discover them with `get-properties`, then pick a value
+using the badges on the detail card (Required, FEEL, Default, Active when).
+
+### Disambiguation prefixes
+
+When the same name lives on multiple binding types (e.g. an `input` and
+a `header` both called `correlationKey`), prefix the key with the
+binding type:
+
+| Prefix              | Binding type           |
+|---------------------|------------------------|
+| `input:`            | `zeebe:input`          |
+| `output:`           | `zeebe:output`         |
+| `header:`           | `zeebe:taskHeader`     |
+| `property:`         | `zeebe:property`       |
+| `taskDefinition:`   | `zeebe:taskDefinition` |
+
+```bash
+--set input:correlationKey='=order.id'
+--set header:correlationKey=staticHeaderValue
+```
+
+The plugin errors with the list of qualified names when a bare key is
+ambiguous, and with the list of available property names when the key
+is unknown.
+
+When two settable properties share the same binding name **and** binding
+type but differ by `condition` (template authors use this for
+operation-conditional duplicates), `--set` writes to all of them — the
+engine drops the inactive duplicates at runtime.
+
+### Conditional properties
+
+Templates often hide properties behind a "show this only when X" rule
+(e.g. `authentication.username` is conditional on
+`authentication.type=basic`). `--set` first sets the dependency, then
+follow-up properties:
+
+```bash
+c8ctl element-template apply io.camunda.connectors.HttpJson.v2 \
+  ServiceTask_1 process.bpmn \
+  --set authentication.type=basic \
+  --set authentication.username=alice \
+  --set authentication.password=secret \
+  --set method=GET \
+  --set url=https://api.example.com/me
+```
+
+If a `--set` targets a property whose condition is unmet, you'll get a
+warning at the end (the property won't be applied).
+
+## How OOTB templates are resolved
+
+1. **Source**: the
+   [`@camunda/connectors-element-templates` npm package](https://www.npmjs.com/package/@camunda/connectors-element-templates).
+   `sync` uses npm to install it in a temporary directory.
+2. **Populate the cache once** via `c8ctl element-template sync`.
+   Subcommands that resolve OOTB ids (`search`, `info`, `get-properties`,
+   `apply`, `get`) exit non-zero with a hint to run `sync` when the
+   cache is missing — no auto-download. This keeps pipelines clean:
+   bootstrap progress would otherwise land on stdout and corrupt
+   `apply | bpmn lint` or `get <id> > template.json`.
+3. **Local file or URL** template args (paths containing `/` or `\`,
+   starting with `.`, ending in `.json`, or starting with `http(s)://`)
+   skip the cache entirely.
+4. **Version selection** uses `semver.satisfies` against the BPMN's
+   `modeler:executionPlatformVersion` and each template's
+   `engines.camunda` constraint. Without `@<version>`, the highest
+   compatible version wins.
+5. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
+   refresh — each explicit sync stages a new installation.
+6. **Concurrent syncs** are serialised by an advisory lock at
+   `<cache-dir>/.sync.lock`. A second `sync` started while one is
+   already running exits non-zero rather than racing.
+
+### Cache locations
+
+| Platform | Path |
+|----------|------|
+| macOS    | `~/Library/Application Support/c8ctl/element-templates/` |
+| Linux    | `${XDG_CONFIG_HOME:-~/.config}/c8ctl/element-templates/` |
+| Windows  | `%APPDATA%\c8ctl\element-templates\` |
+
+Set `C8CTL_DATA_DIR` to override.
+
+## Design
+
+See [`docs/design.md`](./docs/design.md) for the full reasoning behind
+the npm source choice, the vendor bundle, the cache strategy
+(mirrored from Desktop Modeler), and version resolution.

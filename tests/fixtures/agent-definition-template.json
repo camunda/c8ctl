@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/@camunda/zeebe-element-templates-json-schema/resources/schema.json",
+  "name": "Agent Definition Regression Test Template",
+  "id": "test-agent-definition-template",
+  "version": 1,
+  "appliesTo": ["bpmn:Task"],
+  "elementType": { "value": "bpmn:ServiceTask" },
+  "properties": [
+    {
+      "value": "aiAgentTask",
+      "binding": { "type": "zeebe:agentDefinition", "property": "agentType" },
+      "type": "Hidden"
+    }
+  ]
+}

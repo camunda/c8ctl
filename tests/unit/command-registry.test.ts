@@ -9,7 +9,10 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
+import type {
+	CommandDef,
+	FlagDef,
+} from "../../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	deriveParseArgsOptions,
@@ -18,9 +21,10 @@ import {
 	getCommandDef,
 	isValidCommand,
 	resolveAlias,
+	resolveVerbAlias,
 	SEARCH_FLAGS,
 	VERB_ALIASES,
-} from "../../src/command-registry.ts";
+} from "../../src/framework/command-registry.ts";
 
 /** Widened read-only views for iterating with index signatures. */
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
@@ -37,9 +41,14 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"create",
 		"delete",
 		"cancel",
+		"suspend",
+		"resume",
+		"migrate",
+		"modify",
 		"await",
 		"complete",
 		"fail",
+		"update",
 		"activate",
 		"resolve",
 		"publish",
@@ -61,7 +70,6 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"output",
 		"completion",
 		"mcp-proxy",
-		"mcp",
 		"feedback",
 		"help",
 		"assign",
@@ -345,6 +353,51 @@ describe("helper functions", () => {
 		assert.ok(!isValidCommand("fail", "pi")); // fail only supports job
 	});
 
+	// ── resolveVerbAlias ─────────────────────────────────────────────────────
+
+	test("resolveVerbAlias returns canonical verbs unchanged", () => {
+		assert.strictEqual(resolveVerbAlias("list"), "list");
+		assert.strictEqual(resolveVerbAlias("watch"), "watch");
+		assert.strictEqual(resolveVerbAlias("remove"), "remove");
+	});
+
+	test("resolveVerbAlias returns unknown verbs unchanged", () => {
+		assert.strictEqual(resolveVerbAlias("nonexistent"), "nonexistent");
+	});
+
+	test("resolveVerbAlias treats prototype keys as unknown verbs", () => {
+		assert.strictEqual(resolveVerbAlias("__proto__"), "__proto__");
+		assert.strictEqual(resolveVerbAlias("constructor"), "constructor");
+		assert.strictEqual(resolveVerbAlias("__proto__", "profile"), "__proto__");
+	});
+
+	test("resolveVerbAlias resolves single-target alias", () => {
+		assert.strictEqual(resolveVerbAlias("w"), "watch");
+	});
+
+	test("resolveVerbAlias disambiguates multi-target alias by resource", () => {
+		// rm → remove when resource is 'profile' (only remove owns profile)
+		assert.strictEqual(resolveVerbAlias("rm", "profile"), "remove");
+		// rm → unload when resource is 'plugin' (only unload owns plugin)
+		assert.strictEqual(resolveVerbAlias("rm", "plugin"), "unload");
+	});
+
+	test("resolveVerbAlias falls back to first target without resource", () => {
+		const targets = VERB_ALIASES.rm;
+		assert.ok(targets && targets.length > 1, "rm should have multiple targets");
+		assert.strictEqual(resolveVerbAlias("rm"), targets[0]);
+	});
+
+	test("every verb alias resolves to a canonical registry entry", () => {
+		for (const alias of Object.keys(VERB_ALIASES)) {
+			const resolved = resolveVerbAlias(alias);
+			assert.ok(
+				Object.hasOwn(COMMAND_REGISTRY, resolved),
+				`alias "${alias}" resolved to "${resolved}" which is not in COMMAND_REGISTRY`,
+			);
+		}
+	});
+
 	test("deriveParseArgsOptions produces flat options for parseArgs", () => {
 		const options = deriveParseArgsOptions();
 		// Global flags
@@ -442,6 +495,7 @@ describe("helper functions", () => {
 			"clientSecret",
 			"audience",
 			"oAuthUrl",
+			"scope",
 			"defaultTenantId",
 			"from-file",
 			"from-env",
@@ -463,6 +517,10 @@ describe("mutating flag correctness", () => {
 		"create",
 		"delete",
 		"cancel",
+		"suspend",
+		"resume",
+		"migrate",
+		"modify",
 		"await",
 		"complete",
 		"fail",
@@ -475,9 +533,7 @@ describe("mutating flag correctness", () => {
 		"assign",
 		"unassign",
 		"completion",
-		"mcp",
 	];
-
 	const NON_MUTATING_VERBS = [
 		"list",
 		"search",

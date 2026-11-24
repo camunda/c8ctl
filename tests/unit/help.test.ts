@@ -4,15 +4,16 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { GLOBAL_FLAGS } from "../../src/command-registry.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
+import { GLOBAL_FLAGS } from "../../src/framework/command-registry.ts";
 import {
 	getVersion,
 	showCommandHelp,
 	showHelp,
 	showVerbResources,
 	showVersion,
-} from "../../src/help.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/framework/ui/help.ts";
+import { isRecord } from "../utils/guards.ts";
 
 describe("Help Module", () => {
 	let consoleLogSpy: string[];
@@ -231,6 +232,41 @@ describe("Help Module", () => {
 		assert.ok(output.includes("fish"));
 	});
 
+	test("showVerbResources shows argument placeholder for run (resources: [], requiresResource: true)", () => {
+		showVerbResources("run");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl run"), "should show usage line");
+		assert.ok(
+			output.includes("Argument:"),
+			"should show Argument section, not empty Available resources",
+		);
+		assert.ok(
+			output.includes("<path>"),
+			"should show <path> placeholder from helpResource",
+		);
+		assert.ok(
+			!output.includes("Available resources:"),
+			"should not show empty Available resources list",
+		);
+	});
+
+	test("showVerbResources shows argument placeholder for deploy (resources: [], requiresResource: false)", () => {
+		showVerbResources("deploy");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl deploy"), "should show usage line");
+		assert.ok(output.includes("Argument:"), "should show Argument section");
+		assert.ok(
+			output.includes("[path...]"),
+			"should show [path...] placeholder from helpResource",
+		);
+		assert.ok(
+			!output.includes("Available resources:"),
+			"should not show empty Available resources list",
+		);
+	});
+
 	test("showHelp includes completion command", () => {
 		showHelp();
 
@@ -333,6 +369,10 @@ describe("Help Module", () => {
 			output.includes("--dateField"),
 			"search help should include --dateField flag",
 		);
+		assert.ok(
+			output.includes("wait-state (ws)"),
+			"search help should include the ws alias for wait-state",
+		);
 	});
 
 	test("showCommandHelp shows deploy help", () => {
@@ -427,6 +467,35 @@ describe("Help Module", () => {
 		assert.ok(output.includes("process-instance (pi)"));
 	});
 
+	test("showCommandHelp shows migrate help with its flags", () => {
+		showCommandHelp("migrate");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl migrate"));
+		assert.ok(output.includes("process-instance (pi)"));
+		assert.ok(output.includes("--targetProcessDefinitionKey"));
+		assert.ok(output.includes("--map"));
+		assert.ok(output.includes("--processDefinitionKey"));
+	});
+
+	test("showCommandHelp shows modify help with its flags", () => {
+		showCommandHelp("modify");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl modify"));
+		assert.ok(output.includes("process-instance (pi)"));
+		for (const flag of [
+			"--activate",
+			"--terminate",
+			"--move",
+			"--instructions",
+			"--processDefinitionKey",
+			"--operationReference",
+		]) {
+			assert.ok(output.includes(flag), `missing ${flag}`);
+		}
+	});
+
 	test("showCommandHelp shows resolve help", () => {
 		showCommandHelp("resolve");
 
@@ -445,6 +514,16 @@ describe("Help Module", () => {
 		assert.ok(output.includes("--errorMessage"));
 	});
 
+	test("showCommandHelp shows update help", () => {
+		showCommandHelp("update");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl update"));
+		assert.ok(output.includes("job"));
+		assert.ok(output.includes("--retries"));
+		assert.ok(output.includes("--timeout"));
+	});
+
 	test("showCommandHelp shows activate help", () => {
 		showCommandHelp("activate");
 
@@ -454,6 +533,8 @@ describe("Help Module", () => {
 		assert.ok(output.includes("--maxJobsToActivate"));
 		assert.ok(output.includes("--timeout"));
 		assert.ok(output.includes("--worker"));
+		assert.ok(output.includes("--customHeaders"));
+		assert.ok(output.includes("--fetchVariable"));
 	});
 
 	test("showCommandHelp shows publish help", () => {
@@ -493,9 +574,12 @@ describe("Help Module", () => {
 		assert.ok(output.includes("c8ctl help watch"));
 		assert.ok(output.includes("c8ctl help open"));
 		assert.ok(output.includes("c8ctl help cancel"));
+		assert.ok(output.includes("c8ctl help migrate"));
+		assert.ok(output.includes("c8ctl help modify"));
 		assert.ok(output.includes("c8ctl help resolve"));
 		assert.ok(output.includes("c8ctl help fail"));
 		assert.ok(output.includes("c8ctl help activate"));
+		assert.ok(output.includes("c8ctl help update"));
 		assert.ok(output.includes("c8ctl help publish"));
 		assert.ok(output.includes("c8ctl help correlate"));
 		assert.ok(output.includes("c8ctl help profiles"));
@@ -522,6 +606,7 @@ describe("Help Module", () => {
 		assert.ok(output.includes("resolve"));
 		assert.ok(output.includes("fail"));
 		assert.ok(output.includes("activate"));
+		assert.ok(output.includes("update"));
 		assert.ok(output.includes("publish"));
 		assert.ok(output.includes("correlate"));
 		assert.ok(output.includes("profiles"));
@@ -1376,4 +1461,134 @@ describe("Search flags are consolidated into a single section per verb (#322 fol
 			);
 		});
 	}
+});
+
+// ─── SDK environment variable documentation ─────────────────────────────────
+//
+// SDK-standard variables (`CAMUNDA_REST_ADDRESS`,
+// `CAMUNDA_AUTH_STRATEGY`) were silently ignored, and the supported
+// `CAMUNDA_*` variables were documented nowhere in `c8ctl help`. These tests
+// pin the env-var documentation surface: a dedicated section in the top-level
+// help (kept out of the Flags section, which is reserved for GLOBAL_FLAGS)
+// and the connection/mcp-path details in `c8ctl help mcp-proxy`.
+describe("Help documents the CAMUNDA_* environment variables", () => {
+	let consoleLogSpy: string[];
+	let originalLog: typeof console.log;
+	let originalOutputMode: typeof c8ctl.outputMode;
+
+	beforeEach(() => {
+		consoleLogSpy = [];
+		originalLog = console.log;
+		originalOutputMode = c8ctl.outputMode;
+		c8ctl.outputMode = "text";
+		console.log = (...args: unknown[]) => {
+			consoleLogSpy.push(args.join(" "));
+		};
+	});
+
+	afterEach(() => {
+		console.log = originalLog;
+		c8ctl.outputMode = originalOutputMode;
+	});
+
+	test("top-level help lists the supported CAMUNDA_* variables", () => {
+		showHelp();
+		const output = consoleLogSpy.join("\n");
+
+		for (const envVar of [
+			"CAMUNDA_BASE_URL",
+			"CAMUNDA_REST_ADDRESS",
+			"CAMUNDA_AUTH_STRATEGY",
+			"CAMUNDA_CLIENT_ID",
+			"CAMUNDA_CLIENT_SECRET",
+			"CAMUNDA_USERNAME",
+			"CAMUNDA_PASSWORD",
+			"CAMUNDA_DEFAULT_TENANT_ID",
+		]) {
+			assert.ok(
+				output.includes(envVar),
+				`top-level help must document ${envVar}`,
+			);
+		}
+		assert.match(output, /Environment Variables:/);
+	});
+
+	test("top-level help documents the CAMUNDA_BASE_URL > CAMUNDA_REST_ADDRESS precedence", () => {
+		showHelp();
+		const output = consoleLogSpy.join("\n");
+
+		// The alias relationship must be stated, not just both names listed.
+		assert.match(
+			output,
+			/CAMUNDA_REST_ADDRESS[^\n]*(alias|CAMUNDA_BASE_URL)|alias[^\n]*CAMUNDA_REST_ADDRESS/i,
+			"top-level help must state that CAMUNDA_REST_ADDRESS is an alias",
+		);
+	});
+
+	test("c8ctl help mcp-proxy documents the mcp-path values and connection selection", async () => {
+		await showCommandHelp("mcp-proxy");
+		const output = consoleLogSpy.join("\n");
+
+		assert.ok(
+			output.includes("/mcp/cluster"),
+			"mcp-proxy help must name the default /mcp/cluster path",
+		);
+		assert.ok(
+			output.includes("/mcp/processes"),
+			"mcp-proxy help must name the /mcp/processes path",
+		);
+		for (const envVar of [
+			"CAMUNDA_BASE_URL",
+			"CAMUNDA_REST_ADDRESS",
+			"CAMUNDA_AUTH_STRATEGY",
+		]) {
+			assert.ok(
+				output.includes(envVar),
+				`mcp-proxy help must document ${envVar}`,
+			);
+		}
+	});
+
+	function parseJsonOutput(): Record<string, unknown> {
+		const parsed: unknown = JSON.parse(consoleLogSpy.join("\n"));
+		assert.ok(isRecord(parsed), "help JSON must be an object");
+		return parsed;
+	}
+
+	function envVarNames(value: unknown): string[] {
+		assert.ok(Array.isArray(value), "environmentVariables must be an array");
+		return value.map((entry: unknown) =>
+			isRecord(entry) && typeof entry.name === "string" ? entry.name : "",
+		);
+	}
+
+	test("top-level JSON help carries the environment variables", () => {
+		c8ctl.outputMode = "json";
+		showHelp();
+		const help = parseJsonOutput();
+		const names = envVarNames(help.environmentVariables);
+		for (const envVar of [
+			"CAMUNDA_BASE_URL",
+			"CAMUNDA_REST_ADDRESS",
+			"CAMUNDA_AUTH_STRATEGY",
+		]) {
+			assert.ok(names.includes(envVar), `JSON help must list ${envVar}`);
+		}
+	});
+
+	test("mcp-proxy JSON help carries its usage notes and the environment variables", async () => {
+		c8ctl.outputMode = "json";
+		await showCommandHelp("mcp-proxy");
+		const help = parseJsonOutput();
+		assert.ok(
+			Array.isArray(help.notes),
+			"mcp-proxy JSON help must carry notes",
+		);
+		const notes = help.notes.join("\n");
+		assert.ok(notes.includes("/mcp/cluster"));
+		assert.ok(notes.includes("/mcp/processes"));
+		assert.ok(
+			envVarNames(help.environmentVariables).includes("CAMUNDA_REST_ADDRESS"),
+		);
+	});
 });

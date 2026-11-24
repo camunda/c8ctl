@@ -2,12 +2,19 @@
  * Identity shared helpers and assignment dispatcher
  */
 
-import { TenantId, Username } from "@camunda8/orchestration-cluster-api";
-import { createClient } from "../client.ts";
-import { defineCommand } from "../command-framework.ts";
-import { resolveClusterConfig } from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+import {
+	GroupId,
+	MappingRuleId,
+	RoleId,
+	TenantId,
+	Username,
+} from "@camunda8/orchestration-cluster-api";
+import {
+	createClient,
+	getLogger,
+	resolveClusterConfig,
+} from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 export {
 	createIdentityAuthorizationCommand,
@@ -15,7 +22,6 @@ export {
 	getIdentityAuthorizationCommand,
 	listAuthorizationsCommand,
 	searchIdentityAuthorizationsCommand,
-	validateCreateAuthorizationOptions,
 } from "./identity-authorizations.ts";
 export {
 	createIdentityGroupCommand,
@@ -111,18 +117,17 @@ function formatFlags(flags: readonly string[]): string {
 /**
  * Core assign implementation.
  *
- * Called from per-resource `defineCommand` wrappers below and exercised
- * directly by `tests/unit/identity.test.ts`. All validation errors are
- * raised via `throw` so the framework wrapper can route them through
- * `handleCommandError` and add the `Failed to assign <resource>` prefix.
- * Do NOT reintroduce `process.exit` — the architectural guard in
+ * Called from per-resource `defineCommand` wrappers below. All validation
+ * errors are raised via `throw` so the framework wrapper can route them
+ * through `handleCommandError` and add the `Failed to assign <resource>`
+ * prefix. Do NOT reintroduce `process.exit` — the architectural guard in
  * `tests/unit/no-process-exit-in-handlers.test.ts` will reject it.
  */
-export async function handleAssign(
+async function handleAssign(
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,
-	options: { profile?: string },
+	options: { profile?: string; isDryRun: boolean },
 ): Promise<void> {
 	const logger = getLogger();
 	const allowedTargets = ALLOWED_ASSIGN_TARGETS[resource];
@@ -154,7 +159,7 @@ export async function handleAssign(
 	const resourcePath = RESOURCE_PATHS[resource];
 	const targetPath = `${targetFlag.replace(/^to-/, "")}s`;
 
-	if (c8ctl.dryRun) {
+	if (options.isDryRun) {
 		const config = resolveClusterConfig(options.profile);
 		logger.json({
 			dryRun: true,
@@ -172,14 +177,14 @@ export async function handleAssign(
 		case "role": {
 			if (values["to-user"]) {
 				await client.assignRoleToUser({
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 					username: Username.assumeExists(String(values["to-user"])),
 				});
 				logger.success(`Role '${id}' assigned to user '${values["to-user"]}'`);
 			} else if (values["to-group"]) {
 				await client.assignRoleToGroup({
-					roleId: id,
-					groupId: String(values["to-group"]),
+					roleId: RoleId.assumeExists(id),
+					groupId: GroupId.assumeExists(String(values["to-group"])),
 				});
 				logger.success(
 					`Role '${id}' assigned to group '${values["to-group"]}'`,
@@ -187,15 +192,17 @@ export async function handleAssign(
 			} else if (values["to-tenant"]) {
 				await client.assignRoleToTenant({
 					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 				});
 				logger.success(
 					`Role '${id}' assigned to tenant '${values["to-tenant"]}'`,
 				);
 			} else if (values["to-mapping-rule"]) {
 				await client.assignRoleToMappingRule({
-					roleId: id,
-					mappingRuleId: String(values["to-mapping-rule"]),
+					roleId: RoleId.assumeExists(id),
+					mappingRuleId: MappingRuleId.assumeExists(
+						String(values["to-mapping-rule"]),
+					),
 				});
 				logger.success(
 					`Role '${id}' assigned to mapping rule '${values["to-mapping-rule"]}'`,
@@ -210,7 +217,7 @@ export async function handleAssign(
 		case "user": {
 			if (values["to-group"]) {
 				await client.assignUserToGroup({
-					groupId: String(values["to-group"]),
+					groupId: GroupId.assumeExists(String(values["to-group"])),
 					username: Username.assumeExists(id),
 				});
 				logger.success(
@@ -233,7 +240,7 @@ export async function handleAssign(
 			if (values["to-tenant"]) {
 				await client.assignGroupToTenant({
 					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					groupId: id,
+					groupId: GroupId.assumeExists(id),
 				});
 				logger.success(
 					`Group '${id}' assigned to tenant '${values["to-tenant"]}'`,
@@ -246,8 +253,8 @@ export async function handleAssign(
 		case "mapping-rule": {
 			if (values["to-group"]) {
 				await client.assignMappingRuleToGroup({
-					groupId: String(values["to-group"]),
-					mappingRuleId: id,
+					groupId: GroupId.assumeExists(String(values["to-group"])),
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' assigned to group '${values["to-group"]}'`,
@@ -255,7 +262,7 @@ export async function handleAssign(
 			} else if (values["to-tenant"]) {
 				await client.assignMappingRuleToTenant({
 					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					mappingRuleId: id,
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' assigned to tenant '${values["to-tenant"]}'`,
@@ -276,11 +283,11 @@ export async function handleAssign(
  * Core unassign implementation. See `handleAssign` docstring for the
  * error-handling contract (throw, do not `process.exit`).
  */
-export async function handleUnassign(
+async function handleUnassign(
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,
-	options: { profile?: string },
+	options: { profile?: string; isDryRun: boolean },
 ): Promise<void> {
 	const logger = getLogger();
 	const allowedSources = ALLOWED_UNASSIGN_SOURCES[resource];
@@ -312,7 +319,7 @@ export async function handleUnassign(
 	const resourcePath = RESOURCE_PATHS[resource];
 	const sourcePath = `${sourceFlag.replace(/^from-/, "")}s`;
 
-	if (c8ctl.dryRun) {
+	if (options.isDryRun) {
 		const config = resolveClusterConfig(options.profile);
 		logger.json({
 			dryRun: true,
@@ -330,7 +337,7 @@ export async function handleUnassign(
 		case "role": {
 			if (values["from-user"]) {
 				await client.unassignRoleFromUser({
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 					username: Username.assumeExists(String(values["from-user"])),
 				});
 				logger.success(
@@ -338,8 +345,8 @@ export async function handleUnassign(
 				);
 			} else if (values["from-group"]) {
 				await client.unassignRoleFromGroup({
-					roleId: id,
-					groupId: String(values["from-group"]),
+					roleId: RoleId.assumeExists(id),
+					groupId: GroupId.assumeExists(String(values["from-group"])),
 				});
 				logger.success(
 					`Role '${id}' unassigned from group '${values["from-group"]}'`,
@@ -347,15 +354,17 @@ export async function handleUnassign(
 			} else if (values["from-tenant"]) {
 				await client.unassignRoleFromTenant({
 					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 				});
 				logger.success(
 					`Role '${id}' unassigned from tenant '${values["from-tenant"]}'`,
 				);
 			} else if (values["from-mapping-rule"]) {
 				await client.unassignRoleFromMappingRule({
-					roleId: id,
-					mappingRuleId: String(values["from-mapping-rule"]),
+					roleId: RoleId.assumeExists(id),
+					mappingRuleId: MappingRuleId.assumeExists(
+						String(values["from-mapping-rule"]),
+					),
 				});
 				logger.success(
 					`Role '${id}' unassigned from mapping rule '${values["from-mapping-rule"]}'`,
@@ -370,7 +379,7 @@ export async function handleUnassign(
 		case "user": {
 			if (values["from-group"]) {
 				await client.unassignUserFromGroup({
-					groupId: String(values["from-group"]),
+					groupId: GroupId.assumeExists(String(values["from-group"])),
 					username: Username.assumeExists(id),
 				});
 				logger.success(
@@ -393,7 +402,7 @@ export async function handleUnassign(
 			if (values["from-tenant"]) {
 				await client.unassignGroupFromTenant({
 					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					groupId: id,
+					groupId: GroupId.assumeExists(id),
 				});
 				logger.success(
 					`Group '${id}' unassigned from tenant '${values["from-tenant"]}'`,
@@ -406,8 +415,8 @@ export async function handleUnassign(
 		case "mapping-rule": {
 			if (values["from-group"]) {
 				await client.unassignMappingRuleFromGroup({
-					groupId: String(values["from-group"]),
-					mappingRuleId: id,
+					groupId: GroupId.assumeExists(String(values["from-group"])),
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' unassigned from group '${values["from-group"]}'`,
@@ -415,7 +424,7 @@ export async function handleUnassign(
 			} else if (values["from-tenant"]) {
 				await client.unassignMappingRuleFromTenant({
 					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					mappingRuleId: id,
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' unassigned from tenant '${values["from-tenant"]}'`,
@@ -461,6 +470,7 @@ function makeAssignCommand<
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;
@@ -478,6 +488,7 @@ function makeUnassignCommand<
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;
@@ -517,6 +528,7 @@ export const assignFallbackCommand = defineCommand(
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;
@@ -538,6 +550,7 @@ export const unassignFallbackCommand = defineCommand(
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;

@@ -11,6 +11,9 @@
     "README.md",
     "AGENTS.md"
   ],
+  "engines": {
+    "c8ctl": "*"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch"

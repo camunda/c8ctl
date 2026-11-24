@@ -38,7 +38,7 @@
  *
  * Out of scope (separate, wider work — not blocking #288 for `open`):
  *
- *   `src/command-validation.ts` exposes `requirePositional`,
+ *   `src/utils/shared/validation.ts` exposes `requirePositional`,
  *   `requireOneOf`, etc., which the `open` handler calls (via
  *   `validateOpenAppOptions`). Those helpers still call
  *   `process.exit(1)` directly on bad input, bypassing the

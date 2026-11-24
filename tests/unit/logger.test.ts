@@ -4,8 +4,8 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { getLogger, Logger, sortTableData } from "../../src/logger.ts";
-import { c8ctl } from "../../src/runtime.ts";
+import { getLogger, Logger, sortTableData } from "../../src/core/logger.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 describe("Logger Module", () => {
 	let consoleLogSpy: string[];
@@ -35,8 +35,81 @@ describe("Logger Module", () => {
 	afterEach(() => {
 		console.log = originalLog;
 		console.error = originalError;
+		c8ctl.quiet = undefined;
 		c8ctl.activeProfile = undefined;
 		c8ctl.resolvedBaseUrl = undefined;
+	});
+
+	describe("Quiet mode", () => {
+		for (const mode of ["text", "json"] as const) {
+			describe(`in ${mode} mode`, () => {
+				beforeEach(() => {
+					c8ctl.outputMode = mode;
+					c8ctl.quiet = true;
+				});
+
+				test("suppresses info and success messages", () => {
+					const logger = new Logger();
+					logger.info("status");
+					logger.info("status", { stream: "stdout" });
+					logger.success("done");
+					assert.deepStrictEqual(consoleLogSpy, []);
+					assert.deepStrictEqual(consoleErrorSpy, []);
+				});
+
+				test("a success with a key still emits the key", () => {
+					const logger = new Logger();
+					logger.success("Process instance created", "2251799813685249");
+					const out = [...consoleLogSpy, ...consoleErrorSpy];
+					assert.strictEqual(out.length, 1);
+					assert.ok(out[0].includes("2251799813685249"));
+					if (mode === "text") {
+						assert.deepStrictEqual(consoleLogSpy, ["2251799813685249"]);
+					} else {
+						assert.deepStrictEqual(JSON.parse(consoleErrorSpy[0]), {
+							status: "success",
+							message: "Process instance created",
+							key: "2251799813685249",
+						});
+					}
+				});
+
+				test("still writes essential info messages", () => {
+					const logger = new Logger();
+					logger.info("the answer", { essential: true });
+					assert.strictEqual(consoleLogSpy.length + consoleErrorSpy.length, 1);
+					assert.ok(
+						[...consoleLogSpy, ...consoleErrorSpy][0].includes("the answer"),
+					);
+				});
+
+				test("still writes warnings and errors", () => {
+					const logger = new Logger();
+					logger.warn("careful");
+					logger.error("broken", new Error("cause"));
+					assert.ok(consoleErrorSpy.some((l) => l.includes("careful")));
+					assert.ok(consoleErrorSpy.some((l) => l.includes("broken")));
+				});
+
+				test("still writes data output", () => {
+					const logger = new Logger();
+					logger.json({ key: 1 });
+					logger.output("raw content");
+					logger.table([{ Key: 1 }]);
+					assert.ok(consoleLogSpy.some((l) => l.includes('"key"')));
+					assert.ok(consoleLogSpy.some((l) => l.includes("raw content")));
+					assert.ok(consoleLogSpy.join("\n").includes("Key"));
+				});
+			});
+		}
+
+		test("essential has no effect when quiet is off", () => {
+			c8ctl.outputMode = "text";
+			const logger = new Logger();
+			logger.info("plain");
+			logger.info("essential", { essential: true });
+			assert.deepStrictEqual(consoleLogSpy, ["plain", "essential"]);
+		});
 	});
 
 	describe("Text Mode", () => {
@@ -590,6 +663,116 @@ describe("Logger Module", () => {
 				typeof firstArg === "string" && firstArg.includes("Debug with args"),
 			);
 		});
+	});
+});
+
+describe("renderCell via table() — text mode cell rendering", () => {
+	let logOutput: string[];
+	let logger: Logger;
+
+	beforeEach(() => {
+		logOutput = [];
+		const trackingWriter = {
+			log(...data: unknown[]): void {
+				logOutput.push(data.join(" "));
+			},
+			error(..._data: unknown[]): void {},
+		};
+		logger = new Logger(trackingWriter);
+		c8ctl.outputMode = "text";
+	});
+
+	test("plain object cell is JSON-stringified", () => {
+		logger.table([{ headers: { "x-foo": "bar", "x-count": 42 } }]);
+
+		const rows = logOutput.slice(2); // skip header + separator
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes('{"x-foo":"bar","x-count":42}'),
+			`Expected JSON-stringified object in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("array cell is JSON-stringified", () => {
+		logger.table([{ tags: ["a", "b", "c"] }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes('["a","b","c"]'),
+			`Expected JSON-stringified array in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("null cell renders as empty string", () => {
+		logger.table([{ value: null }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		// null → empty → padded with spaces, so the row should not contain "null"
+		assert.ok(
+			!rows[0].includes("null"),
+			`Expected empty cell, got: ${rows[0]}`,
+		);
+	});
+
+	test("undefined cell renders as empty string", () => {
+		logger.table([{ a: "x", b: undefined }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			!rows[0].includes("undefined"),
+			`Expected empty cell, got: ${rows[0]}`,
+		);
+	});
+
+	test("string cell is passed through unchanged", () => {
+		logger.table([{ name: "hello" }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes("hello"),
+			`Expected 'hello' in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("number cell is converted via String()", () => {
+		logger.table([{ count: 42 }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(rows[0].includes("42"), `Expected '42' in row, got: ${rows[0]}`);
+	});
+
+	test("boolean cell is converted via String()", () => {
+		logger.table([{ active: true }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes("true"),
+			`Expected 'true' in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("column width accounts for JSON-stringified object length", () => {
+		// Header "headers" is 7 chars; value {"x-foo":"bar"} is 15 chars → column must be ≥15
+		logger.table([{ headers: { "x-foo": "bar" } }]);
+
+		const header = logOutput[0];
+		// The column header "headers" must be padded to at least the value width
+		assert.ok(
+			header.startsWith("headers"),
+			`Header line should start with 'headers', got: ${header}`,
+		);
+		// The data row should contain the JSON without truncation
+		const row = logOutput[2];
+		assert.ok(
+			row.includes('{"x-foo":"bar"}'),
+			`Row should contain full JSON, got: ${row}`,
+		);
 	});
 });
 

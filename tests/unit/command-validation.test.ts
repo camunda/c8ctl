@@ -11,10 +11,12 @@ import {
 	detectUnknownFlags,
 	requireCsvEnum,
 	requireEnum,
-	requireOneOf,
 	requireOption,
+} from "../../src/framework/command-validation.ts";
+import {
+	requireOneOf,
 	requirePositional,
-} from "../../src/command-validation.ts";
+} from "../../src/utils/shared/validation.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 
 // A minimal enum-like object matching the SDK pattern
@@ -251,13 +253,16 @@ describe("requireOneOf", () => {
 
 // ─── validateFlags ───────────────────────────────────────────────────────────
 
-import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
+import type {
+	CommandDef,
+	FlagDef,
+} from "../../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	resolveAlias,
-} from "../../src/command-registry.ts";
-import { validateFlags } from "../../src/command-validation.ts";
+} from "../../src/framework/command-registry.ts";
+import { validateFlags } from "../../src/framework/command-validation.ts";
 
 /** Widened read-only view of COMMAND_REGISTRY for iterating with index signatures. */
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
@@ -437,7 +442,7 @@ describe("validateFlags behaviour", () => {
 function effectiveFlags(
 	def: CommandDef,
 	resource: string | undefined,
-): Record<string, import("../../src/command-registry.ts").FlagDef> {
+): Record<string, import("../../src/framework/command-registry.ts").FlagDef> {
 	if (def.resourceFlags && resource && def.resourceFlags[resource]) {
 		return def.resourceFlags[resource];
 	}
@@ -618,7 +623,7 @@ describe("validateFlags handles repeated-flag arrays", () => {
 
 	const requiredFlag: Record<
 		string,
-		import("../../src/command-registry.ts").FlagDef
+		import("../../src/framework/command-registry.ts").FlagDef
 	> = {
 		owner: { type: "string", description: "Owner", required: true },
 	};
@@ -637,7 +642,7 @@ describe("validateFlags handles repeated-flag arrays", () => {
 
 	const validatedFlag: Record<
 		string,
-		import("../../src/command-registry.ts").FlagDef
+		import("../../src/framework/command-registry.ts").FlagDef
 	> = {
 		num: {
 			type: "string",
@@ -665,6 +670,202 @@ describe("validateFlags handles repeated-flag arrays", () => {
 	});
 });
 
+// ─── validateFlags — multiple:true + validate ────────────────────────────────
+
+/**
+ * `deserializeFlags` validates every element of a `multiple: true` flag
+ * (not just the last), so `validateFlags` — the pre-dispatch chokepoint —
+ * must do the same. Otherwise an earlier invalid element would pass this
+ * check (which only looked at the last element) and then throw uncaught
+ * inside `deserializeFlags` during dispatch, surfacing as an "Unexpected
+ * error" instead of a clean `Invalid --<flag>` message.
+ */
+describe("validateFlags handles multiple:true + validate", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	const multipleValidatedFlag: Record<
+		string,
+		import("../../src/framework/command-registry.ts").FlagDef
+	> = {
+		num: {
+			type: "string",
+			multiple: true,
+			description: "Repeatable number",
+			validate: (v: string) => {
+				if (!/^[0-9]+$/.test(v)) throw new Error("must be numeric");
+				return v;
+			},
+		},
+	};
+
+	test("validates every element, not just the last", () => {
+		// The FIRST value is invalid here — a last-only check would miss it.
+		assert.throws(
+			() => validateFlags({ num: ["abc", "123"] }, multipleValidatedFlag),
+			/process\.exit\(1\)/,
+		);
+		const combined = errorSpy.join("\n");
+		assert.ok(combined.includes("Invalid --num"), combined);
+	});
+
+	test("accepts every element when all are valid", () => {
+		const result = validateFlags(
+			{ num: ["123", "456"] },
+			multipleValidatedFlag,
+		);
+		assert.deepStrictEqual(result.get("num"), ["123", "456"]);
+	});
+
+	test("validates a single occurrence supplied as a plain string", () => {
+		const result = validateFlags({ num: "123" }, multipleValidatedFlag);
+		assert.deepStrictEqual(result.get("num"), ["123"]);
+	});
+
+	test("skips a multiple:true + validate flag that was never supplied", () => {
+		const result = validateFlags({}, multipleValidatedFlag);
+		assert.strictEqual(result.size, 0);
+	});
+});
+
+// ─── validateFlags — multiple:true + required:true ───────────────────────────
+
+/**
+ * A `multiple: true` flag has no last-write-wins semantics — every element
+ * is independently meaningful — so the required-flag presence check must
+ * not look only at the last element the way it does for a non-repeatable
+ * flag.
+ */
+describe("validateFlags handles multiple:true + required:true", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	const requiredMultipleFlag: Record<
+		string,
+		import("../../src/framework/command-registry.ts").FlagDef
+	> = {
+		header: {
+			type: "string",
+			multiple: true,
+			required: true,
+			description: "A required, repeatable header",
+		},
+	};
+
+	test("is not rejected as missing when a non-empty value precedes an empty one", () => {
+		// The LAST occurrence is empty; an earlier one is not. A last-only
+		// presence check would incorrectly report this as missing.
+		assert.doesNotThrow(() =>
+			validateFlags({ header: ["X: 1", ""] }, requiredMultipleFlag),
+		);
+	});
+
+	test("is rejected as missing when every occurrence is empty", () => {
+		assert.throws(
+			() => validateFlags({ header: ["", ""] }, requiredMultipleFlag),
+			/process\.exit\(1\)/,
+		);
+		const combined = errorSpy.join("\n");
+		assert.ok(combined.includes("--header is required"), combined);
+	});
+
+	test("is rejected as missing when never supplied", () => {
+		assert.throws(
+			() => validateFlags({}, requiredMultipleFlag),
+			/process\.exit\(1\)/,
+		);
+	});
+
+	test("is accepted when supplied once as a plain string", () => {
+		assert.doesNotThrow(() =>
+			validateFlags({ header: "X: 1" }, requiredMultipleFlag),
+		);
+	});
+});
+
+// ─── validateFlags — rejectEmpty ─────────────────────────────────────────────
+
+/**
+ * By default an empty occurrence of a flag means "not supplied" and is
+ * dropped before the handler runs. A flag that opts in with
+ * `rejectEmpty: true` must instead fail, so an empty value (e.g. from an
+ * unset shell variable) cannot silently remove part of a request.
+ */
+describe("validateFlags enforces FlagDef.rejectEmpty", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	const flags: Record<
+		string,
+		import("../../src/framework/command-registry.ts").FlagDef
+	> = {
+		activate: {
+			type: "string",
+			multiple: true,
+			rejectEmpty: true,
+			description: "A repeatable flag that rejects empty values",
+		},
+		single: {
+			type: "string",
+			rejectEmpty: true,
+			description: "A single-value flag that rejects empty values",
+		},
+		header: {
+			type: "string",
+			multiple: true,
+			description: "A repeatable flag with the default empty handling",
+		},
+	};
+
+	const rejected: Array<
+		[string, Record<string, string | boolean | (string | boolean)[]>, string]
+	> = [
+		["a single empty occurrence", { activate: "" }, "activate"],
+		[
+			"an empty occurrence after a valid one",
+			{ activate: ["A", ""] },
+			"activate",
+		],
+		[
+			"an empty occurrence before a valid one",
+			{ activate: ["", "A"] },
+			"activate",
+		],
+		// The argv parser reports a string flag given without a value as `true`.
+		["an occurrence without a value", { activate: true }, "activate"],
+		[
+			"a value-less occurrence among valid ones",
+			{ activate: ["A", true] },
+			"activate",
+		],
+		["an empty single-value flag", { single: "" }, "single"],
+	];
+	for (const [name, values, flag] of rejected) {
+		test(`rejects ${name}`, () => {
+			assert.throws(() => validateFlags(values, flags), /process\.exit\(1\)/);
+			const combined = errorSpy.join("\n");
+			assert.ok(
+				combined.includes(`Invalid --${flag}: value must not be empty`),
+				combined,
+			);
+		});
+	}
+
+	test("accepts non-empty values", () => {
+		assert.doesNotThrow(() =>
+			validateFlags({ activate: ["A", "B"], single: "x" }, flags),
+		);
+	});
+
+	test("accepts a flag that was never supplied", () => {
+		assert.doesNotThrow(() => validateFlags({}, flags));
+	});
+
+	test("keeps dropping empty values of flags that do not opt in", () => {
+		assert.doesNotThrow(() => validateFlags({ header: ["X: 1", ""] }, flags));
+	});
+});
+
 // ─── detectUnknownFlags ─────────────────────────────────────────────────────
 
 describe("detectUnknownFlags — non-search verbs", () => {
@@ -684,8 +885,9 @@ describe("detectUnknownFlags — non-search verbs", () => {
 	});
 
 	test("create: valid flags are not flagged", () => {
-		const unknown = detectUnknownFlags("create", "pi", {
+		const unknown = detectUnknownFlags("create", "process-instance", {
 			processDefinitionId: "my-proc",
+			businessId: "order-123",
 			variables: "{}",
 		});
 		assert.deepStrictEqual(unknown, []);

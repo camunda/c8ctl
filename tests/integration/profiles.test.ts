@@ -35,7 +35,9 @@ describe("Profile Management Integration Tests", () => {
 	});
 
 	test("add profile", async () => {
-		const { addProfile, loadProfiles } = await import("../../src/config.ts");
+		const { addProfile, loadProfiles } = await import(
+			"../../src/core/config.ts"
+		);
 
 		addProfile({
 			name: "test-profile",
@@ -55,7 +57,7 @@ describe("Profile Management Integration Tests", () => {
 
 	test("remove profile", async () => {
 		const { addProfile, removeProfile, loadProfiles } = await import(
-			"../../src/config.ts"
+			"../../src/core/config.ts"
 		);
 
 		addProfile({
@@ -74,13 +76,13 @@ describe("Profile Management Integration Tests", () => {
 	});
 
 	test("list profiles shows all profiles", async () => {
-		const { addProfile } = await import("../../src/config.ts");
+		const { addProfile } = await import("../../src/core/config.ts");
 
 		addProfile({ name: "profile1", baseUrl: "http://test1.com" });
 		addProfile({ name: "profile2", baseUrl: "http://test2.com" });
 		addProfile({ name: "profile3", baseUrl: "http://test3.com" });
 
-		const { loadProfiles } = await import("../../src/config.ts");
+		const { loadProfiles } = await import("../../src/core/config.ts");
 		const profiles = loadProfiles();
 
 		assert.strictEqual(profiles.length, 3);

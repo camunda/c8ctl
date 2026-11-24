@@ -5,6 +5,6 @@
     "outDir": "./dist",
     "noEmit": true
   },
-  "include": ["src/**/*", "tests/**/*", "scripts/**/*"],
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "default-plugins/**/*.ts"],
   "exclude": ["node_modules", "dist", "src/templates"]
 }

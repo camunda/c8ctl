@@ -15,13 +15,13 @@ import type {
 	CommandDef,
 	FlagDef,
 	PositionalDef,
-} from "../src/command-registry.ts";
+} from "../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	RESOURCE_ALIASES,
 	SEARCH_FLAGS,
-} from "../src/command-registry.ts";
+} from "../src/framework/command-registry.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -31,6 +31,8 @@ const DOCS_PATH = resolve(ROOT, "docs", "command-reference.md");
 
 export const START_MARKER = "<!-- command-reference:start -->";
 export const END_MARKER = "<!-- command-reference:end -->";
+export const VRL_START_MARKER = "<!-- verb-resource-list:start -->";
+export const VRL_END_MARKER = "<!-- verb-resource-list:end -->";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -275,6 +277,12 @@ export function generateCommandContent(
 			lines.push("");
 		}
 
+		// Docs-only notes (e.g. an exit-code table) — not part of help.
+		if (def.docsNotes && def.docsNotes.length > 0) {
+			lines.push(...def.docsNotes);
+			lines.push("");
+		}
+
 		lines.push("---");
 		lines.push("");
 	}
@@ -287,21 +295,38 @@ export function generateCommandContent(
 	return lines;
 }
 
-/** Generate the README command reference section (nested under ## Command Reference). */
+/**
+ * Generate the README command reference section (a short pointer).
+ *
+ * The full, per-command reference lives in docs/command-reference.md — the source of
+ * truth that is synced to camunda-docs. The README intentionally keeps only the compact
+ * verb/resource list (see generateVerbResourceList) plus this pointer, to avoid
+ * duplicating ~1000 lines of generated content.
+ */
 export function generate(): string {
 	const lines: string[] = [];
 
 	lines.push("## Command Reference");
 	lines.push("");
-	lines.push(
-		"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
-	);
+	lines.push("<!-- Auto-generated pointer. Do not edit manually.");
 	lines.push(
 		"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->",
 	);
 	lines.push("");
-
-	lines.push(...generateCommandContent(3));
+	lines.push(
+		"A compact list of every verb and resource is in [Command Structure](#command-structure) above.",
+	);
+	lines.push("");
+	lines.push(
+		"For the complete reference of every command, flag, resource, and alias, see:",
+	);
+	lines.push("");
+	lines.push(
+		"- [`docs/command-reference.md`](docs/command-reference.md) in this repository, or",
+	);
+	lines.push(
+		"- the [c8ctl command reference](https://docs.camunda.io/docs/next/apis-tools/c8ctl/command-reference/) on docs.camunda.io.",
+	);
 
 	return lines.join("\n");
 }
@@ -316,12 +341,9 @@ export const DOCS_FRONTMATTER = [
 ].join("\n");
 
 export const DOCS_PREAMBLE = [
-	"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
+	"<!-- Auto-generated from COMMAND_REGISTRY in the c8ctl repo. Do not edit manually or in camunda-docs.",
+	"     This page is the source of truth in c8ctl and is synced to camunda-docs automatically.",
 	"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts --docs -->",
-	"",
-	":::warning Alpha feature",
-	"`c8ctl` is in alpha and is not intended for production use. Commands and flags may change without notice between releases. See [Getting started](getting-started.md) for details.",
-	":::",
 ].join("\n");
 
 /** Generate a standalone Docusaurus-compatible command reference page. */
@@ -368,6 +390,73 @@ export function filterVerbSpecificFlags(
 	return result;
 }
 
+// ─── Verb / Resource List ────────────────────────────────────────────────────
+
+/**
+ * Generate the verb and resource summary list from COMMAND_REGISTRY.
+ * This populates the <!-- verb-resource-list:start/end --> markers in README.md.
+ */
+export function generateVerbResourceList(): string {
+	const lines: string[] = [];
+	lines.push(
+		"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
+	);
+	lines.push(
+		"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->",
+	);
+	lines.push("");
+
+	// ── Verbs ──
+	lines.push("**Verbs**:");
+	lines.push("");
+
+	const registry: Record<string, CommandDef> = COMMAND_REGISTRY;
+	for (const [verb, def] of Object.entries(registry)) {
+		const aliasStr =
+			def.aliases && def.aliases.length > 0
+				? ` (alias: \`${def.aliases[0]}\`)`
+				: "";
+		const desc = def.description.replace(/`[^`]*`|(<)/g, (match, lt) =>
+			lt ? "\\<" : match,
+		);
+		lines.push(`- \`${verb}\`${aliasStr} - ${desc}`);
+	}
+	lines.push("");
+
+	// ── Resources ──
+	// Collect canonical resources from domain verbs only (skip utility verbs
+	// whose "resources" are really subcommand arguments like shell names or app names).
+	const UTILITY_VERBS = new Set([
+		"completion",
+		"output",
+		"open",
+		"cluster",
+		"which",
+	]);
+	const canonicalResources = new Set<string>();
+	for (const [verb, def] of Object.entries(registry)) {
+		if (UTILITY_VERBS.has(verb)) continue;
+		for (const r of def.resources) {
+			const canonical = RESOURCE_ALIASES[r] ?? r;
+			canonicalResources.add(canonical);
+		}
+	}
+
+	// Build display: canonical (alias1, alias2)
+	const resourceEntries: string[] = [];
+	for (const canonical of [...canonicalResources].sort()) {
+		const aliases = aliasesForResource(canonical);
+		if (aliases.length > 0) {
+			resourceEntries.push(`${canonical} (${aliases.join(", ")})`);
+		} else {
+			resourceEntries.push(canonical);
+		}
+	}
+	lines.push(`**Resources**: ${resourceEntries.join(", ")}`);
+
+	return lines.join("\n");
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 function main(): void {
@@ -400,19 +489,35 @@ function main(): void {
 		return;
 	}
 
-	const readme = readFileSync(README_PATH, "utf-8");
+	const originalReadme = readFileSync(README_PATH, "utf-8");
+	let readme = originalReadme;
 
+	// ── Sync verb-resource-list section ──
+	const vrlStartIdx = readme.indexOf(VRL_START_MARKER);
+	const vrlEndIdx = readme.indexOf(VRL_END_MARKER);
+
+	if (vrlStartIdx !== -1 && vrlEndIdx !== -1 && vrlStartIdx < vrlEndIdx) {
+		const vrlGenerated = generateVerbResourceList();
+		const vrlBefore = readme.slice(0, vrlStartIdx + VRL_START_MARKER.length);
+		const vrlAfter = readme.slice(vrlEndIdx);
+		readme = `${vrlBefore}\n${vrlGenerated}\n${vrlAfter}`;
+	}
+
+	// ── Sync command-reference section ──
+	// The full command reference lives in docs/command-reference.md (the source of truth
+	// synced to camunda-docs); the README keeps only a short pointer inside the
+	// command-reference markers. The markers are required so that an accidental deletion of
+	// the block is caught by the sync check instead of silently passing.
 	const startIdx = readme.indexOf(START_MARKER);
 	const endIdx = readme.indexOf(END_MARKER);
 
 	if (startIdx === -1 || endIdx === -1) {
 		console.error(
-			`ERROR: README.md is missing ${START_MARKER} and/or ${END_MARKER} markers.`,
+			`ERROR: README.md is missing ${START_MARKER} and/or ${END_MARKER}.`,
 		);
 		process.exit(1);
 	}
-
-	if (startIdx >= endIdx) {
+	if (startIdx > endIdx) {
 		console.error(
 			`ERROR: ${START_MARKER} must appear before ${END_MARKER} in README.md.`,
 		);
@@ -422,24 +527,24 @@ function main(): void {
 	const generated = generate();
 	const before = readme.slice(0, startIdx + START_MARKER.length);
 	const after = readme.slice(endIdx);
-	const updated = `${before}\n\n${generated}\n\n${after}`;
+	readme = `${before}\n\n${generated}\n\n${after}`;
+
+	const updated = readme;
 
 	if (checkMode) {
-		if (updated !== readme) {
-			console.error(
-				"README.md command reference is out of sync with COMMAND_REGISTRY.",
-			);
+		if (updated !== originalReadme) {
+			console.error("README.md is out of sync with COMMAND_REGISTRY.");
 			console.error(
 				"Run: node --experimental-strip-types scripts/sync-readme-commands.ts",
 			);
 			process.exit(1);
 		}
-		console.log("README.md command reference is up to date.");
+		console.log("README.md is up to date.");
 		return;
 	}
 
 	writeFileSync(README_PATH, updated, "utf-8");
-	console.log("README.md command reference updated.");
+	console.log("README.md updated.");
 }
 
 // Only run when executed directly (not when imported by tests)

@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-npm-runtime",
+  "version": "1.0.0",
+  "description": "Fixture: a plugin consuming the cross-platform npm runner from the c8ctl plugin runtime",
+  "type": "module",
+  "main": "c8ctl-plugin.js",
+  "keywords": ["c8ctl-plugin"]
+}

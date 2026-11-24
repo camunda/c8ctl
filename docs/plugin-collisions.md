@@ -68,6 +68,24 @@ install-directory entry for command-name comparisons).
   before its module body is imported. Its top-level side effects do not
   run; none of its commands register.
 
+### The one exception: a plugin disabled by `engines.c8ctl`
+
+A plugin whose declared host requirement this c8ctl does not satisfy
+([plugins.md](plugins.md#the-c8ctl-version-a-plugin-needs)) loses a
+command-name collision to a compatible plugin **regardless of load
+order**. Its own copy of that command exists only to report which c8ctl it
+needs, so letting alphabetical order hand it the name would leave the user
+with a command that always throws while a working implementation sits
+unreachable.
+
+The disabled plugin keeps its entry in `c8ctl help` and its other
+commands. `doctor plugin` reports the takeover as an ordinary command-name
+collision whose `winner` is the compatible plugin, and lists the disabled
+plugin separately under its incompatibility. A default plugin can never be
+on the losing side of this: the requirement is enforced for
+user-installed plugins only, which are the ones versioned independently of
+the c8ctl they run on.
+
 ### Why not stricter policies
 
 The issue listed several candidates; we deliberately picked the cheapest

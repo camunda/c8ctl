@@ -1,0 +1,12 @@
+{
+  "name": "c8ctl-plugin-host-requirement",
+  "version": "2.1.0",
+  "description": "Fixture: a plugin that declares the c8ctl it needs via engines.c8ctl (#523)",
+  "type": "module",
+  "main": "c8ctl-plugin.js",
+  "keywords": ["c8ctl-plugin"],
+  "engines": {
+    "node": ">=22",
+    "c8ctl": ">=4.0.0-alpha.1"
+  }
+}

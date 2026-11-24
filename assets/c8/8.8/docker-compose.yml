@@ -4,7 +4,7 @@ networks:
 services:
   postgres:
     container_name: postgres
-    image: postgres:17.5-alpine
+    image: postgres:18.6-alpine
     ports:
       - '5432:5432'
     environment:
@@ -15,7 +15,7 @@ services:
       - zeebe_network
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.8
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.20
     container_name: elasticsearch
     profiles: ['elasticsearch']
     environment:
@@ -39,7 +39,7 @@ services:
       - ./els-snapshots:/usr/local/els-snapshots
 
   opensearch:
-    image: opensearchproject/opensearch:2.19.4
+    image: opensearchproject/opensearch:3.8.0
     container_name: opensearch
     profiles: ['opensearch']
     environment:
@@ -62,23 +62,23 @@ services:
     networks:
       - zeebe_network
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.18.8
-    profiles: ['elasticsearch']
-    ports:
-      - 5601:5601
-    environment:
-      - elasticsearch.hosts=http://elasticsearch:9200
-    depends_on:
-      - elasticsearch
-    networks:
-      - zeebe_network
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.18.8
+  #   profiles: ['elasticsearch']
+  #   ports:
+  #     - 5601:5601
+  #   environment:
+  #     - elasticsearch.hosts=http://elasticsearch:9200
+  #   depends_on:
+  #     - elasticsearch
+  #   networks:
+  #     - zeebe_network
 
   keycloak:
     depends_on:
       - postgres
     container_name: keycloak
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.7
     command: start-dev --http-relative-path=/auth
     ports:
       - '18080:8080'
@@ -100,7 +100,7 @@ services:
 
   camunda:
     container_name: camunda
-    image: camunda/camunda:8.8-SNAPSHOT
+    image: camunda/camunda:${CAMUNDA_VERSION}
     environment:
       - 'JAVA_TOOL_OPTIONS=-Xms512m -Xmx1g'
       - ZEEBE_BROKER_NETWORK_HOST=camunda

@@ -20,18 +20,21 @@ import {
 	generate,
 	generateCommandContent,
 	generateDocs,
+	generateVerbResourceList,
 	renderFlagsTable,
 	renderPositionals,
 	resourceDisplay,
 	START_MARKER,
 	uniqueAliases,
+	VRL_END_MARKER,
+	VRL_START_MARKER,
 } from "../../scripts/sync-readme-commands.ts";
-import type { CommandDef } from "../../src/command-registry.ts";
+import type { CommandDef } from "../../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	SEARCH_FLAGS,
-} from "../../src/command-registry.ts";
+} from "../../src/framework/command-registry.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,19 +55,48 @@ function verbSection(output: string, verb: string): string {
 /** Widened registry for iteration */
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
 
-// ─── generate() structural tests ─────────────────────────────────────────────
+// ─── generate() README pointer tests ─────────────────────────────────────────
 
-describe("generate() output structure", () => {
+describe("generate() README pointer", () => {
 	const output = generate();
 
 	test("starts with Command Reference heading", () => {
 		assert.ok(output.startsWith("## Command Reference"));
 	});
 
-	test("contains auto-generated notice as HTML comment", () => {
-		assert.ok(output.includes("<!-- Auto-generated from COMMAND_REGISTRY"));
+	test("contains auto-generated pointer notice as HTML comment", () => {
+		assert.ok(output.includes("<!-- Auto-generated pointer"));
 		assert.ok(output.includes("-->"));
 	});
+
+	test("links to the in-repo command reference", () => {
+		assert.ok(output.includes("docs/command-reference.md"));
+	});
+
+	test("links to the command reference on docs.camunda.io", () => {
+		// Use a regex match rather than String.includes on a URL literal to avoid
+		// CodeQL's js/incomplete-url-substring-sanitization false positive — this is
+		// a docs-link presence assertion, not URL validation.
+		assert.match(
+			output,
+			/docs\.camunda\.io\/docs\/next\/apis-tools\/c8ctl\/command-reference/,
+		);
+	});
+
+	test("references the Command Structure section", () => {
+		assert.ok(output.includes("#command-structure"));
+	});
+
+	test("does not embed the full per-command reference", () => {
+		assert.ok(!output.includes("### Global Flags"));
+		assert.ok(!output.includes("### Commands"));
+	});
+});
+
+// ─── Full command content (README-level, headingBase=3) structure ────────────
+
+describe("generateCommandContent(3) output structure", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	test("contains Global Flags section", () => {
 		assert.ok(output.includes("### Global Flags"));
@@ -108,8 +140,8 @@ describe("generate() output structure", () => {
 
 // ─── Every verb in the registry appears in generated output ──────────────────
 
-describe("generate() includes all registry verbs", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes all registry verbs", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const verb of Object.keys(REGISTRY)) {
 		test(`verb "${verb}" appears as a heading`, () => {
@@ -123,8 +155,8 @@ describe("generate() includes all registry verbs", () => {
 
 // ─── Every verb description appears ─────────────────────────────────────────
 
-describe("generate() includes verb descriptions", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes verb descriptions", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		test(`verb "${verb}" shows its description`, () => {
@@ -142,7 +174,7 @@ describe("generate() includes verb descriptions", () => {
 // ─── MDX angle bracket escaping ──────────────────────────────────────────────
 
 describe("verbDescription escapes bare angle brackets for MDX", () => {
-	const output = generate();
+	const output = generateCommandContent(3).join("\n");
 
 	test("help verb description escapes bare <command> to \\<command>", () => {
 		assert.ok(
@@ -176,8 +208,8 @@ describe("verbDescription escapes bare angle brackets for MDX", () => {
 
 // ─── Global flags all appear ─────────────────────────────────────────────────
 
-describe("generate() includes all global flags", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes all global flags", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const flagName of Object.keys(GLOBAL_FLAGS)) {
 		test(`global flag "--${flagName}" appears`, () => {
@@ -191,8 +223,8 @@ describe("generate() includes all global flags", () => {
 
 // ─── Search flags all appear ─────────────────────────────────────────────────
 
-describe("generate() includes all search flags", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes all search flags", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const flagName of Object.keys(SEARCH_FLAGS)) {
 		test(`search flag "--${flagName}" appears`, () => {
@@ -206,8 +238,8 @@ describe("generate() includes all search flags", () => {
 
 // ─── Resource aliases appear ─────────────────────────────────────────────────
 
-describe("generate() includes resource aliases", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes resource aliases", () => {
+	const output = generateCommandContent(3).join("\n");
 	const aliases = uniqueAliases();
 
 	for (const { alias, canonical } of aliases) {
@@ -222,8 +254,8 @@ describe("generate() includes resource aliases", () => {
 
 // ─── Verbs with aliases show them ────────────────────────────────────────────
 
-describe("generate() shows verb aliases", () => {
-	const output = generate();
+describe("generateCommandContent(3) shows verb aliases", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		if (def.aliases && def.aliases.length > 0) {
@@ -241,8 +273,8 @@ describe("generate() shows verb aliases", () => {
 
 // ─── Verbs with examples show them ───────────────────────────────────────────
 
-describe("generate() includes help examples", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes help examples", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		if (def.helpExamples && def.helpExamples.length > 0) {
@@ -260,8 +292,8 @@ describe("generate() includes help examples", () => {
 
 // ─── Verbs with positionals show them ────────────────────────────────────────
 
-describe("generate() includes positional arguments", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes positional arguments", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		if (!def.resourcePositionals) continue;
@@ -281,8 +313,8 @@ describe("generate() includes positional arguments", () => {
 
 // ─── Verbs with resource-specific flags show them ────────────────────────────
 
-describe("generate() includes resource-specific flags", () => {
-	const output = generate();
+describe("generateCommandContent(3) includes resource-specific flags", () => {
+	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		if (!def.resourceFlags) continue;
@@ -303,7 +335,7 @@ describe("generate() includes resource-specific flags", () => {
 // ─── Resource alias display in resource-specific flag summaries ──────────────
 
 describe("resource-specific flag summaries include aliases", () => {
-	const output = generate();
+	const output = generateCommandContent(3).join("\n");
 
 	test('process-instance summary shows alias "pi"', () => {
 		assert.ok(
@@ -554,6 +586,29 @@ describe("README.md markers", () => {
 		const endIdx = readme.indexOf(END_MARKER);
 		assert.ok(startIdx < endIdx, "Start marker must appear before end marker");
 	});
+
+	test("contains verb-resource-list start marker", () => {
+		assert.ok(
+			readme.includes(VRL_START_MARKER),
+			`README.md is missing ${VRL_START_MARKER}`,
+		);
+	});
+
+	test("contains verb-resource-list end marker", () => {
+		assert.ok(
+			readme.includes(VRL_END_MARKER),
+			`README.md is missing ${VRL_END_MARKER}`,
+		);
+	});
+
+	test("verb-resource-list start marker appears before end marker", () => {
+		const startIdx = readme.indexOf(VRL_START_MARKER);
+		const endIdx = readme.indexOf(VRL_END_MARKER);
+		assert.ok(
+			startIdx < endIdx,
+			"VRL start marker must appear before end marker",
+		);
+	});
 });
 
 // ─── README is in sync (same assertion as --check mode) ──────────────────────
@@ -575,12 +630,33 @@ describe("README.md sync check", () => {
 			"README.md command reference is out of sync. Run: npm run sync:readme",
 		);
 	});
+
+	test("verb-resource-list content matches what is in README", () => {
+		const readme = readFileSync(README_PATH, "utf-8");
+		const startIdx = readme.indexOf(VRL_START_MARKER);
+		const endIdx = readme.indexOf(VRL_END_MARKER);
+		assert.ok(
+			startIdx !== -1 && endIdx !== -1,
+			"README.md is missing verb-resource-list markers",
+		);
+
+		const generated = generateVerbResourceList();
+		const before = readme.slice(0, startIdx + VRL_START_MARKER.length);
+		const after = readme.slice(endIdx);
+		const expected = `${before}\n${generated}\n${after}`;
+
+		assert.strictEqual(
+			readme,
+			expected,
+			"README.md verb-resource list is out of sync. Run: npm run sync:readme",
+		);
+	});
 });
 
 // ─── No verb in the registry is missing from the generated output ────────────
 
-describe("generate() completeness guard", () => {
-	const output = generate();
+describe("generateCommandContent(3) completeness guard", () => {
+	const output = generateCommandContent(3).join("\n");
 	const verbHeadings = [...output.matchAll(/^#### `(\S+)`$/gm)].map(
 		(m) => m[1],
 	);
@@ -671,11 +747,6 @@ describe("generateDocs() output structure", () => {
 		assert.ok(output.includes(DOCS_PREAMBLE));
 	});
 
-	test("includes alpha warning admonition", () => {
-		assert.ok(output.includes(":::warning Alpha feature"));
-		assert.ok(output.includes(":::"));
-	});
-
 	test("uses ## for top-level sections (not ###)", () => {
 		assert.ok(output.includes("## Global Flags"));
 		assert.ok(output.includes("## Commands"));
@@ -710,9 +781,5 @@ describe("generateDocs() output structure", () => {
 	test("does not contain README markers", () => {
 		assert.ok(!output.includes(START_MARKER));
 		assert.ok(!output.includes(END_MARKER));
-	});
-
-	test("links to getting-started.md in alpha warning", () => {
-		assert.ok(output.includes("[Getting started](getting-started.md)"));
 	});
 });

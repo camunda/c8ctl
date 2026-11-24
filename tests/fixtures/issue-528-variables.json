@@ -1,0 +1,94 @@
+{
+  "discoveryQuestions": [
+    {
+      "id": "Question 1",
+      "q": "For one recent completed production case per routed case type, which elements of the exported main BPD and six called subprocesses executed, and are the disconnected `Trigger Handle Correction of Error Payment`, `TriggerHandleCase`, and Shares helper artifacts externally invoked, obsolete, or still required?",
+      "d": "AI Proposal: Retain the exported main BPD, all six routed subprocesses, and flag disconnected artifacts as required until production traces and an owner-approved disposition prove they may be omitted.",
+      "a": "Retain the exported main BPD, all six routed subprocesses, and flag disconnected artifacts as required until production traces and an owner-approved disposition prove they may be omitted."
+    },
+    {
+      "id": "Question 2",
+      "q": "For every exported Coach/human activity, what evidence confirms user-task versus manual-task semantics, its form and input/output contract, candidate group, authorization visibility, claim/reassign/postpone behavior, due date, escalation, priority, and completion or termination outcomes?",
+      "d": "AI Proposal: Preserve an engine-managed human wait as a Camunda user task and use a manual task only where evidence proves the work has no workflow UI, assignment, or completion state.",
+      "a": "Preserve an engine-managed human wait as a Camunda user task and use a manual task only where evidence proves the work has no workflow UI, assignment, or completion state."
+    },
+    {
+      "id": "Question 3",
+      "q": "Who currently owns each exported participant queue and Process Operations queue, and for POOL and PAL Tax who may calculate, control, approve, reject, reassign, escalate, and authorize termination without violating four-eyes separation?",
+      "d": "AI Proposal: Provisionally retain the exported scenario-specific groups and distinct calculate/control tasks, with no self-approval, until current owners approve the identity and authorization mapping.",
+      "a": "Provisionally retain the exported scenario-specific groups and distinct calculate/control tasks, with no self-approval, until current owners approve the identity and authorization mapping."
+    },
+    {
+      "id": "Question 4",
+      "q": "For every COEP, Divorces, Shares Buy, and Shares Sell timer/message race, what are the active duration, business calendar, timezone, message name, correlation key, payload, trigger owner, buffering/TTL, authorization, interrupting behavior, and late, duplicate, or unmatched-message rule?",
+      "d": "AI Proposal: Preserve each exported event race and historical calendar provisionally; do not implement polling or invent correlation, buffering, or duplicate rules without current runtime evidence.",
+      "a": "Preserve each exported event race and historical calendar provisionally; do not implement polling or invent correlation, buffering, or duplicate rules without current runtime evidence."
+    },
+    {
+      "id": "Question 5",
+      "q": "For each exported boundary error/message and Process Operations handler `01`–`06`, `08`, `09`, and `11`, which named faults follow the modeled human recovery path, which are retryable technical failures, and what retry, termination, PDF, and successful-correction outcome is required?",
+      "d": "AI Proposal: Preserve every exported human exception route and termination/PDF outcome; use bounded worker retries only for proven transient faults and route exhausted or modeled faults to the historical recovery path.",
+      "a": "Preserve every exported human exception route and termination/PDF outcome; use bounded worker retries only for proven transient faults and route exhausted or modeled faults to the historical recovery path."
+    },
+    {
+      "id": "Question 6",
+      "q": "Which IBM KPI events and stages (`Case Start`, `START`, `CLAIM`, `NEW_DUE_DATE`, `RELOAD`, POOL/HANDLE/FINISH, `END`, `TERMINATE`) are emitted today, what does each mean, and which writer, table, key, and timestamp prove its Camunda milestone mapping?",
+      "d": "AI Proposal: Preserve all exported case- and step-level stage names, identifiers, and timestamps as explicit milestones until a production extract proves which stages are active and how they are persisted.",
+      "a": "Preserve all exported case- and step-level stage names, identifiers, and timestamps as explicit milestones until a production extract proves which stages are active and how they are persisted."
+    },
+    {
+      "id": "Question 7",
+      "q": "For each populated `PENCO SI.xlsx` row—`GetEmployeeSessionUserContext`, `GetCustomerBasicInformation`, `GetCustomerAdvisorData`, `getEmployeeData`, `ManageCustomerComments`, `GetAccountListV1`, `GeneratePDF`, and `Notification Mail to Requestor`—what exact exported wrapper/operation is used today, what recent trace proves current usage, and what owner-approved successor contract and test prove field, fault, security, side-effect, and outcome parity?",
+      "d": "AI Proposal: All seven WSDL rows have confirmed historical export matches and the mail row has confirmed modeled behavior, but every current-use status and successor parity remains unverified; mail has no target contract.",
+      "a": "All seven WSDL rows have confirmed historical export matches and the mail row has confirmed modeled behavior, but every current-use status and successor parity remains unverified; mail has no target contract."
+    },
+    {
+      "id": "Question 8",
+      "q": "For every active legacy or successor interface, what are the accountable owner, environment endpoint, service identity, authentication/TLS/secrets mechanism, payload version, timeout, fault contract, retry/backoff policy, idempotency key, correlation ID, reconciliation behavior, and runtime support evidence?",
+      "d": "AI Proposal: Keep each legacy operation behind a one-operation compatibility worker until its owner approves a successor contract and production-like evidence for security, timeout, faults, retries, idempotency, and reconciliation.",
+      "a": "Keep each legacy operation behind a one-operation compatibility worker until its owner approves a successor contract and production-like evidence for security, timeout, faults, retries, idempotency, and reconciliation."
+    },
+    {
+      "id": "Question 9",
+      "q": "Which exported integrations omitted from `PENCO SI.xlsx`—including KPI registration, DSP/e-sign/RabbitMQ, update-comment, auxiliary population/overflow/advisor lookup, and casehandler-email paths—are active, inherited but unused, or replaced by manual work, and what production trace supports each classification?",
+      "d": "AI Proposal: Retain all omitted exported integrations as unresolved crosswalk entries; classify none as removable until a deployed-model reference or recent production trace proves its status.",
+      "a": "Retain all omitted exported integrations as unresolved crosswalk entries; classify none as removable until a deployed-model reference or recent production trace proves its status."
+    },
+    {
+      "id": "Question 10",
+      "q": "What canonical case/correction identity links IBM BPM, each Camunda instance and task, every external request and side effect, comments, documents, mail, and KPI history, and where are duplicate detection and reconciliation outcomes recorded?",
+      "d": "AI Proposal: Use the authoritative IBM case/correction identity as the root correlation key and retain external request IDs plus attempt and outcome records, subject to confirmation from production data.",
+      "a": "Use the authoritative IBM case/correction identity as the root correlation key and retain external request IDs plus attempt and outcome records, subject to confirmation from production data."
+    },
+    {
+      "id": "Question 11",
+      "q": "What is the approved current COEP wait rule: the exported `COEP Timer_60days` label, “Wait 3 months or Adhoc,” or the script-calculated 90 business days, and which calendar and production case prove it?",
+      "d": "AI Proposal: No duration is sufficiently evidenced for acceptance; retain the conflict explicitly and require the current rule owner to confirm it with calendar configuration and a recent case trace.",
+      "a": "No duration is sufficiently evidenced for acceptance; retain the conflict explicitly and require the current rule owner to confirm it with calendar configuration and a recent case trace."
+    },
+    {
+      "id": "Question 12",
+      "q": "Is closure mail sent to the advisor/creator, the generic “requestor,” or another role, and what recipient rule, email-decision input, template, delivery evidence, retry, and deduplication contract applies?",
+      "d": "AI Proposal: Preserve advisor/creator as the provisional recipient because that is the exported executable behavior, pending owner confirmation of the broader spreadsheet wording.",
+      "a": "Preserve advisor/creator as the provisional recipient because that is the exported executable behavior, pending owner confirmation of the broader spreadsheet wording."
+    },
+    {
+      "id": "Question 13",
+      "q": "Which target contracts separately replace employee profile lookup, IBM session/security `UserContext`, and customer–advisor relationship lookup, and what test proves that Employees API V2 does not collapse these distinct semantics?",
+      "d": "AI Proposal: Treat Employees API V2 only as an employee-profile candidate; retain separate identity/session and customer–advisor relationship capabilities until contract tests prove otherwise.",
+      "a": "Treat Employees API V2 only as an employee-profile candidate; retain separate identity/session and customer–advisor relationship capabilities until contract tests prove otherwise."
+    },
+    {
+      "id": "Question 14",
+      "q": "From a current open-case export, which active task/subprocess/timer/message, assignment, incident/retry, external side effect, document, mail, and KPI-history states exist, and for each state will cases drain, remain on IBM in parallel, or be explicitly recreated with approved rollback and sign-off?",
+      "d": "AI Proposal: Default to drain or controlled parallel run; recreate only explicitly inventoried states with owner-approved correlation, deduplication, reconciliation, and rollback because Camunda migration cannot transfer IBM instances.",
+      "a": "Default to drain or controlled parallel run; recreate only explicitly inventoried states with owner-approved correlation, deduplication, reconciliation, and rollback because Camunda migration cannot transfer IBM instances."
+    },
+    {
+      "id": "Question 15",
+      "q": "For a named recent period and by case type, what measured intake, completion, termination, backlog, median/P90 wall-clock time, queue/message/timer wait, active time, retries, exceptions, rework, and manual touches exist, what does “token usage” mean and at what grain is it measured, and which extracts and formulas reconcile one completed and one reworked case to KPI stages?",
+      "d": "AI Proposal: No measured runtime baseline or defined token metric is available; require source extracts, formulas, and case-level reconciliation before setting lift-and-shift timing or capacity acceptance thresholds.",
+      "a": "No measured runtime baseline or defined token metric is available; require source extracts, formulas, and case-level reconciliation before setting lift-and-shift timing or capacity acceptance thresholds."
+    }
+  ]
+}

@@ -102,21 +102,67 @@ export const commands = {
 };
 ```
 
+### Where flags go on the command line
+
+c8ctl parses the command line in two stages. Stage 1 reads only c8ctl's **global** flags from the front of the line and stops at the first positional — the command name. Stage 2 parses everything after the command name against `global flags ∪ the command's own flags`. So a plugin flag must follow the command name (`c8ctl my-command --label x`). `c8ctl --label x my-command` is rejected with an error that says so — `Flag --label is not a global flag; command-specific flags go after the command. Did you mean: c8ctl my-command --label x` — rather than treating `x` as the command. (The corrected order is suggested only when the plugin declares the flag; otherwise the error lists the global flags that are allowed before a command.) Global flags are accepted on either side of the command name. A plugin flag may reuse the name of a built-in verb's flag (such as `--limit`); only collisions with global flags are blocked.
+
 ### Flag Definition Structure
 
 Each flag can have the following properties:
 
 - `type`: `'string'` or `'boolean'` (required)
-- `description`: Describes the flag for documentation purposes (required). Not currently shown in `c8ctl help` output.
+- `description`: Describes the flag (required). It is shown next to the flag in the `Flags:` block of `c8ctl help <command>`.
 - `short`: Single-character alias (optional, e.g., `'s'` for `-s`)
 - `required`: When `true`, the CLI exits with an error if the flag is omitted (optional, defaults to `false`)
+- `multiple`: When `true` (string flags only), the flag may be repeated and the handler receives an array
 
-> **Important:** Plugin flags are checked against c8ctl's built-in flags at runtime with different consequences depending on where the collision occurs:
-> - **Long-name collision** (e.g. `--output`, `--verbose`, `--dry-run`): the entire plugin flag is dropped. A warning is emitted and the handler will not receive the value.
-> - **Long-name collision combined with `required: true`**: the command is **unsatisfiable** — the colliding token is always stripped from argv before the plugin parser sees it, so no user input can satisfy the requirement. c8ctl refuses to dispatch the command and exits with an actionable error directing the plugin author to rename the flag (#364).
-> - **Short-alias collision** (e.g. `-v`, `-o`, `-h`): only the short alias is stripped. The long flag name still works — `--myflag value` is parsed correctly, but `-m value` is not.
->
-> Avoid long names like `--output`, `--limit`, `--all`, `--asc`, `--desc`, `--sort-by`, `--dry-run`, `--verbose`, `--fields`, `--profile`, `--help`, `--version`, and short aliases `-o`, `-l`, `-v`, `-p`, `-h`.
+#### Reserved names (flags c8ctl consumes itself)
+
+Only c8ctl's **global** flags are reserved. A plugin flag cannot use these names, because c8ctl consumes them before the plugin sees the command line:
+
+| Long name | Short |
+|-----------|-------|
+| `--help` | `-h` |
+| `--version` | `-v` |
+| `--profile` | |
+| `--dry-run` | |
+| `--verbose` | |
+| `--quiet` | `-q` |
+| `--fields` | |
+| `--json` | |
+| `--yes` | `-y` |
+
+Everything else is yours, including names that some built-in commands use, such as `--limit`, `--all`, `--asc`, `--desc`, `--sortBy`, `--id` or `--name`. A plugin flag only ever competes with the globals.
+
+What happens when a plugin declares a reserved name:
+
+- **Long name** (e.g. `--verbose`): the plugin flag is never delivered; c8ctl treats the token as the global. It is left out of `c8ctl help <command>`. If a user types it, c8ctl warns that the flag is reserved and not passed to the plugin. Nothing is printed on invocations that do not use it, and `c8ctl doctor plugin` lists every such declaration for the plugin author.
+- **Long name with `required: true`**: the command can never succeed, so c8ctl refuses to run it and exits with an actionable error asking the author to rename the flag.
+- **Short alias** (e.g. `short: 'y'`): only the alias is dropped. The long flag keeps working, `c8ctl help` does not advertise the alias, and typing the alias warns.
+
+#### Reading global values: the `ctx` argument
+
+A flag handler is called as `handler(args, flags, ctx)`. Read global flags from `ctx`, not from `flags`:
+
+| Global flag | `ctx` field |
+|-------------|-------------|
+| `--profile` (or the session profile) | `ctx.profile` |
+| `--dry-run` | `ctx.dryRun` |
+| `--verbose` | `ctx.verbose` |
+| `--quiet` | `ctx.quiet` |
+| `--json` / session output mode | `ctx.outputMode` |
+| `--yes` | `ctx.yes` |
+| `--fields` | `ctx.fields` |
+
+`ctx` also carries `ctx.logger`, `ctx.prompt` and a lazily created `ctx.client`. A bare-function handler receives `ctx` as its third argument too, after a `flags` argument that is `undefined`. Undeclared flags the user typed (for example a mistyped `--harnes`) are warned about and dropped by the host; their names are exposed as `ctx.unrecognizedFlags` so destructive commands can reject them instead of running with a broader scope than intended. Option-like values a string flag swallowed (for example `--fields -harness=cursor`) remain ordinary values — the host exposes them as `ctx.suspiciousFlagValues` without warning, so destructive commands can reject them while other plugins keep receiving them.
+
+#### How flag values are parsed
+
+- `--foo=x` and `--foo x` both give `foo: "x"`.
+- A string flag given **no value** — because the next token is another flag, or the line ends — gives `foo: true`. It never swallows the next flag: `--foo --bar` gives `foo: true` and `bar: true`. (Use `--foo=` for an explicit empty string.)
+- A value that only *starts* with a dash but is not a flag the command knows is still a value: `--foo -5` gives `foo: "-5"`.
+- After a `--` terminator nothing is parsed as a flag.
+- A flag the plugin did not declare (and that is not a global) is **not delivered**. c8ctl prints a warning, `Unknown flag --x for '<command>'; declared flags: ...`, and runs the command anyway. The warning is also printed for bare-function commands, which declare no flags.
 
 ### Example with Flags
 
@@ -175,6 +221,50 @@ Commands declared as bare functions continue to work unchanged:
 - The handler signature `async (args)` remains valid
 - No migration required for commands that don't use custom flags
 
+### A bare-function handler receives only positionals
+
+**A bare-function command (`'my-command': async (args) => { ... }`) is handed only the parsed positional arguments that follow the command name. It never sees any flag.** The host parses the command line itself; every flag the command did not declare is consumed and discarded before the handler runs — c8ctl's global flags (`--profile`, `--json`, `--yes`, ...) take effect in the host, and unknown flags such as `--purge` or `--stdin` are dropped (the handler cannot even tell they were typed; c8ctl prints an `Unknown flag ... for '<command>'` warning so the user notices). A handler that checks `args.includes('--purge')` will never see it true.
+
+A command that needs flags must opt into one of the two supported forms:
+
+| Need | Use | The handler receives |
+|------|-----|----------------------|
+| A fixed set of flags you can enumerate | `{ flags, handler }` (see [Plugin Flags](#plugin-flags)) | `args` (positionals) and `flags` (typed, validated values) |
+| The raw command line, e.g. to forward to another tool, or a flag set you cannot enumerate | `passthrough: true` in the command's metadata (below) | `args` = every token after the command name except c8ctl's global flags |
+
+Do **not** work around this by re-reading `process.argv` inside a handler: it duplicates the host's global-flag handling, breaks when a global flag sits between the tokens you are looking for, and bypasses help and validation.
+
+### Passthrough commands
+
+```javascript
+export const metadata = {
+  name: 'my-plugin',
+  commands: {
+    'my-command': {
+      description: 'Wraps some-tool',
+      passthrough: true,
+      // Required: names the boundary in `c8ctl help my-command`.
+      passthroughHint: 'Forwards everything after the command name to some-tool',
+      // Optional documentation; the plugin or tool parses these arguments.
+      flagsHint: ['--purge  Also delete data'],
+    },
+  },
+};
+
+export const commands = {
+  // Bare function; the third argument is the plugin host context.
+  'my-command': async (args, _flags, ctx) => {
+    // args: ['start', '--debug', 'x'] for `c8ctl my-command start --debug x`
+  },
+};
+```
+
+- A command is **either** passthrough **or** `{ flags, handler }` — declaring both is rejected at load time, so a command cannot mix declared flags with raw ones. A command whose subcommands need both (like `cluster`, which has its own `--purge` and forwards arbitrary flags to `c8run secrets`) should be a passthrough command and parse its own flags.
+- c8ctl strips only its **global** flags (`--help`, `--version`/`-v`, `--profile`, `--dry-run`, `--verbose`, `--quiet`/`-q`, `--fields`, `--json`, `--yes`/`-y`), including the value of string-typed ones. They are not forwarded. If the wrapped tool needs one of those names (for example `--yes`), read the host's interpretation from `ctx` (`ctx.yes`, `ctx.profile`, `ctx.dryRun`, ...) and forward it explicitly.
+- A `--` terminator is forwarded too, and everything after it verbatim, global flag names included.
+- `flagsHint` documents flags handled by the plugin or underlying tool. It does not declare host-parsed flags or shell completions. Passthrough flag completion offers only global flags; subcommands and file completion remain available.
+- Use `passthroughHint` to describe which arguments the plugin handles and which it forwards. For example, `cluster secrets` handles a leading `--c8-version` and forwards `--physical-tenant` unchanged to c8run.
+
 ## Plugin Runtime API
 
 At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8ctl`.
@@ -183,8 +273,60 @@ At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8
 - SDK client factory: `createClient(profile?, sdkConfig?)`
 - Tenant resolver: `resolveTenantId(profile?)`
 - Logger accessor: `getLogger()`
+- User data directory: `getUserDataDir()`
+- Camunda Desktop Modeler data directory: `getModelerDataDir()`
+- Cross-platform npm runner: `npm({ args, stdout?, stdio? })`
 
 Use the client factory when your plugin needs direct Camunda API access, `resolveTenantId` to mirror c8ctl tenant fallback behavior, and `getLogger()` to emit output-mode-aware logs.
+
+### Logger output
+
+`logger.info(message)` writes plain text to stdout in text mode and a `{"status":"info","message":"..."}` envelope to stderr in JSON mode. Pass `{ stream: "stdout" }` as the second argument for a primary result, or `{ stream: "stderr" }` for a diagnostic in either mode. Formatting remains mode-aware; the override affects only that call and does not apply `--fields` filtering.
+
+Use `logger.output(content)` for raw stdout content and `logger.json(data)` for structured data with `--fields` filtering.
+
+With `--quiet`, `logger.info` and `logger.success` print nothing, except that `logger.success(message, key)` still prints the key (bare on stdout in text mode; JSON mode keeps the record). Pass `{ essential: true }` to `logger.info` when the message is the command's answer or explains a warning or error, so it still prints. Data written with `logger.output`, `logger.json` or `logger.table`, warnings and errors are never hidden.
+
+### Declaring the c8ctl version you need
+
+This surface grows: `npm({ ... })` is newer than the rest of it, and a plugin calling it on an older c8ctl gets `TypeError: c8ctl.npm is not a function` from inside its own handler. Declare the floor instead, in the plugin's `package.json` (#523):
+
+```json
+{
+  "engines": {
+    "c8ctl": ">=4.0.0-alpha.1"
+  }
+}
+```
+
+c8ctl then refuses `load plugin` / `upgrade plugin` / `downgrade plugin` on a host that is too old, and disables the plugin's commands with a message naming the required and running versions, rather than letting them fail deeper in. `doctor plugin` reports the requirement and any incompatibility in text and `--json`.
+
+Range evaluation delegates to `semver` (npm's own library for `engines` fields), with `includePrerelease` on, so the full npm range grammar is supported — comparators (`>=`, `>`, `<=`, `<`, `^`, `~`, an exact version, `*`), set unions (`"^3 || ^4"`), hyphen ranges (`"3.3.0 - 4.0.0"`), and partial or wildcard versions (`"^4"`, `"4.x"`). Prereleases order as semver specifies (`>=4.0.0` excludes `4.0.0-alpha.1`, and `^4.1.0` excludes `5.0.0-alpha.1`).
+
+A range `semver` cannot parse (`"latest"`, `">=four"`) lands on the same fail-open path as c8ctl running as an unpublished development build: the plugin stays fully enabled, because the check never disables a plugin over a question it could not answer. See [docs/plugins.md](docs/plugins.md#the-c8ctl-version-a-plugin-needs) for the user-facing view.
+
+### Running npm from a plugin
+
+Use `c8ctl.npm()` rather than spawning npm yourself. On Windows npm is a `npm.cmd` shim: a bare `npm` spawn fails with `ENOENT`, and `npm.cmd` alone fails with `EINVAL` under the CVE-2024-27980 hardening in Node 18.20.2 / 20.12.2 / 21.7.3+. The runtime helper routes the call through `cmd.exe` with every argument quoted (plugin paths routinely contain spaces) and rejects arguments that cannot be passed safely — an embedded `"`, a line break, or a `%VAR%` reference.
+
+```typescript
+// Capture stdout
+const { stdout } = c8ctl.npm({ args: ['view', 'c8ctl-plugin-foo', 'version'], stdout: true });
+
+// Stream to the terminal instead (stdio is forwarded to the child)
+c8ctl.npm({ args: ['install', 'c8ctl-plugin-foo'], stdio: 'inherit' });
+```
+
+`stdout: true` returns `{ stdout: string }`; omitting it returns `undefined`. A non-zero npm exit throws.
+
+#### Installing into a directory with `--prefix`
+
+`npm install --prefix <dir>` with no package spec misbehaves on Windows: npm applies the CLI `--prefix` to the global prefix too, and because the Windows global install root is `<prefix>\node_modules` (rather than `<prefix>/lib/node_modules` as on POSIX) npm decides the install is global, rewrites the empty argument list to `.`, and resolves that against the process cwd — so it reads the wrong `package.json` ([#526](https://github.com/camunda/c8ctl/issues/526)). `c8ctl.npm()` detects this exact shape on Windows and instead runs npm with its cwd set to the prefix directory, which is equivalent and correct. Plugins do not need to change their cwd or use an npm-specific option form, and POSIX invocations are untouched. The re-scope is bounded (`--workspaces=false`) so npm resolves exactly that directory rather than promoting the install to a workspace root above it, and a prefix that is itself a workspace root is left untouched.
+
+```typescript
+// Works the same on Linux, macOS and Windows
+c8ctl.npm({ args: ['install', '--prefix', projectDir], stdout: true });
+```
 
 For TypeScript autocomplete, use the exported runtime type:
 
@@ -381,7 +523,7 @@ The plugin loader ([src/plugin-loader.ts](src/plugin-loader.ts)) provides:
 
 ### Help Command
 
-The help command ([src/commands/help.ts](src/commands/help.ts)):
+The help command ([src/framework/ui/help.ts](src/framework/ui/help.ts)):
 
 1. Calls `getPluginCommandsInfo()` to retrieve plugin information
 2. Builds a "Plugin Commands" section if plugins are loaded

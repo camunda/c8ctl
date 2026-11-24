@@ -23,7 +23,7 @@ describe("Session Management Integration Tests", () => {
 		process.env.C8CTL_MODELER_DIR = modelerDir;
 
 		// Reset c8ctl runtime state before each test
-		const { c8ctl } = await import("../../src/runtime.ts");
+		const { c8ctl } = await import("../../src/core/runtime.ts");
 		c8ctl.activeProfile = undefined;
 		c8ctl.activeTenant = undefined;
 		c8ctl.outputMode = "text";
@@ -41,9 +41,9 @@ describe("Session Management Integration Tests", () => {
 
 	test("use profile sets active profile in c8ctl runtime", async () => {
 		const { addProfile, setActiveProfile, loadSessionState } = await import(
-			"../../src/config.ts"
+			"../../src/core/config.ts"
 		);
-		const { c8ctl } = await import("../../src/runtime.ts");
+		const { c8ctl } = await import("../../src/core/runtime.ts");
 
 		// Add a profile first
 		addProfile({
@@ -64,9 +64,9 @@ describe("Session Management Integration Tests", () => {
 
 	test("use tenant sets active tenant in c8ctl runtime", async () => {
 		const { setActiveTenant, loadSessionState } = await import(
-			"../../src/config.ts"
+			"../../src/core/config.ts"
 		);
-		const { c8ctl } = await import("../../src/runtime.ts");
+		const { c8ctl } = await import("../../src/core/runtime.ts");
 
 		setActiveTenant("my-tenant");
 
@@ -80,9 +80,9 @@ describe("Session Management Integration Tests", () => {
 
 	test("output mode sets mode in c8ctl runtime", async () => {
 		const { setOutputMode, loadSessionState } = await import(
-			"../../src/config.ts"
+			"../../src/core/config.ts"
 		);
-		const { c8ctl } = await import("../../src/runtime.ts");
+		const { c8ctl } = await import("../../src/core/runtime.ts");
 
 		setOutputMode("json");
 
@@ -101,8 +101,8 @@ describe("Session Management Integration Tests", () => {
 			setActiveTenant,
 			setOutputMode,
 			loadSessionState,
-		} = await import("../../src/config.ts");
-		const { c8ctl } = await import("../../src/runtime.ts");
+		} = await import("../../src/core/config.ts");
+		const { c8ctl } = await import("../../src/core/runtime.ts");
 
 		// Add profile
 		addProfile({
@@ -129,7 +129,7 @@ describe("Session Management Integration Tests", () => {
 
 	test("session state affects credential resolution", async () => {
 		const { addProfile, setActiveProfile, resolveClusterConfig } = await import(
-			"../../src/config.ts"
+			"../../src/core/config.ts"
 		);
 
 		// Add profile with specific config (need both clientId and clientSecret for OAuth)
@@ -153,7 +153,7 @@ describe("Session Management Integration Tests", () => {
 
 	test("session state affects tenant resolution", async () => {
 		const { setActiveTenant, resolveTenantId } = await import(
-			"../../src/config.ts"
+			"../../src/core/config.ts"
 		);
 
 		// Set active tenant

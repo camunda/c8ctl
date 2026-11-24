@@ -12,9 +12,10 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { c8ctl } from "../../src/core/runtime.ts";
 import {
 	detectShell,
 	extractCompletionVersion,
@@ -22,8 +23,43 @@ import {
 	getShellRcFile,
 	installCompletion,
 	refreshCompletionsIfStale,
-} from "../../src/completion.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/framework/ui/completion.ts";
+
+/**
+ * Environment variables that `os.homedir()` consults: `HOME` on POSIX,
+ * `USERPROFILE` on Windows. Tests that redirect the home directory must set
+ * both, otherwise Windows runs fall through to the real user profile and the
+ * RC-file assertions inspect a file the code never wrote.
+ */
+const HOME_ENV_VARS = ["HOME", "USERPROFILE"] as const;
+
+/** Point every home-directory env var at `dir`. */
+function setHomeEnv(dir: string): void {
+	for (const key of HOME_ENV_VARS) {
+		process.env[key] = dir;
+	}
+}
+
+/** Snapshot the home-directory env vars so they can be restored afterwards. */
+function saveHomeEnv(): Record<string, string | undefined> {
+	const saved: Record<string, string | undefined> = {};
+	for (const key of HOME_ENV_VARS) {
+		saved[key] = process.env[key];
+	}
+	return saved;
+}
+
+/** Restore a snapshot taken with `saveHomeEnv()`. */
+function restoreHomeEnv(saved: Record<string, string | undefined>): void {
+	for (const key of HOME_ENV_VARS) {
+		const value = saved[key];
+		if (value === undefined) {
+			delete process.env[key];
+		} else {
+			process.env[key] = value;
+		}
+	}
+}
 
 // ─── detectShell ─────────────────────────────────────────────────────────────
 
@@ -71,6 +107,47 @@ describe("detectShell", () => {
 // ─── getShellRcFile ──────────────────────────────────────────────────────────
 
 describe("getShellRcFile", () => {
+	test("falls back to userInfo().homedir when HOME is empty (os.homedir() returns '')", () => {
+		// os.homedir() on POSIX returns the empty string when HOME is set to "".
+		// The implementation falls back to userInfo().homedir in that case.
+		// On Windows os.homedir() reads USERPROFILE so HOME="" has no effect there.
+		if (process.platform === "win32") return;
+
+		const originalHome = process.env.HOME;
+		process.env.HOME = "";
+
+		try {
+			assert.strictEqual(
+				getShellRcFile("zsh"),
+				join(userInfo().homedir, ".zshrc"),
+			);
+		} finally {
+			if (originalHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = originalHome;
+			}
+		}
+	});
+
+	test("returns undefined rather than a broken path when home cannot be determined", () => {
+		// On POSIX, HOME="" causes os.homedir() to return ""; userInfo().homedir
+		// still provides the real home in a normal environment, so the function
+		// returns a valid path. The `if (!home) return undefined` guard is a
+		// defensive measure for unusual environments (e.g. a headless container
+		// with no passwd entry) where neither source resolves to a usable dir.
+		// Testing it without module mocking is not possible in this codebase, but
+		// we verify here that the result is always either a meaningful absolute
+		// path or undefined — never join("", ...) which produces a relative path.
+		const rc = getShellRcFile("zsh");
+		if (rc !== undefined) {
+			assert.ok(
+				rc.startsWith("/") || (rc.length > 2 && rc[1] === ":"),
+				`Expected an absolute path, got ${JSON.stringify(rc)}`,
+			);
+		}
+	});
+
 	test("returns .zshrc for zsh", () => {
 		const rc = getShellRcFile("zsh");
 		assert.ok(rc);
@@ -102,7 +179,7 @@ describe("getCompletionFilePath", () => {
 
 	beforeEach(() => {
 		origDataDir = process.env.C8CTL_DATA_DIR;
-		process.env.C8CTL_DATA_DIR = "/tmp/c8ctl-test";
+		process.env.C8CTL_DATA_DIR = join(tmpdir(), "c8ctl-test");
 	});
 
 	afterEach(() => {
@@ -114,8 +191,11 @@ describe("getCompletionFilePath", () => {
 	});
 
 	test("returns path under data dir with correct extension", () => {
-		const path = getCompletionFilePath("zsh");
-		assert.strictEqual(path, "/tmp/c8ctl-test/completions/c8ctl.zsh");
+		const completionPath = getCompletionFilePath("zsh");
+		assert.strictEqual(
+			completionPath,
+			join(tmpdir(), "c8ctl-test", "completions", "c8ctl.zsh"),
+		);
 	});
 
 	test("works for all three shells", () => {
@@ -259,19 +339,19 @@ describe("refreshCompletionsIfStale", () => {
 
 describe("installCompletion", () => {
 	let origDataDir: string | undefined;
-	let origHome: string | undefined;
+	let origHome: Record<string, string | undefined>;
 	let origXdgConfigHome: string | undefined;
 	let testDir: string;
 
 	beforeEach(() => {
 		origDataDir = process.env.C8CTL_DATA_DIR;
-		origHome = process.env.HOME;
+		origHome = saveHomeEnv();
 		origXdgConfigHome = process.env.XDG_CONFIG_HOME;
 		testDir = join(tmpdir(), `c8ctl-completion-install-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 		process.env.C8CTL_DATA_DIR = testDir;
-		// Isolate HOME so RC wiring doesn't touch the real user's shell config
-		process.env.HOME = testDir;
+		// Isolate the home dir so RC wiring doesn't touch the real user's config
+		setHomeEnv(testDir);
 		// Isolate XDG config so fish completions do not write outside the temp dir
 		process.env.XDG_CONFIG_HOME = join(testDir, ".config");
 	});
@@ -282,11 +362,7 @@ describe("installCompletion", () => {
 		} else {
 			process.env.C8CTL_DATA_DIR = origDataDir;
 		}
-		if (origHome === undefined) {
-			delete process.env.HOME;
-		} else {
-			process.env.HOME = origHome;
-		}
+		restoreHomeEnv(origHome);
 		if (origXdgConfigHome === undefined) {
 			delete process.env.XDG_CONFIG_HOME;
 		} else {
@@ -372,7 +448,7 @@ describe("installCompletion", () => {
 		const dirWithQuote = join(testDir, "it's");
 		mkdirSync(dirWithQuote, { recursive: true });
 		process.env.C8CTL_DATA_DIR = dirWithQuote;
-		process.env.HOME = dirWithQuote;
+		setHomeEnv(dirWithQuote);
 		const rcFile = join(dirWithQuote, ".zshrc");
 		writeFileSync(rcFile, "# existing config\n");
 
@@ -398,12 +474,12 @@ describe("completion version header", () => {
 	test("all three generators produce a version header", () => {
 		// We test via installCompletion to exercise the full path
 		const origDataDir = process.env.C8CTL_DATA_DIR;
-		const origHome = process.env.HOME;
+		const origHome = saveHomeEnv();
 		const origXdgConfigHome = process.env.XDG_CONFIG_HOME;
 		const testDir = join(tmpdir(), `c8ctl-completion-header-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 		process.env.C8CTL_DATA_DIR = testDir;
-		process.env.HOME = testDir;
+		setHomeEnv(testDir);
 		process.env.XDG_CONFIG_HOME = testDir;
 
 		try {
@@ -422,11 +498,7 @@ describe("completion version header", () => {
 			} else {
 				process.env.C8CTL_DATA_DIR = origDataDir;
 			}
-			if (origHome === undefined) {
-				delete process.env.HOME;
-			} else {
-				process.env.HOME = origHome;
-			}
+			restoreHomeEnv(origHome);
 			if (origXdgConfigHome === undefined) {
 				delete process.env.XDG_CONFIG_HOME;
 			} else {

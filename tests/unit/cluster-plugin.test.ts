@@ -3,21 +3,126 @@
  */
 
 import assert from "node:assert";
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { mockProcessExit } from "../utils/mocks.ts";
+import { pollUntil, pollUntilValue } from "../utils/polling.ts";
 
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
+
+/** Platform-correct binary name: c8run.exe on Windows, c8run elsewhere. */
+const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
+
+/**
+ * Upper bound for obtaining a real process start signature. On Windows each
+ * lookup is a blocking `powershell` + CIM call with a 10 s per-call timeout in
+ * the plugin, and the first call of a run pays the cold-start cost. A 30 s
+ * deadline therefore allowed only three attempts (t=0, 10, 20 s), so a slow
+ * runner failed the test without the lookup ever having a fair chance. The
+ * signature itself is the readiness signal; this is only a safety net sized to
+ * a dozen attempts, so do not tighten it back.
+ */
+const SIGNATURE_DEADLINE_MS = 120_000;
+
+/**
+ * Build a durable running-cluster record for a live PID that `recordedPidIsLive`
+ * accepts on BOTH fingerprinting and non-fingerprinting platforms. Since #568 a
+ * record entry on a fingerprinting platform MUST carry a start signature to be
+ * trusted (a signature-less entry there is treated as a stale/legacy pidfile and
+ * rejected), so this captures the real signature where the platform can produce
+ * one and degrades to a signature-less record only where it cannot.
+ */
+async function liveSelfRecord({
+	version = "8.9",
+	pid = process.pid,
+	signatureOf = plugin.processStartSignature,
+	canFingerprint = plugin.platformSupportsProcessSignature(),
+	timeoutMs = SIGNATURE_DEADLINE_MS,
+}: {
+	version?: string;
+	pid?: number;
+	signatureOf?: (pid: number) => string | null;
+	canFingerprint?: boolean;
+	timeoutMs?: number;
+} = {}) {
+	// A real signature is the readiness signal. The deadline only bounds setup
+	// when Windows CIM/PowerShell is slow; it must never produce an unsigned record.
+	const sig = canFingerprint
+		? await pollUntilValue(
+				async () => signatureOf(pid) || undefined,
+				timeoutMs,
+				100,
+				`process start signature for PID ${pid}`,
+			)
+		: null;
+	return {
+		version,
+		pids: [pid],
+		signatures: sig ? { [pid]: sig } : {},
+	};
+}
+
+describe("Cluster Plugin – live PID record fixture", () => {
+	test("waits for a signature after a transient lookup failure", async () => {
+		const queriedPids: number[] = [];
+		const record = await liveSelfRecord({
+			version: "8.8",
+			pid: 1234,
+			canFingerprint: true,
+			signatureOf: (pid) => {
+				queriedPids.push(pid);
+				return queriedPids.length === 1 ? null : "fixture-start";
+			},
+		});
+
+		assert.deepStrictEqual(record, {
+			version: "8.8",
+			pids: [1234],
+			signatures: { 1234: "fixture-start" },
+		});
+		assert.deepStrictEqual(queriedPids, [1234, 1234]);
+	});
+
+	test("fails explicitly when the signature acquisition deadline expires", async () => {
+		await assert.rejects(
+			liveSelfRecord({
+				pid: 1234,
+				canFingerprint: true,
+				signatureOf: () => null,
+				timeoutMs: 0,
+			}),
+			/timed out waiting for process start signature for PID 1234/,
+		);
+	});
+
+	test("uses an unsigned record only on platforms without fingerprint support", async () => {
+		const record = await liveSelfRecord({
+			pid: 1234,
+			canFingerprint: false,
+			signatureOf: () =>
+				assert.fail("Unsupported platforms must not query a signature"),
+		});
+		assert.deepStrictEqual(record, {
+			version: "8.9",
+			pids: [1234],
+			signatures: {},
+		});
+	});
+});
 
 // ---------------------------------------------------------------------------
 // metadata
@@ -51,6 +156,30 @@ describe("Cluster Plugin – metadata", () => {
 		);
 	});
 
+	test("cluster command is a passthrough command so the host delivers its flags", () => {
+		// A bare-function command only receives parsed positionals; --purge,
+		// --debug, --c8-version and c8run's own secrets flags would be dropped.
+		const cmd = plugin.metadata.commands.cluster;
+		assert.strictEqual(cmd.passthrough, true);
+		assert.ok(
+			typeof cmd.passthroughHint === "string" && cmd.passthroughHint.length > 0,
+			"passthrough requires a non-empty passthroughHint",
+		);
+		assert.strictEqual(
+			cmd.flags,
+			undefined,
+			"passthrough and declared flags are mutually exclusive",
+		);
+	});
+
+	test("cluster command declares a secrets subcommand", () => {
+		const subcommands = plugin.metadata.commands.cluster.subcommands;
+		assert.ok(
+			subcommands.some((s: { name: string }) => s.name === "secrets"),
+			'subcommands should include "secrets"',
+		);
+	});
+
 	test("cluster command provides examples", () => {
 		const examples = plugin.metadata.commands.cluster.examples;
 		assert.ok(Array.isArray(examples), "examples should be an array");
@@ -68,7 +197,7 @@ describe("Cluster Plugin – metadata", () => {
 		}
 	});
 
-	test("examples include start, stop, status, list, logs, list-remote, install, and delete commands", () => {
+	test("examples include start, stop, status, list, logs, list-remote, install, delete, and purge commands", () => {
 		const examples = plugin.metadata.commands.cluster.examples;
 		const cmds = examples.map((e: { command: string }) => e.command);
 		assert.ok(
@@ -104,6 +233,10 @@ describe("Cluster Plugin – metadata", () => {
 		assert.ok(
 			cmds.some((c: string) => c.includes("delete")),
 			"Should have a delete example",
+		);
+		assert.ok(
+			cmds.some((c: string) => c.includes("purge")),
+			"Should have a purge example",
 		);
 	});
 });
@@ -160,14 +293,15 @@ describe("Cluster Plugin – command usage output", () => {
 		assert.ok(output.includes("stop"), 'Usage should mention "stop"');
 	});
 
-	test("prints usage when called with an invalid subcommand", async () => {
-		await plugin.commands.cluster(["invalid"]);
-
-		const output = captured.join("\n");
-		assert.ok(
-			output.includes("Usage"),
-			"Should print usage for unrecognised subcommand",
-		);
+	test("prints usage and fails when called with an invalid subcommand", async () => {
+		const originalExitCode = process.exitCode;
+		try {
+			await plugin.commands.cluster(["invalid"]);
+			assert.equal(process.exitCode, 1);
+			assert.ok(captured.join("\n").includes("Usage"));
+		} finally {
+			process.exitCode = originalExitCode;
+		}
 	});
 
 	test("usage mentions version option", async () => {
@@ -185,6 +319,16 @@ describe("Cluster Plugin – command usage output", () => {
 
 		const output = captured.join("\n");
 		assert.ok(output.includes("--debug"), "Should document --debug flag");
+	});
+
+	test("usage mentions secrets subcommand", async () => {
+		await plugin.commands.cluster([]);
+
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("secrets"),
+			'Should document "secrets" subcommand',
+		);
 	});
 
 	test("usage contains examples", async () => {
@@ -265,6 +409,63 @@ describe("Cluster Plugin – version validation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// resolveExtractCommand (issue #540 — native Windows extraction)
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – resolveExtractCommand", () => {
+	const archivePath = "/cache/c8run-8.9.13-windows-x86_64.zip";
+	const targetDir = "/cache/c8run-8.9.13";
+
+	test("uses `tar -xf` for a .zip on Windows (no POSIX unzip)", () => {
+		const { command, args } = plugin.resolveExtractCommand({
+			archivePath,
+			targetDir,
+			platform: "win32",
+		});
+		assert.strictEqual(command, "tar");
+		assert.deepStrictEqual(args, ["-xf", archivePath, "-C", targetDir]);
+	});
+
+	test("uses `unzip -q` for a .zip on macOS", () => {
+		const { command, args } = plugin.resolveExtractCommand({
+			archivePath: "/cache/c8run-8.9.13-macos-aarch64.zip",
+			targetDir,
+			platform: "darwin",
+		});
+		assert.strictEqual(command, "unzip");
+		assert.deepStrictEqual(args, [
+			"-q",
+			"/cache/c8run-8.9.13-macos-aarch64.zip",
+			"-d",
+			targetDir,
+		]);
+	});
+
+	test("uses `tar -xzf` for a .tar.gz on Linux", () => {
+		const tgz = "/cache/c8run-8.9.13-linux-x86_64.tar.gz";
+		const { command, args } = plugin.resolveExtractCommand({
+			archivePath: tgz,
+			targetDir,
+			platform: "linux",
+		});
+		assert.strictEqual(command, "tar");
+		assert.deepStrictEqual(args, ["-xzf", tgz, "-C", targetDir]);
+	});
+
+	test("throws on an unsupported archive format", () => {
+		assert.throws(
+			() =>
+				plugin.resolveExtractCommand({
+					archivePath: "/cache/c8run.rar",
+					targetDir,
+					platform: "win32",
+				}),
+			/Unsupported archive format/,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // parsePluginArgs
 // ---------------------------------------------------------------------------
 
@@ -298,9 +499,32 @@ describe("Cluster Plugin – parsePluginArgs", () => {
 		assert.strictEqual(result.version, "8.8");
 	});
 
+	test("parses --c8-version=<value> form", () => {
+		const result = plugin.parsePluginArgs(["start", "--c8-version=8.8"]);
+		assert.strictEqual(result.version, "8.8");
+	});
+
+	test("throws when --c8-version= has an empty value", () => {
+		assert.throws(
+			() => plugin.parsePluginArgs(["start", "--c8-version="]),
+			/Missing value for --c8-version/,
+		);
+	});
+
 	test("parses --debug flag", () => {
 		const result = plugin.parsePluginArgs(["start", "--debug"]);
 		assert.strictEqual(result.debug, true);
+	});
+
+	test("parses --purge flag", () => {
+		const result = plugin.parsePluginArgs(["stop", "--purge"]);
+		assert.strictEqual(result.subcommand, "stop");
+		assert.strictEqual(result.purge, true);
+	});
+
+	test("purge defaults to false when flag absent", () => {
+		const result = plugin.parsePluginArgs(["stop"]);
+		assert.strictEqual(result.purge, false);
 	});
 
 	test("throws when --c8-version has no value (end of args)", () => {
@@ -357,7 +581,7 @@ describe("Cluster Plugin – findC8RunBinaryPath", () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		const result = plugin.findC8RunBinaryPath(config);
 		assert.ok(result !== null, "should find binary");
 		assert.ok(result?.includes("c8run"), "path should reference binary name");
@@ -384,7 +608,7 @@ describe("Cluster Plugin – isC8RunInstalled", () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		assert.strictEqual(plugin.isC8RunInstalled(config), true);
 	});
 });
@@ -412,7 +636,7 @@ describe("Cluster Plugin – getC8RunBinaryPath", () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		const result = plugin.getC8RunBinaryPath(config);
 		assert.ok(
 			typeof result === "string" && result.length > 0,
@@ -605,6 +829,35 @@ describe("Cluster Plugin – hasNewerVersionAvailable", () => {
 		assert.strictEqual(result, false, "same ETag means no new version");
 	});
 
+	test("asks for the identity encoding, like the download whose ETag was stored", async () => {
+		const config = { cacheDir: tempDir, version: "8.8" };
+		plugin.storeETag(config, '"etag-abc"');
+
+		// A server with Vary: Accept-Encoding gives the gzip variant another ETag.
+		stubFetch(async (_url, init) => {
+			const identity =
+				new Headers(init?.headers).get("accept-encoding") === "identity";
+			return {
+				ok: true,
+				headers: {
+					get: (h: string) =>
+						h === "etag"
+							? identity
+								? '"etag-abc"'
+								: 'W/"etag-abc-gzip"'
+							: null,
+				},
+			};
+		});
+
+		const result = await plugin.hasNewerVersionAvailable(config);
+		assert.strictEqual(
+			result,
+			false,
+			"the unchanged archive must not be re-downloaded",
+		);
+	});
+
 	test("returns true when stored ETag differs from remote ETag", async () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		plugin.storeETag(config, '"etag-old"');
@@ -694,7 +947,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		};
 		const binaryDir = join(tempDir, "c8run-8.8.1", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
 	});
@@ -709,7 +962,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		const installDir = join(tempDir, "c8run-8.8.1");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
 
@@ -730,7 +983,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-current"');
 
 		const originalFetch = globalThis.fetch;
@@ -771,7 +1024,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-old"');
 
 		assert.strictEqual(
@@ -919,6 +1172,46 @@ describe("Cluster Plugin – parseVersionsFromHtml", () => {
 		);
 	});
 
+	test("graduated minor without an X.Y.0 directory is not the alpha train", () => {
+		// 8.10 has historical alpha dirs and a published patch release (8.10.4/),
+		// but no 8.10.0/ directory. A shipped patch release proves the minor is GA,
+		// so stable must resolve to 8.10 rather than falling back to 8.9.
+		const html = `
+      <a href="8.8/">8.8</a>
+      <a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.9.5/">8.9.5</a>
+      <a href="8.10/">8.10</a>
+      <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+      <a href="8.10.0-alpha2/">8.10.0-alpha2</a>
+      <a href="8.10.4/">8.10.4</a>
+    `;
+		const result = plugin.parseVersionsFromHtml(html);
+		assert.ok(result, "should return a result");
+		assert.strictEqual(
+			result.stable,
+			"8.10",
+			"stable should be 8.10 since a patch release has shipped",
+		);
+		assert.strictEqual(result.alpha, "8.10");
+	});
+
+	test("alpha-only minor with no release directories stays in the alpha train across two-digit minors", () => {
+		// 8.10 only has alpha dirs: it is still the alpha train, and 8.9 (numerically
+		// lower, lexically higher) must remain stable.
+		const html = `
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.10/">8.10</a>
+      <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+    `;
+		const result = plugin.parseVersionsFromHtml(html);
+		assert.ok(result, "should return a result");
+		assert.strictEqual(result.stable, "8.9");
+		assert.strictEqual(result.alpha, "8.10");
+	});
+
 	test("graduated alpha with new alpha train above", () => {
 		// 8.9 went GA, and 9.0 alphas have started
 		const html = `
@@ -969,7 +1262,7 @@ describe("Cluster Plugin – resolveVersion", () => {
 		// Create a fake c8run installation so readLocalAliasMapping considers the alias valid
 		const installDir = join(cacheDir, `c8run-${version}`, `c8run-${version}`);
 		mkdirSync(installDir, { recursive: true });
-		writeFileSync(join(installDir, "c8run"), "fake");
+		writeFileSync(join(installDir, C8RUN_BINARY), "fake");
 	}
 
 	function mockFetchWithVersions(html: string) {
@@ -1052,11 +1345,70 @@ describe("Cluster Plugin – resolveVersion", () => {
 		);
 	});
 
+	test("offline without a persisted alias uses the package fallback", async () => {
+		mockFetchOffline();
+
+		const resolved = await plugin.resolveVersion("stable", {
+			cacheDir: tempDir,
+		});
+		assert.strictEqual(
+			resolved,
+			"8.10",
+			"should use the package fallback when offline without a cached alias",
+		);
+	});
+
+	test("offline with preferLocal and no persisted alias uses the package fallback", async () => {
+		mockFetchOffline();
+
+		const resolved = await plugin.resolveVersion("stable", {
+			preferLocal: true,
+			cacheDir: tempDir,
+		});
+		assert.strictEqual(
+			resolved,
+			"8.10",
+			"should use the package fallback when starting offline without a cached alias",
+		);
+	});
+
 	test("non-alias version specs pass through unchanged", async () => {
 		const resolved = await plugin.resolveVersion("8.8.5", {
 			cacheDir: tempDir,
 		});
 		assert.strictEqual(resolved, "8.8.5", "non-alias should pass through");
+	});
+
+	test("preferLocal matches installed minor prefix when alias resolves to rolling version (#431)", async () => {
+		// Simulate: alias "stable" → "8.9" (minor/rolling), but installed version is "8.9.5".
+		// The cache dir has c8run-8.9.5, NOT c8run-8.9.
+		// Current bug: readLocalAliasMapping does an exact match on "8.9" → not found → re-downloads.
+		// Fix: should find c8run-8.9.5 because it starts with "8.9."
+		const cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		try {
+			// Simulate installed version 8.9.5 (full semver directory)
+			const installDir = join(cacheDir, "c8run-8.9.5", "c8run-8.9.5");
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(join(installDir, C8RUN_BINARY), "fake");
+
+			// Simulate the alias cache: stable → 8.9 (minor version pattern)
+			plugin.storeLocalAliasMapping(cacheDir, "stable", "8.9");
+
+			// Remote is unreachable — preferLocal should still find the installed version
+			mockFetchOffline();
+
+			const resolved = await plugin.resolveVersion("stable", {
+				preferLocal: true,
+				cacheDir,
+			});
+			assert.strictEqual(
+				resolved,
+				"8.9.5",
+				"should find installed 8.9.5 when alias maps to rolling 8.9",
+			);
+		} finally {
+			rmSync(cacheDir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -1114,6 +1466,27 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 		);
 	});
 
+	test("does not print hint when resolved version is a concrete pin in the same minor (#434)", async () => {
+		// Remote alpha train: 8.10 has alpha dirs but no GA yet → alpha alias = 8.10.
+		// Local alpha resolved to the concrete pin 8.10.0-alpha1 (same minor line).
+		// @ts-expect-error — mock fetch
+		globalThis.fetch = async () => ({
+			ok: true,
+			text: async () => `
+        <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+        <a href="8.10/">8.10</a><a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+      `,
+		});
+
+		await plugin.checkBackgroundAliasFreshness("alpha", "8.10.0-alpha1");
+
+		assert.strictEqual(
+			loggedMessages.filter((m: string) => m.includes("newer")).length,
+			0,
+			"Should not print upgrade hint when the resolved pin is in the same minor line",
+		);
+	});
+
 	test("does not print hint when remote alias matches resolved version", async () => {
 		// @ts-expect-error — mock fetch
 		globalThis.fetch = async () => ({
@@ -1132,7 +1505,152 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 		);
 	});
 
-	test("does not persist alias mapping (start remains deterministic)", async () => {
+	test("advances alias mapping when the newer version is already installed", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+		try {
+			plugin.storeLocalAliasMapping(tempDir, "stable", "8.9");
+			// 8.10 installed explicitly (e.g. `cluster install 8.10`) as a pinned patch
+			const binaryDir = join(tempDir, "c8run-8.10.4", "c8run-8.10.4");
+			mkdirSync(binaryDir, { recursive: true });
+			writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+
+			// @ts-expect-error — mock fetch: remote says stable is 8.10
+			globalThis.fetch = async () => ({
+				ok: true,
+				text: async () => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.4/">8.10.4</a>
+        `,
+			});
+
+			await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+
+			const cached = readFileSync(
+				join(tempDir, "alias-stable.resolved"),
+				"utf-8",
+			).trim();
+			assert.strictEqual(cached, "8.10");
+			assert.ok(
+				loggedMessages.some(
+					(m: string) =>
+						m.includes("8.10") &&
+						m.includes("already installed") &&
+						m.includes('"c8ctl cluster start stable"') &&
+						!m.includes("cluster install"),
+				),
+				`Should report the promotion, got: ${loggedMessages.join("; ")}`,
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	for (const { layout, dir, alphaResolves } of [
+		{
+			layout: "pinned",
+			dir: ["c8run-8.10.0-alpha1", "c8run-8.10.0-alpha1"],
+			alphaResolves: "8.10.0-alpha1",
+		},
+		{
+			// `install alpha` while 8.10 was the alpha train fills the rolling dir with an alpha build
+			layout: "rolling dir holding an alpha build",
+			dir: ["c8run-8.10", "c8run-8.10.0-alpha1"],
+			alphaResolves: "8.10",
+		},
+	]) {
+		test(`stable never advances to or resolves a prerelease install (${layout})`, async () => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+			const listing = (stableMinor: string) => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+          ${stableMinor === "8.10" ? '<a href="8.10.4/">8.10.4</a>' : ""}
+        `;
+			try {
+				plugin.storeLocalAliasMapping(tempDir, "stable", "8.9");
+				for (const segments of [["c8run-8.9", "c8run-8.9.29"], dir]) {
+					const binaryDir = join(tempDir, ...segments);
+					mkdirSync(binaryDir, { recursive: true });
+					writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+				}
+
+				// @ts-expect-error — mock fetch: remote says stable is 8.10
+				globalThis.fetch = async () => ({
+					ok: true,
+					text: async () => listing("8.10"),
+				});
+				await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+				assert.strictEqual(
+					readFileSync(join(tempDir, "alias-stable.resolved"), "utf-8").trim(),
+					"8.9",
+					"only an alpha build of 8.10 is installed",
+				);
+
+				// A stable mapping already at 8.10 must not be satisfied by the alpha
+				// build either: resolution falls through to remote (stable = 8.9 here).
+				plugin.storeLocalAliasMapping(tempDir, "stable", "8.10");
+				plugin.storeLocalAliasMapping(tempDir, "alpha", "8.10");
+				// @ts-expect-error — mock fetch: 8.10 still alpha-only
+				globalThis.fetch = async () => ({
+					ok: true,
+					text: async () => listing("8.9"),
+				});
+				plugin._resetDynamicAliasCache();
+				assert.strictEqual(
+					await plugin.resolveVersion("stable", {
+						preferLocal: true,
+						cacheDir: tempDir,
+					}),
+					"8.9",
+				);
+				// alpha keeps accepting prerelease builds of its minor.
+				assert.strictEqual(
+					await plugin.resolveVersion("alpha", {
+						preferLocal: true,
+						cacheDir: tempDir,
+					}),
+					alphaResolves,
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("reports, rather than claims, a promotion it could not persist", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
+		try {
+			const binaryDir = join(tempDir, "c8run-8.10.4", "c8run-8.10.4");
+			mkdirSync(binaryDir, { recursive: true });
+			writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+			// A directory in place of the alias file makes the write fail.
+			mkdirSync(join(tempDir, "alias-stable.resolved"));
+
+			// @ts-expect-error — mock fetch: remote says stable is 8.10
+			globalThis.fetch = async () => ({
+				ok: true,
+				text: async () => `
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+          <a href="8.10/">8.10</a><a href="8.10.4/">8.10.4</a>
+        `,
+			});
+
+			await plugin.checkBackgroundAliasFreshness("stable", "8.9", tempDir);
+
+			assert.ok(
+				loggedMessages.some(
+					(m: string) =>
+						m.includes("could not be updated") &&
+						/cluster start 8\.10\.4$/.test(m),
+				),
+				`got: ${loggedMessages.join("; ")}`,
+			);
+			assert.ok(!loggedMessages.some((m: string) => m.includes("will use it")));
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not persist alias mapping when the newer version is not installed", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bg-"));
 		try {
 			// Seed a cached alias file pointing to 8.8
@@ -1147,7 +1665,7 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
         `,
 			});
 
-			await plugin.checkBackgroundAliasFreshness("stable", "8.8");
+			await plugin.checkBackgroundAliasFreshness("stable", "8.8", tempDir);
 
 			// The alias file should still point to 8.8 — not overwritten to 8.9
 			const cached = readFileSync(
@@ -1191,6 +1709,43 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 			loggedMessages.length,
 			0,
 			"should not log anything on non-OK response",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// flushStartHints
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – flushStartHints", () => {
+	test("waits for pending start hints before a failed start exits", async () => {
+		const printed: string[] = [];
+		const config = {
+			_aliasHintPromise: new Promise<void>((resolve) =>
+				setTimeout(() => {
+					printed.push("alias hint");
+					resolve();
+				}, 20),
+			),
+			_hintPromise: Promise.resolve().then(() => {
+				printed.push("rolling hint");
+			}),
+		};
+
+		await plugin.flushStartHints(config, 1000);
+
+		assert.deepStrictEqual(printed.sort(), ["alias hint", "rolling hint"]);
+	});
+
+	test("gives up after the timeout when a hint never settles", async () => {
+		const config = { _aliasHintPromise: new Promise(() => {}) };
+		const started = Date.now();
+
+		await plugin.flushStartHints(config, 50);
+
+		assert.ok(
+			Date.now() - started < 1000,
+			"must not block the failed start beyond the timeout",
 		);
 	});
 });
@@ -1306,6 +1861,101 @@ describe("Cluster Plugin – clusterStatus", () => {
 			output.includes("starting or unresponsive"),
 			"Should report starting/unresponsive status",
 		);
+	});
+
+	// #560 — a live PID record with no active marker and an unreachable health
+	// endpoint is the orphaned-process case (install dir replaced/removed while
+	// running). Status must surface it as "running (untracked)" with recovery
+	// guidance rather than reporting the live cluster as stopped.
+	test('reports "running (untracked)" with a stop hint for an orphaned process (live record, no marker)', async () => {
+		// Live recorded PID (our own), no marker; beforeEach's fetch stub keeps
+		// the health endpoint unreachable.
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+
+		await plugin.clusterStatus(tempDir);
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("running (untracked)"),
+			'Should report "running (untracked)" status for an orphaned process',
+		);
+		assert.ok(
+			output.includes("c8ctl cluster stop"),
+			"Should surface the cluster stop recovery hint",
+		);
+		assert.ok(
+			output.includes("8.9"),
+			"Should display the version resolved from the durable record",
+		);
+	});
+
+	// #560 — an orphaned process can still serve the health endpoint while
+	// holding its ports. Status must still flag it as untracked (with the stop
+	// hint) even when healthy, while retaining the connection URLs.
+	test('reports "running (untracked)" with URLs AND a stop hint when an orphan is healthy', async () => {
+		Object.defineProperty(globalThis, "fetch", {
+			value: async () => ({ ok: true, json: async () => ({ status: "UP" }) }),
+			writable: true,
+			configurable: true,
+		});
+		// Live recorded PID (our own), no marker → untracked, and health is UP.
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+
+		await plugin.clusterStatus(tempDir);
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("running (untracked)"),
+			"untracked must take precedence over a healthy probe",
+		);
+		assert.ok(output.includes("Operate"), "healthy URLs are still surfaced");
+		assert.ok(
+			output.includes("c8ctl cluster stop"),
+			"the recovery hint is shown even for a healthy orphan",
+		);
+	});
+
+	// #560 — `--json` consumers must get the SAME orphan recovery guidance the
+	// text renderer prints, otherwise a machine-readable status reports
+	// "running (untracked)" with no actionable instruction.
+	test('emits a "recovery" field in JSON mode for an untracked orphan (and none when tracked)', async () => {
+		const originalC8ctl = globalThis.c8ctl;
+		const payloads: Record<string, unknown>[] = [];
+		globalThis.c8ctl = {
+			// @ts-expect-error — partial Logger mock for testing
+			getLogger: () => ({
+				mode: "json",
+				json: (obj: Record<string, unknown>) => payloads.push(obj),
+				info: () => {},
+				warn: () => {},
+				error: () => {},
+				debug: () => {},
+			}),
+		};
+		try {
+			// Orphan: live recorded PID, no marker, health unreachable.
+			plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+			await plugin.clusterStatus(tempDir);
+			assert.strictEqual(payloads.length, 1, "JSON status emitted once");
+			assert.strictEqual(payloads[0].status, "running (untracked)");
+			const recovery = payloads[0].recovery;
+			assert.ok(
+				typeof recovery === "string" && recovery.includes("c8ctl cluster stop"),
+				"JSON orphan status must carry the stop recovery instruction",
+			);
+
+			// Tracked/stopped: no record, no marker → no recovery field.
+			payloads.length = 0;
+			plugin.clearRunningClusterRecord(tempDir);
+			await plugin.clusterStatus(tempDir);
+			assert.strictEqual(payloads.length, 1, "JSON status emitted once");
+			assert.strictEqual(payloads[0].status, "stopped");
+			assert.strictEqual(
+				payloads[0].recovery,
+				undefined,
+				"a non-orphan JSON status must not carry a recovery field",
+			);
+		} finally {
+			globalThis.c8ctl = originalC8ctl;
+		}
 	});
 });
 
@@ -1524,6 +2174,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 	let captured: string[];
 	let originalLog: typeof console.log;
 	let originalWarn: typeof console.warn;
+	let originalError: typeof console.error;
 	let originalExit: typeof process.exit;
 
 	beforeEach(() => {
@@ -1531,11 +2182,15 @@ describe("Cluster Plugin – deleteVersion", () => {
 		captured = [];
 		originalLog = console.log;
 		originalWarn = console.warn;
+		originalError = console.error;
 		originalExit = process.exit;
 		console.log = (...args: unknown[]) => {
 			captured.push(args.map(String).join(" "));
 		};
 		console.warn = (...args: unknown[]) => {
+			captured.push(args.map(String).join(" "));
+		};
+		console.error = (...args: unknown[]) => {
 			captured.push(args.map(String).join(" "));
 		};
 	});
@@ -1544,6 +2199,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
 		console.log = originalLog;
 		console.warn = originalWarn;
+		console.error = originalError;
 		process.exit = originalExit;
 	});
 
@@ -1551,7 +2207,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await plugin.deleteVersion(tempDir, "8.8");
 		assert.strictEqual(
@@ -1570,13 +2226,29 @@ describe("Cluster Plugin – deleteVersion", () => {
 		);
 	});
 
+	test("removes an install dir whose binary is missing", async () => {
+		// A partial/corrupt install — or a launcher deleted while runtime data
+		// remained — must still be deletable; setup teardown relies on it.
+		const installDir = join(tempDir, "c8run-8.8");
+		mkdirSync(join(installDir, "camunda-data"), { recursive: true });
+
+		await plugin.deleteVersion(tempDir, "8.8");
+		assert.strictEqual(
+			existsSync(installDir),
+			false,
+			"binary-less install dir should be removed",
+		);
+	});
+
 	test("prevents deleting a currently running version", async () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		writeFileSync(join(tempDir, "cluster.active"), "running");
 		writeFileSync(join(tempDir, "cluster.version"), "8.8");
+		// Live pidfile so isVersionRunning() returns true
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
 
 		let exitCalled = false;
 		const restoreExit = mockProcessExit(() => {
@@ -1592,6 +2264,370 @@ describe("Cluster Plugin – deleteVersion", () => {
 		} finally {
 			restoreExit();
 		}
+	});
+
+	test("prevents deleting when pidfiles indicate a running cluster but marker is missing", async () => {
+		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+		// No marker files — only a live pidfile
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+
+		try {
+			await plugin.deleteVersion(tempDir, "8.8").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when processes are detected",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("prevents deleting when cluster.active exists but cluster.version is missing and pidfiles present", async () => {
+		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+		// Partial marker state: active exists but version file is absent
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+
+		try {
+			await plugin.deleteVersion(tempDir, "8.8").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when cluster.version is absent",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// purgeClusterData
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – purgeClusterData", () => {
+	let tempDir: string;
+	let captured: string[];
+	let originalLog: typeof console.log;
+	let originalWarn: typeof console.warn;
+	let originalError: typeof console.error;
+	let originalExit: typeof process.exit;
+
+	function makeFakeInstall(
+		cacheDir: string,
+		version: string,
+		versionDir: string,
+	) {
+		const binaryDir = join(cacheDir, `c8run-${version}`, versionDir);
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+		// camunda-data dir (history data + app state)
+		mkdirSync(join(binaryDir, "camunda-data"), { recursive: true });
+		writeFileSync(join(binaryDir, "camunda-data", "elasticsearch.db"), "data");
+		// camunda-zeebe-* dir with data subdir (Zeebe journal)
+		const zeebeDir = join(binaryDir, `camunda-zeebe-${versionDir}`);
+		mkdirSync(join(zeebeDir, "data"), { recursive: true });
+		writeFileSync(join(zeebeDir, "data", "raft.log"), "journal");
+		mkdirSync(join(zeebeDir, "lib"), { recursive: true });
+		writeFileSync(join(zeebeDir, "lib", "zeebe.jar"), "binary");
+		return binaryDir;
+	}
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		captured = [];
+		originalLog = console.log;
+		originalWarn = console.warn;
+		originalError = console.error;
+		originalExit = process.exit;
+		console.log = (...args: unknown[]) =>
+			captured.push(args.map(String).join(" "));
+		console.warn = (...args: unknown[]) =>
+			captured.push(args.map(String).join(" "));
+		console.error = (...args: unknown[]) =>
+			captured.push(args.map(String).join(" "));
+	});
+
+	afterEach(() => {
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+		console.log = originalLog;
+		console.warn = originalWarn;
+		console.error = originalError;
+		process.exit = originalExit;
+	});
+
+	test("deletes camunda-data and zeebe data dirs, preserves binary and zeebe lib", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"camunda-data should be removed",
+		);
+		const zeebeDataDir = join(binaryDir, "camunda-zeebe-c8run-8.9.9", "data");
+		assert.strictEqual(
+			existsSync(zeebeDataDir),
+			false,
+			"zeebe data dir should be removed",
+		);
+		assert.ok(
+			existsSync(join(binaryDir, C8RUN_BINARY)),
+			"binary should be preserved",
+		);
+		assert.ok(
+			existsSync(join(binaryDir, "camunda-zeebe-c8run-8.9.9", "lib")),
+			"zeebe lib should be preserved",
+		);
+	});
+
+	test("logs what was deleted and what was preserved", async () => {
+		makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("purged") ||
+				output.includes("deleted") ||
+				output.includes("Purged") ||
+				output.includes("Deleted"),
+			"Should log what was deleted",
+		);
+		assert.ok(
+			output.includes("preserved") ||
+				output.includes("intact") ||
+				output.includes("binary"),
+			"Should mention what was preserved",
+		);
+	});
+
+	test("purges leftover data when the install dir survives but the binary is gone", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Simulate a partial/corrupt install: the binary is gone but the install
+		// dir and its runtime data remain (e.g. the orphan case in #560).
+		rmSync(join(binaryDir, C8RUN_BINARY));
+		assert.strictEqual(
+			plugin.isC8RunInstalled({ cacheDir: tempDir, version: "8.9" }),
+			false,
+			"precondition: the binary must be absent",
+		);
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"camunda-data must be purged even with the binary missing",
+		);
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-zeebe-c8run-8.9.9", "data")),
+			false,
+			"zeebe data must be purged even with the binary missing",
+		);
+	});
+
+	test("errors and exits when version is not installed", async () => {
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await assert.rejects(
+				() => plugin.purgeClusterData(tempDir, "9.9"),
+				/exit/,
+			);
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("not installed") || output.includes("9.9"),
+				"Should report version not found",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("works when camunda-data does not exist (e.g. never started)", async () => {
+		const binaryDir = join(tempDir, "c8run-8.9", "c8run-8.9.9");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+
+		// Should not throw even with no data dirs to delete
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		const output = captured.join("\n");
+		assert.ok(output.length > 0, "Should produce some output");
+	});
+
+	test("rejects invalid version spec (path traversal attempt)", async () => {
+		await assert.rejects(
+			() => plugin.purgeClusterData(tempDir, "../evil"),
+			/Invalid version/,
+		);
+	});
+
+	test("rejects version spec with double-dot sequence", async () => {
+		await assert.rejects(
+			() => plugin.purgeClusterData(tempDir, "8..9"),
+			/Invalid version/,
+		);
+	});
+
+	test("purges successfully even when a different version is currently running", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Simulate version 8.10 running (different from the 8.9 we are purging)
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(tempDir, "cluster.version"), "8.10");
+		const runningVersionDir = join(tempDir, "c8run-8.10");
+		mkdirSync(runningVersionDir, { recursive: true });
+		writeFileSync(
+			join(runningVersionDir, "camunda.process"),
+			String(process.pid),
+		);
+
+		// 8.9's data dirs should be deleted without error
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"8.9 camunda-data should be purged regardless of 8.10 running",
+		);
+		// 8.10's directory should be untouched
+		assert.ok(
+			existsSync(runningVersionDir),
+			"Running version directory should be untouched",
+		);
+	});
+
+	test("errors and exits when the target version is currently running", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(tempDir, "cluster.version"), "8.9");
+		// Live pidfile so isVersionRunning() returns true
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await assert.rejects(
+				() => plugin.purgeClusterData(tempDir, "8.9"),
+				/exit/,
+			);
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("running") || output.includes("Stop"),
+				"Should tell the user to stop the cluster first",
+			);
+			assert.ok(
+				output.includes("--purge"),
+				"Should hint at cluster stop --purge",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("purges successfully when marker is stale (no live process)", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Marker files exist but no .process file → cluster is not actually running
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(tempDir, "cluster.version"), "8.9");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"camunda-data should be deleted despite stale marker",
+		);
+	});
+
+	test("prevents purge when pidfiles indicate a running cluster but marker is missing", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// No marker files — only a live pidfile
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await plugin.purgeClusterData(tempDir, "8.9").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when processes are detected",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("prevents purge when cluster.active exists but cluster.version is missing and pidfiles present", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Partial marker state: active exists but version file is absent
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await plugin.purgeClusterData(tempDir, "8.9").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when cluster.version is absent",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("deletes data dirs from multiple camunda-zeebe-* subdirectories", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Add a second zeebe distribution dir
+		const zeebeDir2 = join(binaryDir, "camunda-zeebe-connector-8.9.9");
+		mkdirSync(join(zeebeDir2, "data"), { recursive: true });
+		writeFileSync(join(zeebeDir2, "data", "raft.log"), "journal");
+		mkdirSync(join(zeebeDir2, "lib"), { recursive: true });
+		writeFileSync(join(zeebeDir2, "lib", "connector.jar"), "binary");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-zeebe-c8run-8.9.9", "data")),
+			false,
+			"First zeebe data dir should be deleted",
+		);
+		assert.strictEqual(
+			existsSync(join(zeebeDir2, "data")),
+			false,
+			"Second zeebe data dir should also be deleted",
+		);
+		assert.ok(
+			existsSync(join(zeebeDir2, "lib")),
+			"Second zeebe lib dir should be preserved",
+		);
+	});
+
+	test("handles camunda-zeebe-* dir that has no data subdir (lib-only)", async () => {
+		const binaryDir = join(tempDir, "c8run-8.9", "c8run-8.9.9");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
+		const zeebeDir = join(binaryDir, "camunda-zeebe-8.9.9");
+		mkdirSync(join(zeebeDir, "lib"), { recursive: true });
+		writeFileSync(join(zeebeDir, "lib", "zeebe.jar"), "binary");
+		// No data subdir created
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.ok(
+			existsSync(join(zeebeDir, "lib")),
+			"zeebe lib should remain untouched",
+		);
 	});
 });
 
@@ -1742,13 +2778,195 @@ describe("Cluster Plugin – streamLogs", () => {
 		// Create an install dir with a binary but no log dir
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await plugin.streamLogs(tempDir);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("No log files found"),
 			"Should warn about missing log files",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// followLogFiles — the in-process `tail -f` used on Windows
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – followLogFiles", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-follow-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	/**
+	 * Start following, run `act` while following, then stop. Stopping polls
+	 * once more before resolving, so whatever `act` wrote is always read; the
+	 * long interval keeps the timer out of it, making the output deterministic.
+	 */
+	async function follow(files: string[], act: () => void): Promise<string> {
+		const chunks: string[] = [];
+		const controller = new AbortController();
+		const done = plugin.followLogFiles(files, {
+			signal: controller.signal,
+			write: (chunk: string) => chunks.push(chunk),
+			intervalMs: 60_000,
+		});
+		act();
+		controller.abort();
+		await done;
+		return chunks.join("");
+	}
+
+	test("prints the last 10 lines of each file with headers, then appended lines", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const connectors = join(tempDir, "connectors.log");
+		writeFileSync(
+			camunda,
+			`${Array.from({ length: 15 }, (_, i) => `c${i + 1}`).join("\n")}\n`,
+		);
+		writeFileSync(connectors, "k1\n");
+
+		const output = await follow([camunda, connectors], () => {
+			writeFileSync(connectors, "k1\nk2\n");
+		});
+
+		const expectedInitial = Array.from(
+			{ length: 10 },
+			(_, i) => `c${i + 6}\n`,
+		).join("");
+		assert.strictEqual(
+			output,
+			`==> ${camunda} <==\n${expectedInitial}` +
+				`\n==> ${connectors} <==\nk1\n` +
+				"k2\n",
+		);
+	});
+
+	test("omits headers when following a single file", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "first\nsecond\n");
+		});
+
+		assert.strictEqual(output, "first\nsecond\n");
+	});
+
+	test("re-reads a truncated file from the start", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "old line one\nold line two\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "new\n");
+		});
+
+		assert.strictEqual(output, "old line one\nold line two\nnew\n");
+	});
+
+	test("reads a file rotated in place from the start, even when it is not smaller", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		const rotated = join(tempDir, "camunda.log.new");
+		writeFileSync(camunda, "old\n");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(rotated, "new one\nnew two\n");
+			renameSync(rotated, camunda);
+		});
+
+		assert.strictEqual(output, "old\nnew one\nnew two\n");
+	});
+
+	test("prints the last lines in full however long they are", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		// Longer than any fixed read-back window, e.g. a large stack trace.
+		const longLine = "é".repeat(100_000);
+		writeFileSync(camunda, `before\nlast but one\n${longLine}\n`);
+
+		const output = await follow([camunda], () => {});
+
+		const expected = `before\nlast but one\n${longLine}\n`;
+		// Keep a failure readable rather than diffing 100,000 characters.
+		assert.ok(
+			output === expected,
+			`expected all ${expected.length} characters, got ${output.length}: ${JSON.stringify(output.slice(0, 40))}`,
+		);
+	});
+
+	test("keeps an unterminated last line as-is so appends continue it", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "one\ntwo");
+
+		const output = await follow([camunda], () => {
+			writeFileSync(camunda, "one\ntwo more\n");
+		});
+
+		assert.strictEqual(output, "one\ntwo more\n");
+	});
+
+	test("keeps following while a file is briefly missing", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+
+		const output = await follow([camunda], () => {
+			rmSync(camunda);
+		});
+
+		assert.strictEqual(output, "first\n");
+	});
+
+	test("prints appends while following and stops cleanly on Ctrl+C", async () => {
+		const camunda = join(tempDir, "camunda.log");
+		writeFileSync(camunda, "first\n");
+		const chunks: string[] = [];
+		const output = () => chunks.join("");
+		let abandoned = false;
+
+		const before = new Set(process.listeners("SIGINT"));
+		const done = plugin.followLogsUntilInterrupted([camunda], {
+			write: (chunk: string) => {
+				// Lets a failing test end following when no handler was registered.
+				if (abandoned) throw new Error("test abandoned following");
+				chunks.push(chunk);
+			},
+			intervalMs: 20,
+		});
+		// Called directly: emitting SIGINT would also reach the test runner's handler.
+		const handlers = process.listeners("SIGINT").filter((l) => !before.has(l));
+		try {
+			assert.strictEqual(handlers.length, 1, "registers one SIGINT handler");
+			assert.strictEqual(output(), "first\n");
+
+			appendFileSync(camunda, "second\n");
+			const seen = await pollUntil(
+				async () => output() === "first\nsecond\n",
+				10_000,
+				10,
+			);
+			assert.ok(
+				seen,
+				`appended line not printed while following: ${JSON.stringify(output())}`,
+			);
+		} finally {
+			if (handlers.length === 0) {
+				abandoned = true;
+				appendFileSync(camunda, "end\n");
+				await done.catch(() => {});
+			}
+			for (const handler of handlers) handler("SIGINT");
+		}
+
+		await done;
+		assert.deepStrictEqual(
+			process.listeners("SIGINT").filter((l) => !before.has(l)),
+			[],
+			"removes its SIGINT handler",
 		);
 	});
 });
@@ -1909,6 +3127,160 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 			"delete without version should prompt for one",
 		);
 	});
+
+	test("--purge on non-stop subcommand exits with error", async () => {
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin.commands.cluster(["start", "--purge"]).catch(() => {});
+		} finally {
+			restoreExit();
+		}
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("--purge can only be used with the stop subcommand"),
+			"--purge on start should error",
+		);
+	});
+
+	// c8run stop only signals the processes; Java may keep running for a while.
+	// stop --purge must wait for them to exit instead of refusing to purge.
+	// Builds a cache dir with runtime data and a cluster process (a shell that
+	// takes ~1s to exit after TERM) recorded via a .process pidfile. Resolves
+	// only once the shell has installed its TERM trap.
+	async function setupStopPurgeFixture({
+		killOnStop,
+	}: {
+		killOnStop: boolean;
+	}) {
+		const cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-stop-purge-"));
+		const installDir = join(cacheDir, "c8run-8.9", "c8run-8.9.1");
+		const dataDirs = [
+			join(installDir, "camunda-data"),
+			join(installDir, "camunda-zeebe-8.9.1", "data"),
+		];
+		for (const d of dataDirs) mkdirSync(d, { recursive: true });
+		const readyFile = join(cacheDir, "ready");
+		// Short sleeps in a loop (no long-lived background child) so nothing leaks
+		// once the shell exits; `touch` runs only after the trap is installed.
+		const slow = spawn(
+			"sh",
+			[
+				"-c",
+				`trap "sleep 1; exit 0" TERM; touch "${readyFile}"; while :; do sleep 0.1; done`,
+			],
+			{ stdio: "ignore" },
+		);
+		const pid = slow.pid;
+		assert.ok(pid, "slow process should have a pid");
+		const ready = await pollUntil(async () => existsSync(readyFile), 5000, 20);
+		assert.ok(ready, "slow process should install its TERM trap");
+		writeFileSync(join(installDir, "camunda.process"), String(pid));
+		writeFileSync(join(cacheDir, "cluster.active"), "running");
+		writeFileSync(join(cacheDir, "cluster.version"), "8.9");
+		// Fake c8run: signals the process like the real `c8run stop`, or does nothing.
+		writeFileSync(
+			join(installDir, C8RUN_BINARY),
+			`#!/bin/sh\n${killOnStop ? `kill -TERM ${pid}\n` : ""}exit 0\n`,
+			{ mode: 0o755 },
+		);
+		return { cacheDir, dataDirs, slow };
+	}
+
+	test("stop --purge waits for a slow-shutting-down cluster and then purges", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const { cacheDir, dataDirs, slow } = await setupStopPurgeFixture({
+			killOnStop: true,
+		});
+		const prevCacheDir = process.env.C8RUN_CACHE_DIR;
+		process.env.C8RUN_CACHE_DIR = cacheDir;
+		const restoreExit = mockProcessExit();
+		try {
+			await plugin.commands.cluster(["stop", "--purge"]).catch(() => {});
+		} finally {
+			restoreExit();
+			if (prevCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
+			else process.env.C8RUN_CACHE_DIR = prevCacheDir;
+			slow.kill("SIGKILL");
+		}
+		const purged = dataDirs.every((d) => !existsSync(d));
+		rmSync(cacheDir, { recursive: true, force: true });
+		assert.ok(purged, "runtime data must be purged after stop --purge");
+	});
+
+	test("stop --purge keeps data and hints at manual purge when the cluster does not exit in time", {
+		skip: process.platform === "win32",
+	}, async () => {
+		// c8run stop does nothing here, so the process stays alive past the timeout.
+		const { cacheDir, dataDirs, slow } = await setupStopPurgeFixture({
+			killOnStop: false,
+		});
+		const prevCacheDir = process.env.C8RUN_CACHE_DIR;
+		const prevWait = process.env.C8CTL_STOP_WAIT_TIMEOUT_MS;
+		process.env.C8RUN_CACHE_DIR = cacheDir;
+		process.env.C8CTL_STOP_WAIT_TIMEOUT_MS = "300";
+		let exitCode: number | string | null | undefined;
+		const restoreExit = mockProcessExit((code) => {
+			exitCode = code;
+		});
+		try {
+			await plugin.commands.cluster(["stop", "--purge"]).catch(() => {});
+		} finally {
+			restoreExit();
+			if (prevCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
+			else process.env.C8RUN_CACHE_DIR = prevCacheDir;
+			if (prevWait === undefined) delete process.env.C8CTL_STOP_WAIT_TIMEOUT_MS;
+			else process.env.C8CTL_STOP_WAIT_TIMEOUT_MS = prevWait;
+			slow.kill("SIGKILL");
+		}
+		const kept = dataDirs.every((d) => existsSync(d));
+		assert.strictEqual(exitCode, 1, "should exit non-zero");
+		const output = captured.join("\n");
+		rmSync(cacheDir, { recursive: true, force: true });
+		assert.ok(
+			kept,
+			"runtime data must not be purged while processes are alive",
+		);
+		assert.ok(
+			output.includes("c8ctl cluster purge 8.9"),
+			"should hint at the manual purge command",
+		);
+	});
+
+	test("secrets subcommand with no verb exits with a usage error", async () => {
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin.commands.cluster(["secrets"]).catch(() => {});
+		} finally {
+			restoreExit();
+		}
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("usage: c8ctl cluster secrets"),
+			"should print a secrets-specific usage error",
+		);
+	});
+
+	test("secrets subcommand exits with an install hint when nothing is installed", async () => {
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin.commands.cluster(["secrets", "list"]).catch(() => {});
+		} finally {
+			restoreExit();
+		}
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("No c8run installed locally"),
+			"should point the user at cluster install",
+		);
+		assert.ok(
+			output.includes("c8ctl cluster install"),
+			"should suggest the install command",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -1948,6 +3320,64 @@ describe("Cluster Plugin – isRollingVersion", () => {
 		assert.strictEqual(plugin.isRollingVersion("8.9.0-alpha5"), false);
 		assert.strictEqual(plugin.isRollingVersion("8.8.1"), false);
 		assert.strictEqual(plugin.isRollingVersion("latest"), false);
+	});
+});
+
+describe("Cluster Plugin – extractStartupSummary", () => {
+	const SUMMARY = [
+		"- Operate:                http://localhost:8080/operate",
+		"- Tasklist:               http://localhost:8080/tasklist",
+		"",
+		"Run `./c8run help` to see available commands and options.",
+	].join("\n");
+
+	test("returns the summary when nothing follows it", () => {
+		const raw = `System Version Information\n...\n${SUMMARY}\n`;
+		assert.strictEqual(plugin.extractStartupSummary(raw), SUMMARY);
+	});
+
+	test("cuts the c8run log lines that follow the summary", () => {
+		// c8run prints the summary once Camunda is healthy, then keeps
+		// logging to stderr while Connectors starts — dumping that tail
+		// looks like a second startup.
+		const raw = `${SUMMARY}\n\n-------------------------------------------\n9:57AM DBG Failed to read PID from file. This is expected for the first run.\n9:57AM INF Started process: /tmp/c8run/connectors.process pid=31924\n9:58AM INF All processes are running and healthy, exiting script...\n`;
+		const extracted = plugin.extractStartupSummary(raw);
+		assert.ok(extracted.startsWith("- Operate:"), extracted);
+		assert.ok(
+			extracted.includes("-------------------------------------------"),
+			extracted,
+		);
+		assert.ok(!extracted.includes("INF"), extracted);
+		assert.ok(!extracted.includes("exiting script"), extracted);
+	});
+
+	test("returns null without the summary marker", () => {
+		assert.strictEqual(plugin.extractStartupSummary("no summary here"), null);
+	});
+});
+
+describe("Cluster Plugin – isRemoteMinorNewer", () => {
+	test("true when remote minor is strictly newer", () => {
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.9", "8.8"), true);
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.10", "8.9"), true);
+		assert.strictEqual(plugin.isRemoteMinorNewer("9.0", "8.99"), true);
+	});
+
+	test("false when remote minor matches resolved minor line (#434)", () => {
+		assert.strictEqual(
+			plugin.isRemoteMinorNewer("8.10", "8.10.0-alpha1"),
+			false,
+		);
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.9", "8.9"), false);
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.9", "8.9.0"), false);
+	});
+
+	test("false when remote minor is older", () => {
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.8", "8.9"), false);
+		assert.strictEqual(
+			plugin.isRemoteMinorNewer("8.9", "8.10.0-alpha1"),
+			false,
+		);
 	});
 });
 
@@ -1991,7 +3421,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 		};
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-old"');
 
 		let fetchCalled = false;
@@ -2032,7 +3462,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 		};
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-current"');
 
 		Object.defineProperty(globalThis, "fetch", {
@@ -2072,7 +3502,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 		};
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		Object.defineProperty(globalThis, "fetch", {
 			value: async () => {
@@ -2161,7 +3591,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		writeFileSync(join(tempDir, "cluster.version"), "8.8.1");
 
 		const config = { cacheDir: tempDir, version: "8.8" };
-		await plugin.stopC8Run(config);
+		const result = await plugin.stopC8Run(config);
 
 		const output = captured.join("\n");
 		assert.ok(
@@ -2177,6 +3607,12 @@ describe("Cluster Plugin – stopC8Run", () => {
 		assert.ok(
 			!existsSync(join(tempDir, "cluster.version")),
 			"Version marker should be removed",
+		);
+		// Return value should carry the version so stop --purge can proceed
+		assert.strictEqual(
+			result,
+			"8.8.1",
+			"Should return the stale version so stop --purge can purge it",
 		);
 	});
 });
@@ -2240,5 +3676,1129 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 		writeFileSync(join(versionDir, "camunda.log"), String(process.pid));
 		const result = plugin.hasRunningClusterPidfiles(tempDir);
 		assert.strictEqual(result, false);
+	});
+
+	// #560 — the durable PID record must keep a running instance visible even
+	// after its install dir (and its .process pidfiles) is replaced/removed.
+	test("returns true from the durable PID record when the install dir is gone", async () => {
+		// No c8run-* dirs at all — only the cache-root record, referencing a
+		// live PID (our own). This is the orphaned-process scenario.
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+		assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
+	});
+
+	test("returns false from the durable PID record when its PIDs are dead", () => {
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [999999999],
+		});
+		assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #560 — durable running-cluster PID record & orphan reaping
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – running-cluster PID record (#560)", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+	});
+
+	afterEach(() => {
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	test("write/read/clear round-trips the record", () => {
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [111, 222, 111],
+		});
+		const record = plugin.readRunningClusterRecord(tempDir);
+		assert.strictEqual(record.version, "8.9");
+		// De-duplicated, positive integers only.
+		assert.deepStrictEqual([...record.pids].sort(), [111, 222]);
+
+		plugin.clearRunningClusterRecord(tempDir);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+	});
+
+	test("isVersionInstanceRunning is true from a live .process pidfile", () => {
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(versionDir, { recursive: true });
+		writeFileSync(join(versionDir, "camunda.process"), String(process.pid));
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.9"), true);
+	});
+
+	test("isVersionInstanceRunning is true from the record after the install dir is removed", async () => {
+		// No install dir; only the durable record attributes a live PID to 8.9.
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.9"), true);
+		// A different version is not implicated by that record.
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.8"), false);
+	});
+
+	test("purgeInstalledVersion refuses to remove a running version's install dir", () => {
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(versionDir, { recursive: true });
+		writeFileSync(join(versionDir, "camunda.process"), String(process.pid));
+
+		assert.throws(
+			() => plugin.purgeInstalledVersion({ cacheDir: tempDir, version: "8.9" }),
+			/still running/i,
+		);
+		// The install dir must survive the refused purge.
+		assert.strictEqual(existsSync(versionDir), true);
+	});
+
+	test("stopC8Run reaps an orphaned process the record still tracks after its install dir is gone", async () => {
+		// A real, long-lived child stands in for the orphaned Java process.
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		await new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		});
+
+		try {
+			assert.ok(child.pid, "spawned child must have a PID");
+			// Markers + record survive; the install dir (and its binary) does NOT,
+			// exactly as when a running version's cache dir is replaced/removed.
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.9");
+			plugin.writeRunningClusterRecord(
+				tempDir,
+				await liveSelfRecord({ pid: child.pid }),
+			);
+
+			assert.strictEqual(plugin.isPidAlive(child.pid), true);
+
+			const stopped = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version: "8.9",
+			});
+
+			// The orphan is terminated…
+			await pollUntil(async () => !plugin.isPidAlive(child.pid), 5000, 50);
+			assert.strictEqual(plugin.isPidAlive(child.pid), false);
+			// …markers and the record are cleaned up…
+			assert.strictEqual(existsSync(join(tempDir, "cluster.active")), false);
+			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+			// …and stop reports the version it stopped.
+			assert.strictEqual(stopped, "8.9");
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// #560 — a rolling `install` must refuse to replace a version's install dir
+	// while an instance started from it is still running (only the durable PID
+	// record, not a pidfile, may witness it). Otherwise the in-place upgrade
+	// orphans the process and frees none of its ports.
+	test("ensureC8RunInstalled rejects a rolling update while a live PID record exists, leaving the install intact", async () => {
+		const installDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(installDir, { recursive: true });
+		// A c8run binary so isC8RunInstalled() is true and findC8RunBinaryPath resolves.
+		writeFileSync(join(installDir, C8RUN_BINARY), "#!/bin/sh\n");
+		const config = { cacheDir: tempDir, version: "8.9", checkForUpdates: true };
+		// Stored ETag differs from the (stubbed) remote ETag → an update is available.
+		plugin.storeETag(config, "old-etag");
+		// The durable record is the ONLY witness that the version is still running
+		// (no .process pidfile), exactly the orphan-prevention path under test.
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+
+		const originalFetch = globalThis.fetch;
+		Object.defineProperty(globalThis, "fetch", {
+			value: async () => ({
+				ok: true,
+				headers: { get: (h: string) => (h === "etag" ? "new-etag" : null) },
+			}),
+			writable: true,
+			configurable: true,
+		});
+		try {
+			await assert.rejects(
+				() => plugin.ensureC8RunInstalled(config),
+				/still running/i,
+			);
+			// The install dir must survive the refused rolling update.
+			assert.strictEqual(existsSync(join(installDir, C8RUN_BINARY)), true);
+		} finally {
+			Object.defineProperty(globalThis, "fetch", {
+				value: originalFetch,
+				writable: true,
+				configurable: true,
+			});
+		}
+	});
+
+	// #560/#568 — the download/extract fallback must also refuse to run over a
+	// live instance. When the install dir exists but its binary is missing,
+	// isC8RunInstalled() is false, so the rolling-update guard is skipped and
+	// control falls through to download/extract, which would extract into the
+	// live version dir and overwrite files under the running cluster.
+	test("ensureC8RunInstalled refuses to (re)install over a running instance whose binary is missing", async () => {
+		const installDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(installDir, { recursive: true });
+		// Deliberately NO c8run binary → isC8RunInstalled() is false.
+		// A live instance is still attributed to 8.9 via the durable record.
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+		const config = { cacheDir: tempDir, version: "8.9" };
+
+		await assert.rejects(
+			() => plugin.ensureC8RunInstalled(config),
+			/still running/i,
+		);
+		// The refusal fires before any download/extract, so the dir is untouched.
+		assert.strictEqual(existsSync(installDir), true);
+	});
+
+	// #560 — the PID-reuse guard: a recorded PID is only honoured when its
+	// captured start signature still matches, so a reused numeric PID is not
+	// mistaken for the original cluster process.
+	test("recordedPidIsLive honours a matching signature and rejects a mismatch", () => {
+		const sig = plugin.processStartSignature(process.pid);
+		if (sig) {
+			// Platform can fingerprint: the real signature matches (live), a
+			// deliberately wrong one does not (treated as a reused PID → not live).
+			assert.strictEqual(plugin.recordedPidIsLive(process.pid, sig), true);
+			assert.strictEqual(
+				plugin.recordedPidIsLive(process.pid, `${sig}-tampered-mismatch`),
+				false,
+			);
+		} else {
+			// Platform cannot fingerprint (e.g. unsupported OS): degrade to a
+			// liveness-only check so a real orphan is never stranded.
+			assert.strictEqual(
+				plugin.recordedPidIsLive(process.pid, "unverifiable"),
+				true,
+			);
+		}
+		// A dead PID is never live, regardless of any recorded signature.
+		assert.strictEqual(plugin.recordedPidIsLive(999999999, "whatever"), false);
+	});
+
+	// #568 — a recorded entry with NO signature is trusted (liveness only) ONLY
+	// where the platform cannot fingerprint. On a fingerprinting platform our
+	// writer always signs live PIDs, so a signature-less entry can only be a
+	// stale/legacy/hand-edited cluster.pids and must be rejected rather than risk
+	// signalling a reused, unrelated process.
+	test("recordedPidIsLive rejects a signature-less live PID on fingerprinting platforms", () => {
+		const canFingerprint = plugin.platformSupportsProcessSignature();
+		const live = plugin.recordedPidIsLive(process.pid, undefined);
+		if (canFingerprint) {
+			assert.strictEqual(
+				live,
+				false,
+				"a signature-less record entry must not be trusted where fingerprinting is available",
+			);
+		} else {
+			assert.strictEqual(
+				live,
+				true,
+				"where no PID can carry a signature, degrade to liveness-only so a real orphan is never stranded",
+			);
+		}
+	});
+
+	// #568 — the same enforcement observed end-to-end: a signature-less durable
+	// record must not keep a version "running" on a fingerprinting platform.
+	test("isVersionInstanceRunning ignores a signature-less record on fingerprinting platforms", () => {
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+		const expected = !plugin.platformSupportsProcessSignature();
+		assert.strictEqual(
+			plugin.isVersionInstanceRunning(tempDir, "8.9"),
+			expected,
+		);
+	});
+
+	test("liveRecordedPids drops a recorded PID whose start signature no longer matches", () => {
+		const sig = plugin.processStartSignature(process.pid);
+		if (!sig) {
+			// Signature-based discrimination is not available on this platform;
+			// the guard degrades to liveness-only, which other tests already cover.
+			return;
+		}
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+			signatures: { [process.pid]: `${sig}-reused-pid` },
+		});
+		// The PID is alive but its signature mismatches → it is NOT ours.
+		assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.9"), false);
+	});
+
+	test("stopC8Run does not terminate a live PID whose recorded signature no longer matches", async () => {
+		// A real, long-lived child stands in for an unrelated process that reused
+		// the recorded numeric PID after the original cluster process exited.
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		await new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		});
+
+		try {
+			const sig = plugin.processStartSignature(child.pid);
+			if (!sig || child.pid == null) {
+				// Cannot fingerprint on this platform — skip; the liveness-only
+				// fallback is intentional and covered elsewhere.
+				return;
+			}
+			const pid = child.pid;
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.9");
+			// Recorded with a signature that will NOT match the live child.
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [pid],
+				signatures: { [pid]: `${sig}-stale-reused` },
+			});
+
+			await plugin.stopC8Run({ cacheDir: tempDir, version: "8.9" });
+
+			// The unrelated process must be left untouched…
+			assert.strictEqual(plugin.isPidAlive(child.pid), true);
+			// …and the now-unmatched record is cleared (no live recorded PIDs).
+			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// #560 — the start call site itself must persist the durable record. Drive
+	// the snapshot function used at that call site with a live child's pidfile
+	// and assert the cache-root record captures the live PID and its signature,
+	// so a regression that drops this snapshot cannot pass unnoticed.
+	test("recordRunningClusterPids snapshots the live PID and its signature from the install dir", () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		return new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		})
+			.then(() => {
+				if (child.pid == null) {
+					throw new Error("spawned child has no PID");
+				}
+				const pid = child.pid;
+				const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+				mkdirSync(versionDir, { recursive: true });
+				writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+				plugin.recordRunningClusterPids({ cacheDir: tempDir, version: "8.9" });
+
+				const record = plugin.readRunningClusterRecord(tempDir);
+				assert.strictEqual(record.version, "8.9");
+				assert.ok(
+					record.pids.includes(pid),
+					"the record must contain the live PID from the install dir",
+				);
+				const sig = plugin.processStartSignature(pid);
+				if (sig) {
+					assert.strictEqual(
+						record.signatures?.[pid],
+						sig,
+						"the record must capture the live PID's start signature",
+					);
+				}
+			})
+			.finally(() => {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			});
+	});
+
+	// #560 — a record with no version attribution must never expose its PIDs;
+	// otherwise a malformed cluster.pids could aim `cluster stop` at an
+	// unrelated live process.
+	test("readRunningClusterRecord rejects a record with no version even when it has PIDs", () => {
+		writeFileSync(
+			join(tempDir, "cluster.pids"),
+			JSON.stringify({ version: null, pids: [process.pid] }),
+		);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+	});
+
+	// #560 — cleanup / no-running paths must retire a stale record (no live
+	// PIDs) but keep one that still tracks a live process.
+	test("clearStaleRunningClusterRecord drops a dead-PID record but keeps a live one", async () => {
+		// Dead PID → the record is stale and must be retired.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [999999999],
+		});
+		plugin.clearStaleRunningClusterRecord(tempDir);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+
+		// Live PID → the record must survive.
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+		plugin.clearStaleRunningClusterRecord(tempDir);
+		assert.notStrictEqual(plugin.readRunningClusterRecord(tempDir), null);
+	});
+
+	// #560 — a record whose version fails the path-traversal guard must be
+	// treated as unusable, so `cluster stop` never interpolates a traversal
+	// version into a binary path.
+	test("readRunningClusterRecord rejects a record whose version fails validateVersionSpec", () => {
+		writeFileSync(
+			join(tempDir, "cluster.pids"),
+			JSON.stringify({ version: "foo/../../tmp", pids: [process.pid] }),
+		);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+
+		// A well-formed version is still accepted.
+		writeFileSync(
+			join(tempDir, "cluster.pids"),
+			JSON.stringify({ version: "8.9.5", pids: [process.pid] }),
+		);
+		assert.strictEqual(
+			plugin.readRunningClusterRecord(tempDir)?.version,
+			"8.9.5",
+		);
+	});
+
+	// #560 — termination is gated on the recorded start signature, not bare
+	// numeric liveness: a live PID whose signature no longer matches (PID reuse)
+	// must NOT be signalled, and reaping must report it as not-terminated.
+	test("reapClusterProcesses never signals a live PID whose recorded signature no longer matches", async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			// Record the live PID but with a signature that cannot match it,
+			// standing in for a PID that was reused by an unrelated process.
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [pid],
+				signatures: { [pid]: "linux:0-stale-reused" },
+			});
+
+			const reaped = await plugin.reapClusterProcesses(tempDir);
+
+			assert.strictEqual(
+				reaped,
+				0,
+				"a signature-mismatched PID must not be reaped",
+			);
+			assert.strictEqual(
+				plugin.isPidAlive(pid),
+				true,
+				"the unrelated live process must be left untouched",
+			);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// #560 — on a platform that can fingerprint processes, a recorded PID must
+	// never be persisted without a signature: otherwise a number reused after
+	// the process exits would fall back to numeric-only liveness and the reap
+	// path could signal an unrelated process.
+	test("recordRunningClusterPids records no PID without a signature on a fingerprinting platform", async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+			plugin.recordRunningClusterPids({ cacheDir: tempDir, version: "8.9" });
+
+			const record = plugin.readRunningClusterRecord(tempDir);
+			if (plugin.platformSupportsProcessSignature()) {
+				for (const recordedPid of record.pids) {
+					assert.ok(
+						record.signatures?.[recordedPid],
+						`recorded PID ${recordedPid} must carry a signature on a fingerprinting platform`,
+					);
+				}
+			}
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// #560 — the fingerprinting-capability check must be true on every
+	// CI-supported platform (Linux, macOS, Windows), so the record-building path
+	// omits un-fingerprintable PIDs rather than degrading to liveness-only.
+	test("platformSupportsProcessSignature is true on supported platforms", () => {
+		assert.strictEqual(plugin.platformSupportsProcessSignature(), true);
+	});
+
+	// #560 — deterministic coverage for the null-signature branch: a PID that is
+	// live at record time but whose fingerprint cannot be captured (the process
+	// exited in the capture window, or `ps` failed) must be OMITTED on a
+	// fingerprinting platform, never persisted without a signature. The signature
+	// source is injected so the branch is exercised without racing a real exit.
+	test("recordRunningClusterPids omits a live PID whose signature cannot be captured", async () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return; // liveness-only fallback platform: no signature branch to exercise
+		}
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+			// Signature capture forced to fail for a genuinely live PID.
+			plugin.recordRunningClusterPids(
+				{ cacheDir: tempDir, version: "8.9" },
+				{ signatureOf: () => null },
+			);
+			const omitted = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(
+				!omitted.pids.includes(pid),
+				"a live PID with no capturable signature must be omitted",
+			);
+
+			// With a signature the same live PID is recorded and carries it.
+			plugin.recordRunningClusterPids(
+				{ cacheDir: tempDir, version: "8.9" },
+				{ signatureOf: () => "stub-signature" },
+			);
+			const kept = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(
+				kept.pids.includes(pid),
+				"a fingerprintable live PID must be recorded",
+			);
+			assert.strictEqual(kept.signatures?.[pid], "stub-signature");
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// A fingerprint query that fails or times out once on a LIVE process (a slow
+	// PowerShell/CIM call on a loaded Windows runner) must not leave the process
+	// out of the stop record: stop only reaps recorded PIDs, so a dropped PID is
+	// orphaned. The signature source is injected so the transient failure is
+	// deterministic.
+	test("recordRunningClusterPids retries a transient signature failure so stop still reaps the process", async () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return; // liveness-only fallback platform: no signature branch to exercise
+		}
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+			let calls = 0;
+			plugin.recordRunningClusterPids(
+				{ cacheDir: tempDir, version: "8.9" },
+				{
+					signatureOf: (candidate: number) => {
+						calls += 1;
+						return calls === 1 ? null : plugin.processStartSignature(candidate);
+					},
+					signatureRetryDelayMs: 1,
+				},
+			);
+
+			assert.strictEqual(calls, 2, "the failed query must be retried once");
+			const record = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(
+				record.pids.includes(pid),
+				"a live PID whose first signature query failed must still be recorded",
+			);
+			assert.ok(
+				record.signatures?.[pid],
+				"the recorded PID must carry a signature",
+			);
+
+			assert.strictEqual(await plugin.reapClusterProcesses(tempDir), 1);
+			assert.ok(
+				await pollUntil(async () => !plugin.isPidAlive(pid), 10_000, 50),
+				"the recorded process must be terminated by the stop backstop",
+			);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// The retry is only for a process that is still alive: a PID that is gone is
+	// a final answer, and a signature that never materialises is still never
+	// persisted as a bare PID (that would re-open the PID-reuse hazard).
+	test("recordRunningClusterPids does not retry a dead PID and never records an unsigned one", () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return;
+		}
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(versionDir, { recursive: true });
+		const deadPid = 2 ** 22 + 12345;
+		assert.strictEqual(plugin.isPidAlive(deadPid), false);
+		writeFileSync(join(versionDir, "camunda.process"), String(deadPid));
+
+		let calls = 0;
+		plugin.recordRunningClusterPids(
+			{ cacheDir: tempDir, version: "8.9" },
+			{
+				signatureOf: () => {
+					calls += 1;
+					return null;
+				},
+				signatureRetryDelayMs: 1,
+				skipEmpty: true,
+			},
+		);
+
+		assert.strictEqual(calls, 1, "a dead PID must not be retried");
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+	});
+});
+
+describe("Cluster Plugin – withForwardedYes", () => {
+	// --yes/-y are c8ctl GLOBAL flags: the passthrough host consumes them
+	// (ctx.yes) and strips them from the args, so the plugin restores the one
+	// c8run verb documented to take it.
+	test("re-adds --yes to `secrets delete` when the host saw --yes", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["delete", "API_KEY"], { yes: true }),
+			["delete", "API_KEY", "--yes"],
+		);
+	});
+
+	test("does nothing when --yes was not passed", () => {
+		const tail = ["delete", "API_KEY"];
+		assert.strictEqual(plugin.withForwardedYes(tail, { yes: false }), tail);
+		assert.strictEqual(plugin.withForwardedYes(tail, undefined), tail);
+	});
+
+	test("never appends --yes to a verb other than delete", () => {
+		const tail = ["list"];
+		assert.strictEqual(plugin.withForwardedYes(tail, { yes: true }), tail);
+	});
+
+	test("finds the verb behind a leading --c8-version", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["--c8-version", "8.9", "delete", "K"], {
+				yes: true,
+			}),
+			["--c8-version", "8.9", "delete", "K", "--yes"],
+		);
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["--c8-version=8.9", "delete", "K"], {
+				yes: true,
+			}),
+			["--c8-version=8.9", "delete", "K", "--yes"],
+		);
+	});
+
+	test("does not duplicate a --yes / -y that is already present", () => {
+		const a = ["delete", "K", "--yes"];
+		const b = ["delete", "K", "-y"];
+		assert.strictEqual(plugin.withForwardedYes(a, { yes: true }), a);
+		assert.strictEqual(plugin.withForwardedYes(b, { yes: true }), b);
+	});
+
+	test("inserts --yes immediately before a forwarded `--` terminator", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["delete", "K", "--", "literal"], { yes: true }),
+			["delete", "K", "--yes", "--", "literal"],
+		);
+	});
+
+	test("a --yes / -y that only appears after `--` does not count as already present", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["delete", "K", "--", "--yes"], { yes: true }),
+			["delete", "K", "--yes", "--", "--yes"],
+		);
+	});
+
+	test("does not mutate the tail it receives", () => {
+		const tail = ["delete", "K"];
+		plugin.withForwardedYes(tail, { yes: true });
+		assert.deepStrictEqual(tail, ["delete", "K"]);
+	});
+});
+
+describe("Cluster Plugin – parseSecretsArgs", () => {
+	test("returns the tail unchanged when there is no --c8-version", () => {
+		const result = plugin.parseSecretsArgs(["set", "API_KEY"]);
+		assert.deepStrictEqual(result, {
+			version: null,
+			passthrough: ["set", "API_KEY"],
+		});
+	});
+
+	test("strips a leading --c8-version and its value", () => {
+		const result = plugin.parseSecretsArgs(["--c8-version", "8.10", "list"]);
+		assert.deepStrictEqual(result, { version: "8.10", passthrough: ["list"] });
+	});
+
+	test("strips a leading --c8-version=<value> form", () => {
+		const result = plugin.parseSecretsArgs(["--c8-version=8.10", "list"]);
+		assert.deepStrictEqual(result, { version: "8.10", passthrough: ["list"] });
+	});
+
+	test("throws when --c8-version=<value> has an empty value", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs(["--c8-version=", "list"]),
+			/Missing value for --c8-version/,
+		);
+	});
+
+	test("leaves a non-leading --c8-version untouched", () => {
+		const result = plugin.parseSecretsArgs(["list", "--c8-version", "8.10"]);
+		assert.deepStrictEqual(result, {
+			version: null,
+			passthrough: ["list", "--c8-version", "8.10"],
+		});
+	});
+
+	test("forwards an unknown verb unchanged (no c8ctl-side allowlist)", () => {
+		const result = plugin.parseSecretsArgs(["doctor"]);
+		assert.deepStrictEqual(result, { version: null, passthrough: ["doctor"] });
+	});
+
+	test("throws on an empty tail", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs([]),
+			/usage: c8ctl cluster secrets/,
+		);
+	});
+
+	test("throws when --c8-version has no value", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs(["--c8-version"]),
+			/Missing value for --c8-version/,
+		);
+	});
+
+	test("throws when --c8-version's value looks like a flag", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs(["--c8-version", "--stdin"]),
+			/Missing value for --c8-version/,
+		);
+	});
+});
+
+describe("Cluster Plugin – resolveSecretsPaths", () => {
+	test("absolutizes a relative import file against cwd", () => {
+		const result = plugin.resolveSecretsPaths(["import", "./secrets.env"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, [
+			"import",
+			resolve("/home/user/project", "./secrets.env"),
+		]);
+	});
+
+	test("leaves '-' (stdin) untouched for import", () => {
+		const result = plugin.resolveSecretsPaths(["import", "-"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, ["import", "-"]);
+	});
+
+	test("leaves an already-absolute import path untouched", () => {
+		const result = plugin.resolveSecretsPaths(["import", "/already/abs.env"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, ["import", "/already/abs.env"]);
+	});
+
+	test("leaves non-import verbs untouched", () => {
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, ["list"]);
+	});
+
+	test("absolutizes a relative C8RUN_SECRETS_DIR without mutating the input env", () => {
+		const env = { C8RUN_SECRETS_DIR: ".secrets" };
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user",
+			env,
+		});
+		assert.strictEqual(
+			result.env.C8RUN_SECRETS_DIR,
+			resolve("/home/user", ".secrets"),
+		);
+		assert.strictEqual(
+			env.C8RUN_SECRETS_DIR,
+			".secrets",
+			"input env must not be mutated",
+		);
+	});
+
+	test("leaves an already-absolute C8RUN_SECRETS_DIR untouched", () => {
+		const env = { C8RUN_SECRETS_DIR: "/abs/secrets" };
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user",
+			env,
+		});
+		assert.strictEqual(result.env.C8RUN_SECRETS_DIR, "/abs/secrets");
+	});
+
+	test("returns the same env reference when there is nothing to resolve", () => {
+		const env = {};
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user",
+			env,
+		});
+		assert.strictEqual(result.env, env);
+	});
+});
+
+describe("Cluster Plugin – selectSecretsVersion", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+	});
+
+	afterEach(() => {
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	test("an explicit version always wins", async () => {
+		const result = await plugin.selectSecretsVersion(tempDir, {
+			explicit: "8.9.0-alpha5",
+		});
+		assert.strictEqual(result, "8.9.0-alpha5");
+	});
+
+	test("rejects an invalid explicit version", async () => {
+		await assert.rejects(
+			() => plugin.selectSecretsVersion(tempDir, { explicit: "../evil" }),
+			/Invalid version string/,
+		);
+	});
+
+	test("prefers the currently running cluster's version over installed ones", async () => {
+		writeFileSync(join(tempDir, "cluster.active"), "running");
+		writeFileSync(join(tempDir, "cluster.version"), "8.9.0-alpha5");
+		mkdirSync(join(tempDir, "c8run-8.10"), { recursive: true });
+		const runningDir = join(
+			tempDir,
+			"c8run-8.9.0-alpha5",
+			"c8run-8.9.0-alpha5.1",
+		);
+		mkdirSync(runningDir, { recursive: true });
+		writeFileSync(join(runningDir, "camunda.process"), String(process.pid));
+
+		const result = await plugin.selectSecretsVersion(tempDir, {});
+		assert.strictEqual(result, "8.9.0-alpha5");
+	});
+
+	test("falls back to the highest installed version when nothing is running", async () => {
+		mkdirSync(join(tempDir, "c8run-8.8"), { recursive: true });
+		mkdirSync(join(tempDir, "c8run-8.10"), { recursive: true });
+
+		const result = await plugin.selectSecretsVersion(tempDir, {});
+		assert.strictEqual(result, "8.10");
+	});
+
+	test("returns null when nothing is running or installed", async () => {
+		const result = await plugin.selectSecretsVersion(tempDir, {});
+		assert.strictEqual(result, null);
+	});
+});
+
+describe("Cluster Plugin – mapSecretsFailure", () => {
+	test("returns null on a successful exit", () => {
+		const result = plugin.mapSecretsFailure(
+			0,
+			"unsupported operation: secrets",
+			"8.9",
+		);
+		assert.strictEqual(result, null);
+	});
+
+	test("maps c8run's unsupported-operation error to an upgrade hint", () => {
+		const result = plugin.mapSecretsFailure(
+			1,
+			"unsupported operation: secrets\n",
+			"8.9",
+		);
+		assert.ok(result?.includes("8.9"), "hint should name the resolved version");
+		assert.ok(
+			result?.includes("c8ctl cluster install 8.9"),
+			"hint should suggest refreshing the install",
+		);
+	});
+
+	test("leaves any other c8run failure untouched", () => {
+		const result = plugin.mapSecretsFailure(
+			1,
+			'invalid secret name "1BAD"',
+			"8.9",
+		);
+		assert.strictEqual(result, null);
+	});
+});
+
+describe("Cluster Plugin – runClusterSecrets", () => {
+	let tempDir: string;
+	let captured: string[];
+	let originalError: typeof console.error;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		captured = [];
+		originalError = console.error;
+		console.error = (...args: unknown[]) => {
+			captured.push(args.map(String).join(" "));
+		};
+	});
+
+	afterEach(() => {
+		console.error = originalError;
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	function installFakeBinary(version: string) {
+		const binaryDir = join(tempDir, `c8run-${version}`, `c8run-${version}.1`);
+		mkdirSync(binaryDir, { recursive: true });
+		const binaryPath = join(binaryDir, C8RUN_BINARY);
+		writeFileSync(binaryPath, "");
+		return binaryPath;
+	}
+
+	/** Minimal stand-in for the ChildProcess spawn() returns: an EventEmitter with a stderr stream. */
+	class FakeC8RunProcess extends EventEmitter {
+		readonly stderr = new EventEmitter();
+	}
+
+	function makeFakeSpawn({
+		exitCode = 0,
+		stderrChunks = [],
+	}: {
+		exitCode?: number;
+		stderrChunks?: string[];
+	} = {}) {
+		const calls: {
+			command: string;
+			args: string[];
+			options: Record<string, unknown>;
+		}[] = [];
+		const spawnFn = (
+			command: string,
+			args: string[],
+			options: Record<string, unknown>,
+		) => {
+			const proc = new FakeC8RunProcess();
+			calls.push({ command, args, options });
+			queueMicrotask(() => {
+				for (const chunk of stderrChunks) {
+					proc.stderr.emit("data", Buffer.from(chunk));
+				}
+				proc.emit("close", exitCode);
+			});
+			return proc;
+		};
+		return { spawnFn, calls };
+	}
+
+	test("spawns c8run secrets with the forwarded args, inherited stdio, and the binary's own cwd", async () => {
+		const binaryPath = installFakeBinary("8.9");
+		const { spawnFn, calls } = makeFakeSpawn();
+
+		await plugin.runClusterSecrets(tempDir, ["set", "API_KEY", "--stdin"], {
+			explicitVersion: "8.9",
+			spawnFn,
+			cwd: tempDir,
+			env: {},
+		});
+
+		assert.strictEqual(calls.length, 1);
+		assert.strictEqual(calls[0].command, binaryPath);
+		assert.deepStrictEqual(calls[0].args, [
+			"secrets",
+			"set",
+			"API_KEY",
+			"--stdin",
+		]);
+		assert.strictEqual(calls[0].options.cwd, dirname(binaryPath));
+		assert.deepStrictEqual(calls[0].options.stdio, [
+			"inherit",
+			"inherit",
+			"pipe",
+		]);
+	});
+
+	test("propagates a non-zero exit code from c8run", async () => {
+		installFakeBinary("8.9");
+		const { spawnFn } = makeFakeSpawn({ exitCode: 3 });
+		let exitCode: number | string | null | undefined;
+		const restoreExit = mockProcessExit((code) => {
+			exitCode = code;
+		});
+
+		try {
+			await plugin
+				.runClusterSecrets(tempDir, ["list"], {
+					explicitVersion: "8.9",
+					spawnFn,
+					cwd: tempDir,
+					env: {},
+				})
+				.catch(() => {});
+		} finally {
+			restoreExit();
+		}
+
+		assert.strictEqual(exitCode, 3);
+	});
+
+	test("maps c8run's unsupported-operation stderr to an upgrade hint", async () => {
+		installFakeBinary("8.9");
+		const { spawnFn } = makeFakeSpawn({
+			exitCode: 1,
+			stderrChunks: ["unsupported operation: secrets\n"],
+		});
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin
+				.runClusterSecrets(tempDir, ["list"], {
+					explicitVersion: "8.9",
+					spawnFn,
+					cwd: tempDir,
+					env: {},
+				})
+				.catch(() => {});
+		} finally {
+			restoreExit();
+		}
+
+		const output = captured.join("\n");
+		assert.ok(output.includes('does not support "secrets"'));
+		assert.ok(output.includes("c8ctl cluster install 8.9"));
+	});
+
+	test("exits 1 with an install hint when nothing is installed", async () => {
+		const { spawnFn, calls } = makeFakeSpawn();
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin
+				.runClusterSecrets(tempDir, ["list"], {
+					spawnFn,
+					cwd: tempDir,
+					env: {},
+				})
+				.catch(() => {});
+		} finally {
+			restoreExit();
+		}
+
+		assert.strictEqual(
+			calls.length,
+			0,
+			"should never spawn without a resolved version",
+		);
+		const output = captured.join("\n");
+		assert.ok(output.includes("No c8run installed locally"));
 	});
 });

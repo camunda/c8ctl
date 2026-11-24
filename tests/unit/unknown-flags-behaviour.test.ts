@@ -176,7 +176,7 @@ describe("CLI behavioural: unknown flags — search", () => {
 	});
 
 	test("no warning for valid global flag (--profile)", async () => {
-		const result = await c8("search", "pi", "--dry-run", "--profile", "dev");
+		const result = await c8("search", "pi", "--dry-run", "--profile", "local");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
 	});
@@ -273,7 +273,7 @@ describe("CLI behavioural: unknown flags — get", () => {
 			"12345",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
@@ -326,6 +326,64 @@ describe("CLI behavioural: unknown flags — create", () => {
 		assertNoWarning(result.stderr);
 	});
 
+	test("--businessId is valid for process instances but unknown for users", async () => {
+		const piResult = await c8(
+			"create",
+			"pi",
+			"--dry-run",
+			"--id",
+			"my-process",
+			"--businessId",
+			"order-123",
+		);
+		assert.strictEqual(piResult.status, 0, `stderr: ${piResult.stderr}`);
+		assertNoWarning(piResult.stderr);
+
+		const userResult = await c8(
+			"create",
+			"user",
+			"--dry-run",
+			"--username",
+			"john",
+			"--name",
+			"John Doe",
+			"--email",
+			"john@example.com",
+			"--password",
+			"secret",
+			"--businessId",
+			"order-123",
+		);
+		assert.strictEqual(userResult.status, 0, `stderr: ${userResult.stderr}`);
+		assertWarning(userResult.stderr, "businessId");
+	});
+
+	test("--username is valid for users but unknown for process instances", async () => {
+		const userResult = await c8(
+			"create",
+			"user",
+			"--dry-run",
+			"--username",
+			"john",
+			"--password",
+			"secret",
+		);
+		assert.strictEqual(userResult.status, 0, `stderr: ${userResult.stderr}`);
+		assertNoWarning(userResult.stderr);
+
+		const piResult = await c8(
+			"create",
+			"pi",
+			"--dry-run",
+			"--id",
+			"my-process",
+			"--username",
+			"john",
+		);
+		assert.strictEqual(piResult.status, 0, `stderr: ${piResult.stderr}`);
+		assertWarning(piResult.stderr, "username");
+	});
+
 	test("--sortBy is unknown for create (search-only flag)", async () => {
 		const result = await c8(
 			"create",
@@ -366,7 +424,7 @@ describe("CLI behavioural: unknown flags — delete", () => {
 			"user-key-123",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
@@ -398,7 +456,7 @@ describe("CLI behavioural: unknown flags — cancel", () => {
 			"12345",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
@@ -539,7 +597,7 @@ describe("CLI behavioural: unknown flags — resolve", () => {
 			"12345",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);

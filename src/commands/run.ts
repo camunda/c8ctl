@@ -2,7 +2,7 @@
  * Run command — deploy a BPMN file and start a process instance in one step.
  *
  * Per #288, the body lives directly in the `defineCommand` handler:
- * dry-run preview via the framework's `dryRun()` helper, validation
+ * dry-run preview via the context's `ctx.dryRun()` helper, validation
  * up-front, and `throw` on every error path so the framework's
  * `handleCommandError` wrapper owns process termination.
  */
@@ -13,16 +13,9 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { resolveTenantId } from "../config.ts";
-
-/**
- * Extract process ID from BPMN file content.
- */
-function extractProcessId(bpmnContent: string): string | null {
-	const match = bpmnContent.match(/process[^>]+id="([^"]+)"/);
-	return match ? match[1] : null;
-}
+import { resolveTenantId } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
+import { extractProcessId, parseVariablesFlag } from "../utils/index.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
 
@@ -35,13 +28,17 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 
 	// Dry-run preview comes first, mirroring the pre-#288 order pinned by
 	// `tests/unit/form-topology-run-behaviour.test.ts`. The body shape
-	// `{ path, variables }` is part of that contract.
-	const dr = dryRun({
+	// `{ path, variables, businessId }` is part of that contract.
+	const dr = ctx.dryRun({
 		command: "run",
 		method: "POST",
 		endpoint: "/deployments + /process-instances",
 		profile: ctx.profile,
-		body: { path, variables: flags.variables },
+		body: {
+			path,
+			variables: flags.variables,
+			businessId: flags.businessId,
+		},
 	});
 	if (dr) return dr;
 
@@ -63,13 +60,7 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 	// belongs.
 	let variables: Record<string, unknown> | undefined;
 	if (flags.variables !== undefined) {
-		try {
-			variables = JSON.parse(flags.variables);
-		} catch (error) {
-			throw new Error(
-				`Invalid JSON for variables: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
+		variables = parseVariablesFlag({ raw: flags.variables });
 	}
 
 	// Read BPMN file and extract process ID.
@@ -104,6 +95,9 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 		processDefinitionId: ProcessDefinitionId.assumeExists(processId),
 		tenantId: TenantId.assumeExists(tenantId),
 		...(variables !== undefined && { variables }),
+		...(flags.businessId !== undefined && {
+			businessId: flags.businessId,
+		}),
 	});
 	logger.success("Process instance created", createResult.processInstanceKey);
 

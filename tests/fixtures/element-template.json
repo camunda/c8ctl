@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/@camunda/zeebe-element-templates-json-schema/resources/schema.json",
+  "name": "Test Template",
+  "id": "test-template-1",
+  "appliesTo": ["bpmn:Task"],
+  "properties": [
+    {
+      "label": "Task Type",
+      "type": "String",
+      "binding": { "type": "zeebe:taskDefinition", "property": "type" },
+      "value": "test-type"
+    }
+  ]
+}

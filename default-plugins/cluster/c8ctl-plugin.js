@@ -8,26 +8,39 @@
  *   c8ctl cluster stop  [<version>]
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import {
+  closeSync,
   createWriteStream,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   writeFileSync,
+  renameSync,
   rmSync,
   readdirSync,
   readFileSync,
+  readSync,
+  statSync,
 } from 'node:fs';
+import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename, isAbsolute, resolve } from 'node:path';
+import { finished } from 'node:stream/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // Version aliases – dynamic discovery with package.json fallback
 // ---------------------------------------------------------------------------
 
-const DOWNLOAD_BASE_URL = 'https://downloads.camunda.cloud/release/camunda/c8run/';
+// C8CTL_C8RUN_DOWNLOAD_URL overrides the download center base URL (e.g. for
+// mirrors or tests that must not depend on network access).
+const DOWNLOAD_BASE_URL = (
+  process.env.C8CTL_C8RUN_DOWNLOAD_URL || 'https://downloads.camunda.cloud/release/camunda/c8run/'
+).replace(/\/*$/, '/');
 
 const _pluginPackageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
@@ -58,6 +71,36 @@ export function isRollingVersion(versionSpec) {
 }
 
 /**
+ * Extract the leading major.minor pair from a version string.
+ * Accepts minor patterns ("8.10") and concrete versions ("8.10.0-alpha1").
+ * Returns { major, minor } or null if the string has no major.minor prefix.
+ */
+export function majorMinorOf(version) {
+  const match = /^(\d+)\.(\d+)/.exec(version);
+  if (!match) return null;
+  return { major: Number(match[1]), minor: Number(match[2]) };
+}
+
+/**
+ * True when the remote alias target is a strictly newer minor line than the
+ * locally resolved version. The remote alias always resolves to a major.minor
+ * pattern (e.g. "8.10"), whereas the resolved version may be a concrete pin
+ * (e.g. "8.10.0-alpha1") within that same minor line. Comparing the raw
+ * strings produces false positives (#434): "8.10" !== "8.10.0-alpha1" even
+ * though no newer release exists. Compare at the major.minor level instead.
+ */
+export function isRemoteMinorNewer(remoteVersion, resolvedVersion) {
+  const remote = majorMinorOf(remoteVersion);
+  const resolved = majorMinorOf(resolvedVersion);
+  // If either side is unparseable, fall back to the previous behavior (string inequality).
+  if (!remote || !resolved) return remoteVersion !== resolvedVersion;
+  return (
+    remote.major > resolved.major ||
+    (remote.major === resolved.major && remote.minor > resolved.minor)
+  );
+}
+
+/**
  * Fetch the c8run download directory listing and discover the latest
  * stable and alpha minor versions.
  *
@@ -81,7 +124,8 @@ export async function discoverLatestVersions() {
  * - Minor version directories (e.g. "8.8/", "8.9/") are rolling releases
  *   updated in-place.
  * - An alpha train exists when there are "X.Y.0-alphaN/" directories
- *   for a given minor that has NOT yet shipped a GA release (X.Y.0/).
+ *   for a given minor that has NOT yet shipped a GA release (any X.Y.Z/
+ *   directory without a prerelease suffix).
  *   The highest such minor is the alpha train.
  * - stable = highest minor that is NOT in the alpha train.
  * - alpha  = highest minor overall (regardless of alpha train membership).
@@ -91,8 +135,10 @@ export function parseVersionsFromHtml(html) {
   const minorMatches = [...html.matchAll(/href="(\d+\.\d+)\/"/g)].map(m => m[1]);
   // Match alpha directories like "8.9.0-alpha5/"
   const alphaMatches = [...html.matchAll(/href="(\d+\.\d+)\.0-alpha\d+\/"/g)].map(m => m[1]);
-  // Match GA release directories like "8.9.0/"
-  const gaMatches = [...html.matchAll(/href="(\d+\.\d+)\.0\/"/g)].map(m => m[1]);
+  // Match GA release directories like "8.9.0/" or "8.10.4/". Any non-prerelease
+  // X.Y.Z directory proves the minor has shipped: a listing can contain a patch
+  // release without the X.Y.0 directory (e.g. "8.6.11/" without "8.6.0/").
+  const gaMatches = [...html.matchAll(/href="(\d+\.\d+)\.\d+\/"/g)].map(m => m[1]);
 
   if (minorMatches.length === 0) return null;
 
@@ -169,21 +215,57 @@ function readLocalAliasMapping(cacheDir, alias) {
   const filePath = getAliasMappingPath(cacheDir, alias);
   if (!existsSync(filePath)) return null;
   try {
-    const value = readFileSync(filePath, 'utf-8').trim();
     // Only use the cached mapping if the version is actually installed
-    const config = { cacheDir, version: value };
-    return isC8RunInstalled(config) ? value : null;
+    return findInstalledAliasTarget(cacheDir, readFileSync(filePath, 'utf-8').trim(), alias);
   } catch {
     return null;
   }
 }
 
+/**
+ * Return the installed version that satisfies an alias target, or null.
+ * An exact install wins; for a rolling minor pattern ("8.9") the highest
+ * installed pin in that minor line ("8.9.5") also counts, so a compatible
+ * pinned install is not re-downloaded (#431). For `stable`, an install whose
+ * build is a prerelease never counts — whether pinned ("c8run-8.10.0-alpha1")
+ * or a rolling dir that still holds an alpha build ("c8run-8.10/c8run-8.10.0-alpha1").
+ */
+function findInstalledAliasTarget(cacheDir, value, alias) {
+  const accepts = (version) => {
+    const binaryPath = findC8RunBinaryPath({ cacheDir, version });
+    if (!binaryPath) return false;
+    return alias !== 'stable' || !isPrereleaseBuild(basename(dirname(binaryPath)));
+  };
+
+  if (accepts(value)) return value;
+
+  if (isMinorVersionPattern(value)) {
+    const installedVersions = getInstalledVersionsList(cacheDir)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const match = installedVersions
+      .filter((v) => v.startsWith(value + '.'))
+      .reverse()
+      .find(accepts);
+    if (match) return match;
+  }
+
+  return null;
+}
+
+/** True for a build dir like "c8run-8.10.0-alpha1" (anything with a semver prerelease suffix). */
+function isPrereleaseBuild(buildDirName) {
+  return /^c8run-\d+\.\d+(\.\d+)?-/.test(buildDirName);
+}
+
+/** Persist an alias mapping. Returns false if it could not be written. */
 export function storeLocalAliasMapping(cacheDir, alias, resolved) {
   try {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(getAliasMappingPath(cacheDir, alias), resolved);
+    return true;
   } catch {
     // Best-effort — don't break the command if we can't persist
+    return false;
   }
 }
 
@@ -208,16 +290,21 @@ export function _resetDynamicAliasCache() {
 }
 
 /**
- * Non-blocking background check: query the remote download server and print
- * a hint if the remote alias resolves to a different (newer) version.
+ * Non-blocking background check: query the remote download server and act
+ * if the remote alias resolves to a newer minor than the one being started.
  *
- * Important: does NOT update the persisted alias mapping. The mapping is only
- * updated when the user explicitly runs `cluster install`, keeping `start`
- * deterministic across runs.
+ * - Newer version already installed (e.g. via `cluster install 8.10`): the
+ *   persisted alias mapping is advanced to it, so the *next* `start` uses it.
+ *   Nothing is downloaded — the user already chose to install that version.
+ * - Newer version not installed: only a hint is printed; the mapping is left
+ *   alone so `start` never silently switches to a version it would have to
+ *   download.
+ *
+ * The current run is never affected: it has already resolved its version.
  *
  * Returns the fire-and-forget promise (for testing).
  */
-export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
+export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion, cacheDir) {
   const logger = getLogger();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -228,7 +315,22 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
         if (html) {
           const remote = parseVersionsFromHtml(html);
           const remoteVersion = remote?.[versionSpec];
-          if (remoteVersion && remoteVersion !== resolvedVersion) {
+          if (!remoteVersion || !isRemoteMinorNewer(remoteVersion, resolvedVersion)) return;
+          const installed = cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion, versionSpec);
+          if (installed) {
+            if (storeLocalAliasMapping(cacheDir, versionSpec, remoteVersion)) {
+              logger.info(
+                `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed. ` +
+                `The next "c8ctl cluster start ${versionSpec}" will use it.`,
+              );
+            } else {
+              // Name the exact install: a plain "8.10" would look for c8run-8.10 and download it.
+              logger.info(
+                `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed, ` +
+                `but the cached alias could not be updated. Start it with: c8ctl cluster start ${installed}`,
+              );
+            }
+          } else {
             logger.info(
               `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
               `Install it with: c8ctl cluster install ${versionSpec}`,
@@ -253,6 +355,27 @@ function fireAndForget(promise) {
   return promise.catch(() => {});
 }
 
+/**
+ * Give the background `start` hints (alias freshness, rolling update) a short,
+ * bounded chance to print before a failed start calls process.exit(), which
+ * would otherwise drop them mid-flight. A failed start is when a newer version
+ * is most worth knowing about.
+ */
+export async function flushStartHints(config, timeoutMs = 1000) {
+  const pending = [config?._aliasHintPromise, config?._hintPromise].filter(Boolean);
+  if (pending.length === 0) return;
+  let timer;
+  await Promise.race([
+    Promise.all(pending),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // ---------------------------------------------------------------------------
 // Plugin metadata
 // ---------------------------------------------------------------------------
@@ -264,6 +387,25 @@ export const metadata = {
     'cluster': {
       description:
         'Manage local Camunda 8 cluster — start, stop, status, logs, install, delete, or list versions',
+      // A bare-function plugin command only receives parsed positionals from
+      // the host; every flag it does not declare is dropped before the handler
+      // runs. This command needs raw flags for two reasons: its own
+      // --purge / --debug / --c8-version, and the arbitrary flags `cluster
+      // secrets` forwards to c8run (--stdin, --all, ...). `passthrough` is the
+      // supported way to receive them — the host strips only c8ctl's global
+      // flags (--profile, --json, --yes, ...) and forwards everything else
+      // verbatim. A command cannot combine `passthrough` with declared `flags`,
+      // so the subcommand flags are documented via `flagsHint` instead.
+      passthrough: true,
+      passthroughHint:
+        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin. For local management, physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.',
+      flagsHint: [
+        '--c8-version <version>  Camunda version, alias or major.minor (alternative to the positional <version>)',
+        '--debug                 (start, stop) Stream raw c8run output',
+        '--purge                 (stop only) Also delete runtime data after stopping',
+        '--physical-tenants <ids> (start only) Comma-separated physical tenants for this run (repeatable; Camunda 8.10+)',
+        '--physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (also --physical-tenant=<id>)',
+      ],
       subcommands: [
         { name: 'start', description: 'Start local Camunda 8 cluster' },
         { name: 'stop', description: 'Stop local Camunda 8 cluster' },
@@ -274,6 +416,9 @@ export const metadata = {
         { name: 'delete', description: 'Remove a cached version' },
         { name: 'log', description: 'Stream cluster logs' },
         { name: 'logs', description: 'Stream cluster logs' },
+        { name: 'purge', description: 'Delete runtime data (keeps binary) so the next start is fresh' },
+        { name: 'secrets', description: 'Manage local development secrets (passed through to c8run)' },
+        { name: 'physical-tenants', description: 'Manage local physical tenants (passed through to c8run; Camunda 8.10+)' },
       ],
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
@@ -286,6 +431,15 @@ export const metadata = {
         { command: 'c8ctl cluster list-remote', description: 'List all versions available on the remote download server' },
         { command: 'c8ctl cluster install 8.8', description: 'Download a version without starting it' },
         { command: 'c8ctl cluster delete 8.8', description: 'Remove a locally cached version' },
+        { command: 'c8ctl cluster purge 8.8', description: 'Delete runtime data for a version (binary stays intact)' },
+        { command: 'c8ctl cluster stop --purge', description: 'Stop the running cluster and delete its runtime data' },
+        { command: 'c8ctl cluster secrets set OPENAI_API_KEY', description: 'Store a secret (prompts, no-echo)' },
+        { command: 'c8ctl cluster secrets list', description: 'List secret names (values are never shown)' },
+        { command: 'c8ctl cluster secrets import .env.secrets', description: 'Import secrets from a dotenv file' },
+        { command: 'c8ctl cluster secrets delete OPENAI_API_KEY --yes', description: 'Delete a secret without prompting' },
+        { command: 'c8ctl cluster physical-tenants --c8-version 8.10 add sales', description: 'Save a physical tenant using an installed 8.10 build' },
+        { command: 'c8ctl cluster start 8.10 --physical-tenants sales,hr', description: 'Start physical tenants for one run only' },
+        { command: 'c8ctl cluster secrets --physical-tenant sales set OPENAI_API_KEY', description: 'Store a secret for one physical tenant' },
       ],
     },
   },
@@ -314,11 +468,17 @@ function getLogger() {
 
 const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
+// Durable running-cluster PID record, written at start time. Unlike c8run's
+// own `.process` pidfiles — which live INSIDE a version's install dir and
+// vanish when that dir is replaced or removed — this record lives at the
+// cache root, so a running instance stays trackable (status/stop) even after
+// its install directory is deleted or upgraded out from under it (#560).
+const PID_RECORD_FILE = 'cluster.pids';
 const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
 const HEALTH_CHECK_TIMEOUT_MS = 3_000;
 const ALIAS_COLUMN_WIDTH = 22;
 
-function getCacheDir() {
+export function getCacheDir() {
   const envDir = process.env.C8RUN_CACHE_DIR;
   if (envDir) {
     return envDir;
@@ -342,6 +502,38 @@ function getCacheDir() {
         'c8run',
       );
   }
+}
+
+/**
+ * Platform/architecture pairs the Camunda Download Center publishes a
+ * Camunda 8 Run build for: darwin-aarch64, darwin-x86_64, linux-x86_64 and
+ * windows-x86_64. There is no Linux or Windows arm64 build.
+ */
+const PUBLISHED_PLATFORMS = {
+  darwin: ['x64', 'arm64'],
+  linux: ['x64'],
+  win32: ['x64'],
+};
+
+/**
+ * Why Camunda 8 Run cannot be downloaded for this platform, or null when it
+ * can. A mirror (C8CTL_C8RUN_DOWNLOAD_URL) may host other builds, so any
+ * platform is allowed when one is set.
+ */
+export function unpublishedPlatformMessage({
+  platform = osPlatform(),
+  arch = osArch(),
+  mirror = process.env.C8CTL_C8RUN_DOWNLOAD_URL,
+} = {}) {
+  if (mirror) return null;
+  if (Object.hasOwn(PUBLISHED_PLATFORMS, platform) && PUBLISHED_PLATFORMS[platform].includes(arch)) {
+    return null;
+  }
+  return (
+    `Camunda 8 Run is not published for ${platform} ${arch}. ` +
+    'The Camunda Download Center has builds for macOS (x64, arm64), Linux (x64) and Windows (x64). ' +
+    'To use your own build, set C8CTL_C8RUN_DOWNLOAD_URL to a mirror with the same layout that hosts it.'
+  );
 }
 
 function getPlatformIdentifier() {
@@ -402,14 +594,690 @@ function formatLocalVersionsHint(cacheDir) {
   return `Locally available versions:\n${versions.map(v => `  ${v}`).join('\n')}`;
 }
 
-function getDownloadUrl(version) {
+function getArchiveName(version) {
   const platformInfo = getPlatformIdentifier();
-  return `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+  return `camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+}
+
+function getDownloadUrl(version) {
+  return `${DOWNLOAD_BASE_URL}${version}/${getArchiveName(version)}`;
+}
+
+// A c8run archive is several hundred MB, so a single dropped connection (a
+// proxy or load balancer closing the socket, a Wi-Fi hiccup) must not fail
+// the whole `cluster start`. downloadWithRetry() makes one initial attempt
+// plus up to DOWNLOAD_MAX_RETRIES retries, resuming with an HTTP Range request
+// where the server allows it, and aborts an attempt that receives no data for
+// DOWNLOAD_STALL_TIMEOUT_MS (undici's own body timeout is 300s).
+const DOWNLOAD_MAX_RETRIES = 3;
+const DOWNLOAD_RETRY_BASE_DELAY_MS = 2_000;
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
+const MB = 1024 * 1024;
+const PROGRESS_STEP_PERCENT = 5;
+const PROGRESS_INTERVAL_MS = 5_000;
+
+// TLS certificate errors, which a retry cannot fix (Node's X509 verification
+// codes, see https://nodejs.org/api/tls.html#x509-certificate-error-codes,
+// except OUT_OF_MEM). File-system failures are tagged by fileSystemError().
+const TLS_ERROR_CODES = new Set([
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_CRL',
+  'UNABLE_TO_DECRYPT_CERT_SIGNATURE',
+  'UNABLE_TO_DECRYPT_CRL_SIGNATURE',
+  'UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY',
+  'CERT_SIGNATURE_FAILURE',
+  'CRL_SIGNATURE_FAILURE',
+  'CERT_NOT_YET_VALID',
+  'CERT_HAS_EXPIRED',
+  'CRL_NOT_YET_VALID',
+  'CRL_HAS_EXPIRED',
+  'ERROR_IN_CERT_NOT_BEFORE_FIELD',
+  'ERROR_IN_CERT_NOT_AFTER_FIELD',
+  'ERROR_IN_CRL_LAST_UPDATE_FIELD',
+  'ERROR_IN_CRL_NEXT_UPDATE_FIELD',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'CERT_CHAIN_TOO_LONG',
+  'CERT_REVOKED',
+  'INVALID_CA',
+  'PATH_LENGTH_EXCEEDED',
+  'INVALID_PURPOSE',
+  'CERT_UNTRUSTED',
+  'CERT_REJECTED',
+  'HOSTNAME_MISMATCH',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
+/**
+ * Read a millisecond override from the environment. These are internal knobs
+ * (like C8CTL_STOP_WAIT_TIMEOUT_MS) so tests can keep backoff and stall
+ * detection fast; unset, empty or invalid values fall back to the default.
+ */
+function msFromEnv(name, fallback, { allowZero = true } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || (!allowZero && value === 0)) return fallback;
+  return value;
+}
+
+function formatMB(bytes) {
+  return `${Math.floor(bytes / MB)} MB`;
+}
+
+/** Like formatMB, but shows KB below 1 MB so small amounts don't read as "0 MB". */
+function formatSize(bytes) {
+  return bytes > 0 && bytes < MB ? `${Math.max(1, Math.floor(bytes / 1024))} KB` : formatMB(bytes);
+}
+
+function formatMBPrecise(bytes) {
+  return `${(bytes / MB).toFixed(1)} MB`;
+}
+
+function formatDuration(ms) {
+  return ms >= 1000 ? `${Math.round(ms / 100) / 10}s` : `${Math.round(ms)}ms`;
+}
+
+function formatThroughput(bytes, ms) {
+  return ms > 0 ? `${((bytes / MB) / (ms / 1000)).toFixed(1)} MB/s` : 'n/a';
+}
+
+function formatEta(ms) {
+  const s = Math.ceil(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+function downloadError(message, props = {}) {
+  const { cause, ...rest } = props;
+  return Object.assign(new Error(message, cause === undefined ? undefined : { cause }), rest);
+}
+
+/**
+ * Flatten an error and its `cause` chain into `{ name, code, message }`
+ * entries, outermost first. Undici reports a dropped download as
+ * `TypeError: terminated` whose cause carries the useful part (e.g.
+ * `UND_ERR_SOCKET: other side closed`).
+ */
+export function errorChain(error) {
+  const chain = [];
+  const seen = new Set();
+  let current = error;
+  while (current !== undefined && current !== null && !seen.has(current) && chain.length < 10) {
+    seen.add(current);
+    if (typeof current === 'object') {
+      chain.push({
+        name: typeof current.name === 'string' ? current.name : 'Error',
+        code: typeof current.code === 'string' ? current.code : undefined,
+        message: typeof current.message === 'string' ? current.message : String(current),
+      });
+      current = current.cause;
+    } else {
+      chain.push({ name: typeof current, code: undefined, message: String(current) });
+      break;
+    }
+  }
+  return chain;
+}
+
+function formatChainEntry({ name, code, message }) {
+  return `${name}${code ? ` [${code}]` : ''}: ${message}`;
+}
+
+/** Root cause as "CODE: message" (or just the message when there is no code). */
+function rootCauseDetail(error) {
+  const root = errorChain(error).at(-1);
+  if (!root) return String(error);
+  return root.code ? `${root.code}: ${root.message}` : root.message;
+}
+
+/** Map a network failure to plain words a user can act on. */
+export function describeDownloadFailure(error) {
+  if (typeof error?.reason === 'string') return error.reason;
+  const chain = errorChain(error);
+  const codes = new Set(chain.map((entry) => entry.code).filter(Boolean));
+  const has = (...candidates) => candidates.some((code) => codes.has(code));
+  if (has('UND_ERR_SOCKET', 'ECONNRESET', 'EPIPE', 'UND_ERR_CLOSED', 'ECONNABORTED')) {
+    return 'the connection was closed by the server or a proxy';
+  }
+  if (has('UND_ERR_BODY_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_CONNECT_TIMEOUT', 'ETIMEDOUT')) {
+    return 'the connection timed out';
+  }
+  if (has('ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'EHOSTDOWN')) return 'the network is unreachable';
+  if (has('ENOTFOUND', 'EAI_AGAIN')) return 'the server name could not be resolved (DNS lookup failed)';
+  if (has('ECONNREFUSED')) return 'the connection was refused';
+  if ([...codes].some((code) => TLS_ERROR_CODES.has(code))) {
+    return 'the server certificate could not be verified';
+  }
+  if (chain.some((entry) => entry.message === 'terminated')) return 'the connection was closed unexpectedly';
+  return chain.at(-1)?.message ?? String(error);
+}
+
+/** Wrap a failure of fetch() or of reading the body as a classified download error. */
+function networkError(error) {
+  const codes = errorChain(error).map((entry) => entry.code);
+  return downloadError(describeDownloadFailure(error), {
+    cause: error,
+    reason: describeDownloadFailure(error),
+    retryable: !codes.some((code) => code && TLS_ERROR_CODES.has(code)),
+  });
+}
+
+/** Wrap a failure of the file stream: local, so neither retried nor a network problem. */
+function fileSystemError(error) {
+  return downloadError(error.message, { cause: error, reason: error.message, retryable: false, fileSystem: true });
+}
+
+function isRetryableDownloadError(error) {
+  return error?.retryable === true;
+}
+
+function parseContentRange(header) {
+  const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/i.exec((header || '').trim());
+  if (!match) return null;
+  return {
+    start: Number(match[1]),
+    end: Number(match[2]),
+    total: match[3] === '*' ? 0 : Number(match[3]),
+  };
+}
+
+function fileSizeOrZero(file) {
+  try {
+    return statSync(file).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Show a URL without credentials: userinfo becomes `***`, and the query
+ * (e.g. a signed CDN redirect) and fragment are replaced by `?<redacted>`.
+ */
+function redactUrl(value, fallback = '(invalid URL)') {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) {
+      url.username = '***';
+      url.password = '';
+    }
+    const query = url.search || url.hash ? '?<redacted>' : '';
+    url.search = '';
+    url.hash = '';
+    return `${url.toString()}${query}`;
+  } catch {
+    return fallback;
+  }
+}
+
+const PROXY_ENV_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy'];
+
+function isHttpsProxyConfigured() {
+  return Boolean(process.env.HTTPS_PROXY || process.env.https_proxy);
+}
+
+function isEnvProxyEnabled() {
+  return process.env.NODE_USE_ENV_PROXY === '1';
+}
+
+function proxyHint() {
+  if (isHttpsProxyConfigured() && !isEnvProxyEnabled()) {
+    return (
+      'HTTPS_PROXY is set, but Node.js only uses it when NODE_USE_ENV_PROXY=1 is set as well ' +
+      '(Node.js 22.21+ or 24.5+). Set NODE_USE_ENV_PROXY=1 and try again.'
+    );
+  }
+  return 'Behind a proxy? Set HTTPS_PROXY together with NODE_USE_ENV_PROXY=1 (Node.js 22.21+ or 24.5+).';
+}
+
+function mirrorHint() {
+  const override = process.env.C8CTL_C8RUN_DOWNLOAD_URL;
+  if (override) {
+    return (
+      `C8CTL_C8RUN_DOWNLOAD_URL points the download at ${redactUrl(override)}. ` +
+      'Make sure that server is reachable, or unset it to use the Camunda Download Center.'
+    );
+  }
+  return 'Use a mirror: set C8CTL_C8RUN_DOWNLOAD_URL to a base URL with the same layout as the Camunda Download Center.';
+}
+
+function buildDownloadFailureMessage({
+  error,
+  url,
+  attempts,
+  connected,
+  maxBytesReceived,
+  total,
+  targetFile,
+  keptFileNote,
+  extraHints,
+}) {
+  const codes = errorChain(error).map((entry) => entry.code).filter(Boolean);
+
+  // A local file-system failure has nothing to do with the network.
+  if (error?.fileSystem === true) {
+    return (
+      `Could not save the download to ${targetFile}: ${rootCauseDetail(error)}\n` +
+      (keptFileNote ? `${keptFileNote}\n` : '') +
+      `URL: ${redactUrl(url)}\n` +
+      'What you can try:\n' +
+      '  - Check that there is enough free disk space and that you can write to that directory.\n' +
+      '  - Set C8RUN_CACHE_DIR to a different directory to download there instead.'
+    );
+  }
+
+  const reason = describeDownloadFailure(error);
+  const detail = rootCauseDetail(error);
+  const attemptsText = `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+  const lines = [
+    connected
+      ? `Download failed after ${attemptsText}: ${reason}.`
+      : `Cannot reach the Camunda Download Center (${attemptsText}): ${reason}.`,
+  ];
+  // Our own errors (stall, HTTP status, size mismatch) are fully described by `reason`.
+  if (errorChain(error).length > 1 && detail !== reason) lines.push(`Cause: ${detail}`);
+  lines.push(`URL: ${redactUrl(url)}`);
+  if (maxBytesReceived > 0) {
+    lines.push(
+      `Received ${formatSize(maxBytesReceived)}${total > 0 ? ` of ${formatSize(total)}` : ''} before giving up` +
+        (keptFileNote ? '.' : '; the incomplete download was removed.'),
+    );
+  }
+  if (keptFileNote) lines.push(keptFileNote);
+  const hints = [
+    'Please check your network connection and VPN, then try again.',
+    proxyHint(),
+    ...(codes.some((code) => TLS_ERROR_CODES.has(code))
+      ? ['If your network inspects HTTPS traffic, point NODE_EXTRA_CA_CERTS at your organization\'s CA certificate file.']
+      : []),
+    mirrorHint(),
+    ...extraHints,
+  ];
+  lines.push('What you can try:', ...hints.map((hint) => `  - ${hint}`));
+  return lines.join('\n');
+}
+
+/**
+ * Download `url` to `targetFile`, surviving dropped connections.
+ *
+ * - One initial attempt plus up to `maxRetries` retries, with exponential
+ *   backoff (`retryDelayMs`, doubled per retry), for transient failures only:
+ *   network errors, dropped or stalled connections, HTTP 5xx and 429, and an
+ *   archive whose final size does not match what the server announced.
+ * - Resumes with `Range: bytes=<written>-` and `If-Range: <validator>` when
+ *   the first response carried a strong ETag or a Last-Modified date. A 206
+ *   answer is appended to the partial file; a 200 answer restarts from zero.
+ * - An attempt fails when no bytes arrive for `stallTimeoutMs`.
+ * - Other HTTP errors (e.g. 404) are not retried: the thrown error carries
+ *   `status` so the caller can explain it.
+ * - The partial file is kept between retries and deleted when giving up.
+ * - With `verbose`, logs request/response details, per-attempt timing,
+ *   and full error cause chains.
+ *
+ * Resolves to `{ bytes, etag }`, where `etag` is the ETag (or Last-Modified)
+ * of the downloaded content, or null.
+ */
+export async function downloadWithRetry({
+  url,
+  targetFile,
+  logger = getLogger(),
+  verbose = false,
+  maxRetries = DOWNLOAD_MAX_RETRIES,
+  retryDelayMs = DOWNLOAD_RETRY_BASE_DELAY_MS,
+  stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS,
+  progressIntervalMs = PROGRESS_INTERVAL_MS,
+  extraHints = [],
+}) {
+  const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr', essential: true }) : () => {};
+  const invalid = invalidDownloadUrlReason(url);
+  if (invalid) {
+    throw downloadError(
+      `Cannot download from ${redactUrl(url)}: ${invalid}.` +
+        (process.env.C8CTL_C8RUN_DOWNLOAD_URL ? ' Check C8CTL_C8RUN_DOWNLOAD_URL.' : ''),
+      { reason: invalid, retryable: false },
+    );
+  }
+  const totalAttempts = maxRetries + 1;
+  const state = {
+    written: 0,
+    total: 0,
+    validator: null,
+    etag: null,
+    reportedPercent: 0,
+    reportedBytes: 0,
+    reportedAt: Date.now(),
+    connected: false,
+    maxBytesReceived: 0,
+    attemptBytes: 0,
+  };
+
+  if (verbose) {
+    const proxyVars = PROXY_ENV_VARS.filter((name) => process.env[name]).map((name) =>
+      name.toLowerCase() === 'no_proxy' ? `${name}=${process.env[name]}` : `${name}=${redactUrl(process.env[name], '(set)')}`,
+    );
+    vlog(`Download URL: ${redactUrl(url)}`);
+    vlog(`Target file: ${targetFile}`);
+    vlog(`Node.js ${process.version}; NODE_USE_ENV_PROXY=${process.env.NODE_USE_ENV_PROXY ?? '(not set)'}`);
+    vlog(`Proxy environment: ${proxyVars.length > 0 ? proxyVars.join(', ') : '(none set)'}`);
+    vlog(
+      `Retry policy: up to ${maxRetries} retries (backoff starting at ${formatDuration(retryDelayMs)}), ` +
+        `stall timeout ${formatDuration(stallTimeoutMs)}`,
+    );
+  }
+
+  let lastError;
+  let attempt = 0;
+  while (attempt < totalAttempts) {
+    attempt += 1;
+    const startedAt = Date.now();
+    state.attemptBytes = 0;
+    vlog(`Attempt ${attempt}/${totalAttempts} started`);
+    try {
+      await downloadAttempt({ url, targetFile, state, stallTimeoutMs, progressIntervalMs, logger, vlog, startedAt });
+      const elapsed = Date.now() - startedAt;
+      vlog(
+        `Attempt ${attempt}/${totalAttempts} completed after ${formatDuration(elapsed)}: ` +
+          `${formatMBPrecise(state.attemptBytes)} received (${formatThroughput(state.attemptBytes, elapsed)}), ` +
+          `${formatMBPrecise(state.written)} total`,
+      );
+      return { bytes: state.written, etag: state.etag };
+    } catch (error) {
+      lastError = error;
+      const elapsed = Date.now() - startedAt;
+      vlog(
+        `Attempt ${attempt}/${totalAttempts} failed after ${formatDuration(elapsed)}: ` +
+          `${formatMBPrecise(state.attemptBytes)} received in this attempt, ${formatMBPrecise(state.written)} on disk`,
+      );
+      const chain = errorChain(error);
+      chain.forEach((entry, index) => vlog(`${index === 0 ? 'Error details' : '  caused by'}: ${formatChainEntry(entry)}`));
+
+      if (!isRetryableDownloadError(error) || attempt >= totalAttempts) break;
+
+      const retry = attempt;
+      const delay = retryDelayMs * 2 ** (retry - 1);
+      const reason = describeDownloadFailure(error);
+      const resumable = state.written > 0 && state.validator !== null;
+      const next = resumable
+        ? `, resuming from ${formatSize(state.written)}...`
+        : state.written > 0
+          ? ', restarting from the beginning (the server did not send an ETag or Last-Modified header, so the download cannot be resumed safely)...'
+          : '...';
+      logger.warn(
+        state.written > 0
+          ? `Download interrupted at ${formatSize(state.written)}${state.total > 0 ? ` / ${formatSize(state.total)}` : ''} (${reason}). ` +
+              `Retrying (${retry}/${maxRetries}) in ${formatDuration(delay)}${next}`
+          : `Download failed (${reason}). Retrying (${retry}/${maxRetries}) in ${formatDuration(delay)}...`,
+      );
+      if (!resumable) state.written = 0;
+      await sleep(delay);
+    }
+  }
+
+  // An unremovable file must not hide why the download failed; the message says
+  // it was kept (only if it is really there, e.g. not for ENAMETOOLONG).
+  let cleanupError;
+  try {
+    rmSync(targetFile, { force: true });
+  } catch (error) {
+    if (existsSync(targetFile)) cleanupError = error;
+  }
+  const keptFileNote = cleanupError
+    ? `The incomplete download could not be removed (${cleanupError.code ?? cleanupError.message}); delete it yourself: ${targetFile}`
+    : undefined;
+
+  if (lastError?.status !== undefined && !isRetryableDownloadError(lastError)) {
+    throw Object.assign(lastError, { keptFileNote });
+  }
+
+  throw downloadError(
+    buildDownloadFailureMessage({
+      error: lastError,
+      url,
+      attempts: attempt,
+      connected: state.connected,
+      maxBytesReceived: state.maxBytesReceived,
+      total: state.total,
+      targetFile,
+      keptFileNote,
+      extraHints,
+    }),
+    { cause: lastError, attempts: attempt },
+  );
+}
+
+/** Why fetch() would reject `url` before sending anything, or null if it would not. */
+function invalidDownloadUrlReason(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'not a valid URL';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `unsupported protocol ${parsed.protocol} (use http or https)`;
+  }
+  if (parsed.username || parsed.password) return 'the URL contains credentials, which fetch() does not send';
+  return null;
+}
+
+/** One HTTP request; updates `state` and throws a classified error on failure. */
+async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progressIntervalMs, logger, vlog, startedAt }) {
+  const controller = new AbortController();
+  let stallTimer;
+  let stalled = false;
+  const armStallTimer = () => {
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      stalled = true;
+      controller.abort();
+    }, stallTimeoutMs);
+  };
+  const disarmStallTimer = () => clearTimeout(stallTimer);
+  const classify = (error) => {
+    if (stalled) {
+      const reason = `no data received for ${formatDuration(stallTimeoutMs)}`;
+      return downloadError(reason, { reason, retryable: true });
+    }
+    return networkError(error);
+  };
+
+  const resume = state.written > 0 && state.validator !== null;
+  // fetch() decodes a Content-Encoding transparently, while Content-Length and
+  // byte ranges count encoded bytes; ask for the raw bytes so both match the file.
+  const headers = {
+    'Accept-Encoding': 'identity',
+    ...(resume ? { Range: `bytes=${state.written}-`, 'If-Range': state.validator } : {}),
+  };
+  vlog(`GET ${redactUrl(url)}`);
+  vlog(`Request headers: ${Object.entries(headers).map(([name, value]) => `${name}: ${value}`).join(', ')}`);
+
+  let response;
+  armStallTimer();
+  try {
+    response = await fetch(url, { headers, signal: controller.signal });
+  } catch (error) {
+    throw classify(error);
+  } finally {
+    disarmStallTimer();
+  }
+  state.connected = true;
+
+  const header = (name) => response.headers.get(name);
+  vlog(
+    `Response: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''} from ${redactUrl(response.url || url)}` +
+      `${response.redirected ? ' (after redirect)' : ''}`,
+  );
+  vlog(
+    `Response headers: ${['content-length', 'content-range', 'content-encoding', 'etag', 'last-modified', 'accept-ranges']
+      .map((name) => `${name}: ${header(name) ?? '(none)'}`)
+      .join(', ')}`,
+  );
+
+  const discardBody = () => response.body?.cancel().catch(() => {});
+  let append = false;
+  // Where a 206 body must end; the only size check when the total is `*`.
+  let rangeEnd = 0;
+  // A server may encode the body anyway; its sizes and ranges then don't apply.
+  const encoded = !['', 'identity'].includes((header('content-encoding') ?? '').trim().toLowerCase());
+
+  if (response.status === 206) {
+    const range = parseContentRange(header('content-range'));
+    if (!resume || !range || range.start !== state.written || encoded) {
+      await discardBody();
+      state.written = 0;
+      const reason = `the server sent an unexpected byte range (${header('content-range') ?? 'no Content-Range header'})`;
+      throw downloadError(reason, { reason, retryable: true });
+    }
+    if (range.total > 0) state.total = range.total;
+    rangeEnd = range.end + 1;
+    append = true;
+  } else if (response.ok) {
+    if (resume) {
+      logger.info('The server did not resume the download; restarting from the beginning.');
+    }
+    state.written = 0;
+    state.reportedPercent = 0;
+    state.reportedBytes = 0;
+    state.total = encoded ? 0 : Number.parseInt(header('content-length') || '0', 10) || 0;
+    // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
+    // values are date strings. Both are used as opaque version tokens for equality
+    // comparison — the format difference does not affect correctness.
+    state.etag = header('etag') || header('last-modified') || null;
+    // If-Range needs a strong validator; a weak ETag (W/"...") must not be used.
+    const strongEtag = header('etag') && !header('etag').startsWith('W/') ? header('etag') : null;
+    state.validator = encoded ? null : strongEtag || header('last-modified') || null;
+  } else {
+    await discardBody();
+    if (response.status === 416 && resume) {
+      state.written = 0;
+      const reason = 'the server rejected the request to resume the download (HTTP 416)';
+      throw downloadError(reason, { status: 416, reason, retryable: true });
+    }
+    const reason = `the server responded with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+    throw downloadError(reason, {
+      status: response.status,
+      reason,
+      retryable: response.status >= 500 || response.status === 429,
+    });
+  }
+
+  if (!response.body) {
+    const reason = 'the server sent an empty response';
+    throw downloadError(reason, { reason, retryable: true });
+  }
+
+  const fileStream = createWriteStream(targetFile, { flags: append ? 'a' : 'w' });
+  let fileError;
+  fileStream.on('error', (error) => {
+    fileError = error;
+  });
+  const reader = response.body.getReader();
+
+  try {
+    while (true) {
+      let chunk;
+      armStallTimer();
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        throw classify(error);
+      } finally {
+        disarmStallTimer();
+      }
+      if (chunk.done) break;
+
+      // The stream may have failed while we awaited the read; writing to it then
+      // returns false and 'drain' never comes.
+      if (fileError) throw fileError;
+      if (!fileStream.write(chunk.value)) {
+        await once(fileStream, 'drain');
+      }
+      if (fileError) throw fileError;
+      state.written += chunk.value.length;
+      state.attemptBytes += chunk.value.length;
+      state.maxBytesReceived = Math.max(state.maxBytesReceived, state.written);
+      reportDownloadProgress({ state, logger, startedAt, progressIntervalMs });
+    }
+    fileStream.end();
+    await finished(fileStream);
+  } catch (error) {
+    disarmStallTimer();
+    await reader.cancel().catch(() => {});
+    if (!fileStream.destroyed) fileStream.end();
+    await finished(fileStream).catch(() => {});
+    // What actually reached the disk is what a resume continues from.
+    state.written = fileSizeOrZero(targetFile);
+    throw fileError ? fileSystemError(fileError) : error;
+  }
+
+  state.written = fileSizeOrZero(targetFile);
+  const expected = state.total > 0 ? state.total : rangeEnd;
+  if (expected > 0 && state.written !== expected) {
+    const reason =
+      state.written < expected
+        ? `the download ended early (received ${formatSize(state.written)} of ${formatSize(expected)})`
+        : `the download is larger than announced (${formatSize(state.written)} instead of ${formatSize(expected)})`;
+    // An oversized file cannot be repaired by resuming; start over.
+    if (state.written > expected) state.written = 0;
+    throw downloadError(reason, { reason, retryable: true });
+  }
+}
+
+function reportDownloadProgress({ state, logger, startedAt, progressIntervalMs }) {
+  const now = Date.now();
+  const percentage = state.total > 0 ? Math.floor((state.written / state.total) * 100) : 0;
+  const stepReached = state.total > 0 && percentage >= state.reportedPercent + PROGRESS_STEP_PERCENT;
+  const intervalPassed = now - state.reportedAt >= progressIntervalMs && state.written > state.reportedBytes;
+  if (!stepReached && !intervalPassed) return;
+
+  const elapsed = now - startedAt;
+  const rate = formatThroughput(state.attemptBytes, elapsed);
+  const remaining = state.total - state.written;
+  const eta =
+    state.total > 0 && remaining > 0 && state.attemptBytes > 0 && elapsed > 0
+      ? `, ETA ${formatEta((remaining * elapsed) / state.attemptBytes)}`
+      : '';
+  logger.info(
+    state.total > 0
+      ? `//> ${percentage}% (${formatMBPrecise(state.written)} / ${formatMBPrecise(state.total)}) at ${rate}${eta}`
+      : `//> ${formatMBPrecise(state.written)} (total size unknown) at ${rate}`,
+  );
+  state.reportedPercent = percentage;
+  state.reportedBytes = state.written;
+  state.reportedAt = now;
+}
+
+/**
+ * Render an error for a "Failed to ...:" line without losing its cause.
+ * `${error}` alone hides `error.cause`, which is where undici puts the useful
+ * part of a network failure (e.g. "TypeError: terminated" is caused by
+ * "UND_ERR_SOCKET: other side closed").
+ */
+export function formatErrorWithCause(error) {
+  const base = `${error}`;
+  if (error?.cause === undefined || error?.cause === null) return base;
+  const detail = rootCauseDetail(error);
+  return base.includes(detail) ? base : `${base} (cause: ${detail})`;
+}
+
+/** Shell-quote a path for display in a hint when it contains spaces. */
+/** Quote a path for a copy-paste command: single quotes for POSIX shells, double quotes on Windows. */
+export function quoteForHint(path, platform = osPlatform()) {
+  if (platform === 'win32') {
+    // Windows paths cannot contain `"`; cmd and PowerShell both accept double quotes.
+    return /^[\w.:\\/-]+$/.test(path) ? path : `"${path}"`;
+  }
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
 }
 
 async function downloadC8Run(config) {
   const logger = getLogger();
   const version = config.version;
+
+  // Fail before requesting an archive that was never published.
+  const unpublished = unpublishedPlatformMessage();
+  if (unpublished) throw new Error(unpublished);
 
   const downloadUrl = getDownloadUrl(version);
 
@@ -424,75 +1292,52 @@ async function downloadC8Run(config) {
     `c8run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`,
   );
 
-  const response = await fetch(downloadUrl).catch((error) => {
-    throw new Error(
-      `Cannot reach the Camunda Download Center.\n` +
-        `URL: ${downloadUrl}\n` +
-        `Error: ${error.message}\n\n` +
-        formatLocalVersionsHint(cacheDir),
-    );
+  // A manually downloaded and extracted archive in the install dir is picked
+  // up by isC8RunInstalled(), exactly like one c8ctl extracted itself.
+  const installDir = join(cacheDir, `c8run-${version}`);
+  // Not parsed from downloadUrl: a malformed C8CTL_C8RUN_DOWNLOAD_URL must reach
+  // downloadWithRetry()'s validation instead of throwing a bare TypeError here.
+  const archiveName = getArchiveName(version);
+  const extract = resolveExtractCommand({
+    archivePath: archiveName,
+    targetDir: quoteForHint(installDir),
+    platform: osPlatform(),
   });
+  const manualHint =
+    `Or download ${archiveName} yourself (e.g. with a browser or a download manager), create ${quoteForHint(installDir)} ` +
+    `and extract it there: ${extract.command} ${extract.args.join(' ')}`;
 
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download c8run ${version}: HTTP ${response.status}\n` +
-        `URL: ${downloadUrl}\n` +
-        `Please check the version exists or try a different version.\n\n` +
-        formatLocalVersionsHint(cacheDir),
-    );
-  }
-
-  const totalSize = parseInt(response.headers.get('content-length') || '0');
-
-  if (!response.body) {
-    throw new Error(
-      `Failed to download c8run ${version}: empty response body\n` +
-        `URL: ${downloadUrl}\n` +
-        `Please try again or use a different version.`,
-    );
-  }
-
-  const etag = response.headers.get('etag') || response.headers.get('last-modified') || null;
-  // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
-  // values are date strings. Both are used as opaque version tokens for equality
-  // comparison — the format difference does not affect correctness.
-
-  const fileStream = createWriteStream(targetFile);
-
-  let downloadedSize = 0;
-  let lastReportedPercentage = 0;
-
-  const reader = response.body.getReader();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    fileStream.write(value);
-    downloadedSize += value.length;
-
-    if (totalSize > 0) {
-      const percentage = Math.floor((downloadedSize / totalSize) * 100);
-      if (percentage >= lastReportedPercentage + 10) {
-        logger.info(
-          `Progress: ${percentage}% (${Math.floor(downloadedSize / 1024 / 1024)} MB / ${Math.floor(totalSize / 1024 / 1024)} MB)`,
-        );
-        lastReportedPercentage = percentage;
-      }
+  let result;
+  try {
+    result = await downloadWithRetry({
+      url: downloadUrl,
+      targetFile,
+      logger,
+      verbose: config.verbose === true,
+      retryDelayMs: msFromEnv('C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS', DOWNLOAD_RETRY_BASE_DELAY_MS),
+      stallTimeoutMs: msFromEnv('C8CTL_C8RUN_DOWNLOAD_STALL_TIMEOUT_MS', DOWNLOAD_STALL_TIMEOUT_MS, {
+        allowZero: false,
+      }),
+      extraHints: [manualHint],
+    });
+  } catch (error) {
+    if (error.status !== undefined && !isRetryableDownloadError(error)) {
+      throw new Error(
+        `Failed to download c8run ${version}: HTTP ${error.status}\n` +
+          `URL: ${redactUrl(downloadUrl)}\n` +
+          (error.keptFileNote ? `${error.keptFileNote}\n` : '') +
+          `Please check the version exists or try a different version.\n\n` +
+          formatLocalVersionsHint(cacheDir),
+      );
     }
+    throw new Error(`${error.message}\n\n${formatLocalVersionsHint(cacheDir)}`, { cause: error.cause ?? error });
   }
-
-  await new Promise((resolve, reject) => {
-    fileStream.on('finish', resolve);
-    fileStream.on('error', reject);
-    fileStream.end();
-  });
 
   logger.info(
-    `Downloaded and saved to ${targetFile} (${Math.floor(downloadedSize / 1024 / 1024)} MB)`,
+    `Downloaded and saved to ${targetFile} (${formatMB(result.bytes)})`,
   );
 
-  return { archivePath: targetFile, etag };
+  return { archivePath: targetFile, etag: result.etag };
 }
 
 async function extractArchive(archivePath, targetDir) {
@@ -501,45 +1346,61 @@ async function extractArchive(archivePath, targetDir) {
 
   mkdirSync(targetDir, { recursive: true });
 
+  const { command, args } = resolveExtractCommand({
+    archivePath,
+    targetDir,
+    platform: osPlatform(),
+  });
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, { stdio: 'inherit' });
+    proc.on('exit', (code, signal) => {
+      if (code === 0) {
+        logger.info('Extraction complete.');
+        resolve();
+      } else if (signal) {
+        reject(new Error(`Extraction terminated by signal ${signal}`));
+      } else {
+        reject(new Error(`Extraction failed with code ${code}`));
+      }
+    });
+    proc.on('error', (err) => {
+      reject(
+        new Error(
+          `Failed to extract archive with "${command}": ${err.message}. ` +
+            `Make sure "${command}" is available on your PATH.`,
+        ),
+      );
+    });
+  });
+}
+
+/**
+ * Decide which extractor to spawn for a given archive and platform.
+ *
+ * Windows has no POSIX `unzip`, but ships bsdtar/libarchive as
+ * C:\Windows\System32\tar.exe (Windows 10 1803 / Server 2019+), and libarchive
+ * reads ZIP — so on win32 we extract a `.zip` with `tar -xf`. Any other
+ * platform extracts a `.zip` with `unzip -q`: macOS ships `unzip`
+ * preinstalled, and in practice Linux callers only ever pass a `.tar.gz`
+ * (handled below), never a `.zip`. If a Linux `.zip` were ever passed here it
+ * would resolve to `unzip`, and extractArchive() surfaces a clear "make sure unzip is
+ * on your PATH" error if the binary is missing.
+ *
+ * @param {{ archivePath: string, targetDir: string, platform: string }} opts
+ * @returns {{ command: string, args: string[] }}
+ */
+export function resolveExtractCommand({ archivePath, targetDir, platform }) {
   if (archivePath.endsWith('.zip')) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn('unzip', ['-q', archivePath, '-d', targetDir], {
-        stdio: 'inherit',
-      });
-      proc.on('exit', (code) => {
-        if (code === 0) {
-          logger.info('Extraction complete.');
-          resolve();
-        } else {
-          reject(new Error(`Extraction failed with code ${code}`));
-        }
-      });
-      proc.on('error', (err) => {
-        reject(
-          new Error(
-            `Failed to run unzip command: ${err.message}. Make sure unzip is installed.`,
-          ),
-        );
-      });
-    });
-  } else if (archivePath.endsWith('.tar.gz')) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn('tar', ['-xzf', archivePath, '-C', targetDir], {
-        stdio: 'inherit',
-      });
-      proc.on('exit', (code) => {
-        if (code === 0) {
-          logger.info('Extraction complete.');
-          resolve();
-        } else {
-          reject(new Error(`Extraction failed with code ${code}`));
-        }
-      });
-      proc.on('error', reject);
-    });
-  } else {
-    throw new Error(`Unsupported archive format: ${archivePath}`);
+    if (platform === 'win32') {
+      return { command: 'tar', args: ['-xf', archivePath, '-C', targetDir] };
+    }
+    return { command: 'unzip', args: ['-q', archivePath, '-d', targetDir] };
   }
+  if (archivePath.endsWith('.tar.gz')) {
+    return { command: 'tar', args: ['-xzf', archivePath, '-C', targetDir] };
+  }
+  throw new Error(`Unsupported archive format: ${archivePath}`);
 }
 
 export function findC8RunBinaryPath(config) {
@@ -593,6 +1454,20 @@ export function getC8RunBinaryPath(config) {
 
 export function purgeInstalledVersion(config, { reason } = {}) {
   const logger = getLogger();
+
+  // Never remove a version's install dir while an instance started from it is
+  // still running — doing so orphans the process (it keeps holding its ports)
+  // and destroys the .process pidfiles c8ctl relied on to find it, so
+  // status/stop go blind (#560). This backstops every caller: the delete/purge
+  // subcommands guard earlier with a friendlier message, and the rolling-update
+  // path relies on this to refuse an in-place upgrade of a running version.
+  if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+    throw new Error(
+      `Refusing to remove c8run ${config.version}: an instance started from this version is still running. ` +
+        'Stop it first with "c8ctl cluster stop".',
+    );
+  }
+
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   const platformInfo = getPlatformIdentifier();
   const archiveFile = join(
@@ -643,7 +1518,13 @@ export async function hasNewerVersionAvailable(config) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
-    const response = await fetch(downloadUrl, { method: 'HEAD', signal: controller.signal });
+    // Same representation as the download, whose ETag was stored: with
+    // Vary: Accept-Encoding a gzip variant can carry a different ETag.
+    const response = await fetch(downloadUrl, {
+      method: 'HEAD',
+      headers: { 'Accept-Encoding': 'identity' },
+      signal: controller.signal,
+    });
     if (!response.ok) {
       // Can't determine — keep the current installation
       return false;
@@ -682,6 +1563,16 @@ export async function ensureC8RunInstalled(config) {
         logger.info(`c8run ${config.version} is already installed and up to date.`);
         return;
       }
+      // Refuse to replace a running version's install dir out from under it.
+      // purgeInstalledVersion throws if an instance is still running; surface
+      // an update-specific hint so the user knows to stop the cluster first.
+      if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+        throw new Error(
+          `A newer c8run ${config.version} is available, but an instance started from the current ` +
+            'install is still running. Updating now would orphan it and free none of its ports. ' +
+            'Stop it first with "c8ctl cluster stop", then re-run the install.',
+        );
+      }
       purgeInstalledVersion(config);
     } else {
       // Use local installation as-is (start subcommand, or pinned version)
@@ -704,6 +1595,22 @@ export async function ensureC8RunInstalled(config) {
 
       return;
     }
+  }
+
+  // Reached the download/extract fallback. Either nothing is installed, or the
+  // install dir exists but its binary is missing/corrupt (isC8RunInstalled is
+  // false, so the guarded rolling-update branch above was skipped entirely).
+  // extractArchive writes into c8run-${version}; if an instance started from
+  // this version is still live — a partial/corrupt install whose processes are
+  // running — extracting would overwrite files under the live cluster and could
+  // corrupt it. Refuse here too, mirroring the rolling-update guard above, so a
+  // (re)install can never mutate a running install (#560).
+  if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+    throw new Error(
+      `Refusing to (re)install c8run ${config.version}: an instance started from it is still running, ` +
+        'and extracting now would overwrite files under the live cluster. ' +
+        'Stop it first with "c8ctl cluster stop", then re-run the install.',
+    );
   }
 
   logger.info('No local installation found. Setting up...');
@@ -735,12 +1642,27 @@ export async function ensureC8RunInstalled(config) {
 
 const STARTUP_SUMMARY_MARKER = '- Operate:';
 
-function extractStartupSummary(rawOutput) {
+/**
+ * c8run's zerolog console lines (`9:57AM INF …`). The summary is printed
+ * as soon as Camunda is healthy, but the captured output continues with
+ * these log lines while the Connectors runtime still starts. Cut there —
+ * printing them after the summary looks like the cluster started twice.
+ */
+const C8RUN_LOG_LINE =
+  /^\d{1,2}:\d{2}(?::\d{2})?(?:AM|PM)?\s+(?:DBG|INF|WRN|ERR|FTL|PNC|TRC)\s/;
+
+export function extractStartupSummary(rawOutput) {
   const startIndex = rawOutput.indexOf(STARTUP_SUMMARY_MARKER);
   if (startIndex === -1) {
     return null;
   }
-  return rawOutput.slice(startIndex).trim();
+  const lines = rawOutput.slice(startIndex).split('\n');
+  const summaryLines = [];
+  for (const line of lines) {
+    if (C8RUN_LOG_LINE.test(line.trimStart())) break;
+    summaryLines.push(line);
+  }
+  return summaryLines.join('\n').trim();
 }
 
 async function waitForClusterReady(maxWaitMs = CLUSTER_STARTUP_TIMEOUT_MS) {
@@ -793,7 +1715,7 @@ function printSummary(rawOutput, version) {
   console.log('');
 }
 
-async function startC8Run(config, debug = false) {
+async function startC8Run(config, debug = false, startArgs = []) {
   const logger = getLogger();
   const binaryPath = getC8RunBinaryPath(config);
   const logDir = join(dirname(binaryPath), 'log');
@@ -806,28 +1728,60 @@ async function startC8Run(config, debug = false) {
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
   if (existsSync(markerFile)) {
-    logger.warn('A cluster appears to be running already.');
-    if (existsSync(versionFile)) {
-      const runningVersion = readFileSync(versionFile, 'utf-8').trim();
-      if (runningVersion) {
-        logger.info(`Detected running version marker: ${runningVersion}`);
+    // Check whether actual cluster processes are still alive.
+    // If they are, refuse to start a second instance.
+    // If not, the marker is stale (e.g. crash, WSL restart, force-kill)
+    // — clean it up automatically and proceed with the start.
+    if (hasRunningClusterPidfiles(config.cacheDir)) {
+      logger.warn('A cluster appears to be running already.');
+      if (existsSync(versionFile)) {
+        const runningVersion = readFileSync(versionFile, 'utf-8').trim();
+        if (runningVersion) {
+          logger.info(`Detected running version marker: ${runningVersion}`, { essential: true });
+        }
       }
+      logger.info('Use "c8ctl cluster stop" to stop it first.', { essential: true });
+      return;
     }
-    logger.info('Use "c8ctl cluster stop" to stop it first.');
-    return;
+
+    // Stale marker — no live processes found. Clean up and continue.
+    logger.warn('Found stale cluster marker (no running processes detected). Cleaning up.');
+    if (existsSync(markerFile)) rmSync(markerFile);
+    if (existsSync(versionFile)) rmSync(versionFile);
+  } else if (hasRunningClusterPidfiles(config.cacheDir)) {
+    // No active marker, but a live process is still tracked — typically an
+    // orphan recorded only in the durable cache-root PID record after its
+    // install dir was replaced/removed (#560). Refuse rather than launch a
+    // second instance: a successful start would overwrite the record with a
+    // fresh snapshot (losing the orphan's PID), and on the default ports it
+    // would collide with the still-running process. Preserve the record so
+    // "c8ctl cluster stop" can still find and reap the orphan.
+    logger.warn(
+      'A cluster process appears to be running already (no active marker, but a live tracked process was found).',
+    );
+    const record = readRunningClusterRecord(config.cacheDir);
+    if (record?.version) {
+      logger.info(`Detected running version from the durable PID record: ${record.version}`, { essential: true });
+    }
+    throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
 
   logger.info('Starting Camunda 8 local cluster...');
 
-  const proc = spawn(binaryPath, ['start'], {
+  const proc = spawn(binaryPath, ['start', ...startArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: dirname(binaryPath),
+    env: { ...resolveLocalStoreEnv(process.env, process.cwd()), C8RUN_CLI_NAME },
   });
 
   if (typeof proc.pid !== 'number') {
+    // spawn() reports this failure via an async 'error' event; without a
+    // listener it would crash the process while the hints are flushed below.
+    proc.on('error', (err) => logger.error(`Failed to spawn c8run: ${err.message}`));
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat "${logDir}"/*.log`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
+    await flushStartHints(config);
     process.exit(1);
   }
 
@@ -865,12 +1819,23 @@ async function startC8Run(config, debug = false) {
   });
 
   if (exitCode !== 0) {
+    // A failed tenant probe leaves healthy engines alive; preserve their identity
+    // for stop/status even if the installation directory is subsequently replaced.
+    try {
+      recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
+    } catch (error) {
+      logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
     if (startupOutput.trim()) {
       logger.error(`c8run output:\n${startupOutput.trim()}`);
+    }
+    if (startArgs.length > 0 && /flag provided but not defined: -physical-tenants/.test(startupOutput)) {
+      logger.error('This cached c8run build lacks --physical-tenants. Install a Camunda 8.10+ build containing physical-tenant CLI support with "c8ctl cluster install 8.10".');
     }
     logger.error(
       `c8run start exited with code ${exitCode ?? 'unknown'}${exitSignal ? ` (signal: ${exitSignal})` : ''}. Cluster will not be marked as running.`,
     );
+    await flushStartHints(config);
     process.exit(typeof exitCode === 'number' && exitCode > 0 ? exitCode : 1);
   }
 
@@ -879,34 +1844,206 @@ async function startC8Run(config, debug = false) {
   const isReady = await waitForClusterReady();
 
   if (isReady) {
+    // Publish the durable PID record BEFORE the active marker. If c8ctl is
+    // interrupted between these writes, a record-without-marker is recoverable
+    // (status/stop still see the live process via the record), whereas a
+    // marker-without-record would let the stale-marker cleanup path drop the
+    // markers and leave the process orphaned with no handle to reap it (#560).
+    //
+    // The record write is nevertheless best-effort: if it throws (e.g. the
+    // cache root is unwritable / disk full), we must NOT abort here and leave a
+    // just-started, healthy cluster with NEITHER a record NOR markers — that
+    // strands it for both `status` and `stop`. The install dir still exists at
+    // this point, so the markers + c8run's own `.process` pidfiles keep the
+    // cluster fully trackable and stoppable; only the extra orphan-recovery
+    // handle (needed later, if the dir is removed) is missing, which we warn on.
+    try {
+      recordRunningClusterPids(config);
+    } catch (error) {
+      logger.warn(
+        `Could not persist the durable cluster PID record (${
+          error instanceof Error ? error.message : String(error)
+        }); the cluster is still tracked via its markers and pidfiles.`,
+      );
+    }
     writeFileSync(markerFile, 'running');
     writeFileSync(versionFile, config.version);
     printSummary(startupOutput, config.version);
   } else {
+    // Readiness can fail even after c8run exits successfully. Retain the same
+    // recovery handle as a nonzero launcher exit before reporting failure.
+    try {
+      recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
+    } catch (error) {
+      logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
     logger.error(
       'Cluster failed to start within timeout.',
     );
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat "${logDir}"/*.log`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
     process.exit(1);
   }
 }
 
-export function hasRunningClusterPidfiles(cacheDir) {
-  if (!existsSync(cacheDir)) {
+/** True when a PID refers to a live process. EPERM (owned by another user) counts as alive. */
+export function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
     return false;
   }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return Boolean(error && error.code === 'EPERM');
+  }
+}
 
-  const versionDirs = readdirSync(cacheDir, { withFileTypes: true })
-    .filter(
-      (entry) =>
-        entry.isDirectory() && entry.name.startsWith('c8run-'),
-    )
-    .map((entry) => join(cacheDir, entry.name));
+/**
+ * A best-effort, platform-native "start signature" for a PID — enough to tell
+ * the ORIGINAL process apart from an unrelated one that reused the same numeric
+ * PID after the original exited. Returns a stable string, or null when the
+ * platform/environment gives us nothing to fingerprint with (in which case
+ * callers fall back to a liveness-only check). Never throws.
+ */
+/**
+ * True on platforms where `processStartSignature()` can produce a real
+ * fingerprint (Linux, macOS/BSD, Windows). On any other platform no PID can be
+ * fingerprinted, so callers must degrade to a liveness-only reuse guard rather
+ * than dropping otherwise-trackable PIDs (#560).
+ */
+export function platformSupportsProcessSignature() {
+  const platform = osPlatform();
+  return (
+    platform === 'linux' ||
+    platform === 'darwin' ||
+    platform.endsWith('bsd') ||
+    platform === 'win32'
+  );
+}
 
-  // Scan each version dir and its immediate subdirectories (max depth 1)
-  // rather than a full recursive DFS — c8run installs can contain large
-  // extracted trees, logs, and data that would make a deep walk slow.
+export function processStartSignature(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+  const platform = osPlatform();
+  try {
+    if (platform === 'linux') {
+      // /proc/<pid>/stat field 22 is the process start time (clock ticks since
+      // boot) — fixed for the life of the process and re-assigned with the PID,
+      // so it distinguishes a reused PID. `comm` (field 2) can contain spaces
+      // and parentheses, so parse the numeric fields from the LAST ')'.
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');
+      const rparen = stat.lastIndexOf(')');
+      if (rparen === -1) return null;
+      const fields = stat.slice(rparen + 1).trim().split(/\s+/);
+      // After ')' the fields are state(3), ppid(4), …; starttime is field 22,
+      // i.e. index 19 of this remainder (22 - 3).
+      const starttime = fields[19];
+      return starttime ? `linux:${starttime}` : null;
+    }
+    if (platform === 'darwin' || platform.endsWith('bsd')) {
+      // `ps -o lstart=` prints the process start timestamp, but only at
+      // ONE-SECOND resolution — a PID reused within that same second would
+      // reproduce it, and macOS `ps` exposes no higher-resolution creation
+      // time. Pair it with the executable path (`comm=`), which is fixed for
+      // the life of the process and an unrelated process that reused the PID
+      // will not share. The combined fingerprint means `recordedPidIsLive()`
+      // rejects such a replacement instead of signalling an unrelated process.
+      const out = execFileSync('ps', ['-o', 'lstart=,comm=', '-p', String(pid)], {
+        encoding: 'utf-8',
+        timeout: 3000,
+        // `lstart` is rendered in the process locale, so a start under one
+        // LC_TIME and a stop under another would produce different strings for
+        // the SAME live process — `recordedPidIsLive()` would then reject the
+        // orphan as gone and never reap it. Pin a fixed C/POSIX locale so the
+        // signature is locale-independent and stable across invocations (#560).
+        env: { ...process.env, LC_ALL: 'C', LC_TIME: 'C', LANG: 'C' },
+      }).trim();
+      return out ? `ps:${out}` : null;
+    }
+    if (platform === 'win32') {
+      // Windows is a supported platform (#560): fingerprint with the process
+      // creation time from CIM/WMI. Paired with the PID it distinguishes the
+      // original process from an unrelated one that reused the numeric PID.
+      // Guard the null case so a missing PID yields empty output (→ null) rather
+      // than a property access on $null throwing.
+      const out = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+            `if ($p) { $p.CreationDate.ToString('o') }`,
+        ],
+        // PowerShell start-up plus a CIM query can exceed 5 s on a loaded
+        // machine; a timeout yields no signature, which makes a live orphan
+        // look stopped, so allow a generous budget.
+        { encoding: 'utf-8', timeout: 10000 },
+      ).trim();
+      return out ? `win:${out}` : null;
+    }
+  } catch {
+    // No signature available — the caller falls back to a liveness-only check.
+  }
+  return null;
+}
+
+/**
+ * True when `pid` is alive AND, where we captured a start signature for it, that
+ * signature still matches — i.e. it is the ORIGINAL recorded process, not an
+ * unrelated one that reused the PID after the original exited. A recorded entry
+ * with NO signature is trusted (liveness only) ONLY on platforms that cannot
+ * fingerprint at all; on a fingerprinting platform our writer never persists a
+ * signature-less PID (#568), so a signature-less entry there can only be a
+ * stale/legacy/hand-edited `cluster.pids` and is rejected rather than risk
+ * signalling a reused, unrelated process. When a signature WAS recorded but the
+ * platform cannot reproduce one now (transient `ps` failure), the guard still
+ * degrades to liveness only, never inventing a false negative that would strand
+ * a real orphan.
+ */
+export function recordedPidIsLive(pid, signature) {
+  if (!isPidAlive(pid)) {
+    return false;
+  }
+  if (!signature) {
+    // No signature recorded. On a fingerprinting platform this can only be a
+    // stale/legacy/hand-edited record (our writer always signs live PIDs there
+    // now), whose bare numeric liveness could match a reused unrelated process
+    // — refuse it. Only non-fingerprinting platforms keep the liveness-only
+    // degrade, since there no recorded PID can ever carry a signature and
+    // rejecting would strand every real orphan (#560/#568).
+    return !platformSupportsProcessSignature();
+  }
+  const current = processStartSignature(pid);
+  return current === null || current === signature;
+}
+
+/**
+ * Collect the PIDs recorded in c8run `.process` pidfiles under `cacheDir`.
+ * When `version` is given only that version's install dir is scanned;
+ * otherwise every `c8run-*` install dir is scanned. Each install dir and its
+ * immediate subdirectories are scanned (max depth 1) rather than a full
+ * recursive DFS — c8run installs can contain large extracted trees, logs, and
+ * data that would make a deep walk slow. Returns parsed positive integers
+ * (alive or not); the caller decides liveness.
+ */
+export function collectPidfilePids(cacheDir, { version } = {}) {
+  const pids = [];
+  if (!existsSync(cacheDir)) {
+    return pids;
+  }
+
+  let versionDirs;
+  if (version) {
+    versionDirs = [join(cacheDir, `c8run-${version}`)];
+  } else {
+    versionDirs = readdirSync(cacheDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('c8run-'))
+      .map((entry) => join(cacheDir, entry.name));
+  }
+
   for (const versionDir of versionDirs) {
     let entries;
     try {
@@ -935,34 +2072,369 @@ export function hasRunningClusterPidfiles(cacheDir) {
         if (!entry.isFile() || !entry.name.endsWith('.process')) {
           continue;
         }
-
-        const entryPath = join(dir, entry.name);
-
         let pid;
         try {
-          pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+          pid = Number.parseInt(readFileSync(join(dir, entry.name), 'utf-8').trim(), 10);
         } catch {
           // Pidfile may have been removed between listing and reading.
           continue;
         }
-
-        if (!Number.isInteger(pid) || pid <= 0) {
-          continue;
-        }
-
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch (error) {
-          if (error && error.code === 'EPERM') {
-            return true;
-          }
+        if (Number.isInteger(pid) && pid > 0) {
+          pids.push(pid);
         }
       }
     }
   }
 
-  return false;
+  return pids;
+}
+
+function getPidRecordPath(cacheDir) {
+  return join(cacheDir, PID_RECORD_FILE);
+}
+
+/**
+ * Read the durable running-cluster PID record (see PID_RECORD_FILE). Returns
+ * `{ version, pids }` or null when absent/unparseable. This record lives at
+ * the cache root, so it survives a running version's install dir being
+ * replaced or deleted — the case that otherwise orphans the process (#560).
+ */
+export function readRunningClusterRecord(cacheDir) {
+  const filePath = getPidRecordPath(cacheDir);
+  if (!existsSync(filePath)) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const version = typeof parsed.version === 'string' && parsed.version ? parsed.version : null;
+  const pids = Array.isArray(parsed.pids)
+    ? parsed.pids.filter((pid) => Number.isInteger(pid) && pid > 0)
+    : [];
+  const signatures =
+    parsed.signatures && typeof parsed.signatures === 'object' && !Array.isArray(parsed.signatures)
+      ? Object.fromEntries(
+          Object.entries(parsed.signatures).filter(
+            ([pid, sig]) => Number.isInteger(Number(pid)) && typeof sig === 'string' && sig,
+          ),
+        )
+      : {};
+  // Reject any record that lacks a non-empty version attribution. A record
+  // with no version but stray PIDs (e.g. a malformed/hand-edited cluster.pids)
+  // would otherwise let liveRecordedPids()/reapClusterProcesses() treat those
+  // PIDs as cluster-owned and signal them with no version to attribute them to
+  // — a path to killing an unrelated live process during `cluster stop` (#560).
+  if (!version) {
+    return null;
+  }
+  // Reject a record whose version fails the same path-traversal guard applied
+  // to CLI-supplied versions. `version` is later interpolated into join() paths
+  // by getC8RunBinaryPath during `cluster stop`, so a malformed record such as
+  // `foo/../../tmp` could otherwise bypass validateVersionSpec and make stop
+  // inspect/execute a binary outside the cache root (#560). Treat an invalid
+  // record as unusable rather than trusting on-disk state.
+  try {
+    validateVersionSpec(version);
+  } catch {
+    return null;
+  }
+  return { version, pids, signatures, ...(parsed.startupFailed === true ? { startupFailed: true } : {}) };
+}
+
+/** Persist the durable running-cluster PID record. */
+export function writeRunningClusterRecord(cacheDir, { version, pids, signatures, startupFailed }) {
+  mkdirSync(cacheDir, { recursive: true });
+  const cleanPids = Array.isArray(pids)
+    ? [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]
+    : [];
+  const cleanSignatures = {};
+  if (signatures && typeof signatures === 'object' && !Array.isArray(signatures)) {
+    for (const pid of cleanPids) {
+      const sig = signatures[pid];
+      if (typeof sig === 'string' && sig) {
+        cleanSignatures[pid] = sig;
+      }
+    }
+  }
+  // `cluster.pids` is the ONLY recovery handle once an install dir disappears,
+  // so the write must be crash-safe: serialise to a sibling temp file and
+  // atomically rename it into place. An interruption then leaves either the
+  // previous valid record or the new one — never a truncated/unparseable file
+  // that would make status/stop lose the orphan PID (#560).
+  const finalPath = getPidRecordPath(cacheDir);
+  const tmpPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
+  const payload = JSON.stringify({
+    version: version ?? null,
+    pids: cleanPids,
+    signatures: cleanSignatures,
+    ...(startupFailed === true ? { startupFailed: true } : {}),
+  });
+  try {
+    writeFileSync(tmpPath, payload);
+    renameSync(tmpPath, finalPath);
+  } catch (error) {
+    try {
+      if (existsSync(tmpPath)) rmSync(tmpPath);
+    } catch {
+      // best effort — nothing more we can do about a leftover temp file
+    }
+    throw error;
+  }
+}
+
+/** Remove the durable running-cluster PID record if present. */
+export function clearRunningClusterRecord(cacheDir) {
+  const filePath = getPidRecordPath(cacheDir);
+  if (existsSync(filePath)) {
+    rmSync(filePath);
+  }
+}
+
+/**
+ * Retire the durable record when it no longer tracks any LIVE process. A stale
+ * record left by a crash, a forced kill, or an already-stopped cluster keeps
+ * dead PIDs in `cluster.pids`; on a platform where signature capture is
+ * unavailable the liveness-only fallback would later mistake a reused PID for
+ * this cluster — blocking a start and risking an unrelated process during stop
+ * (#560). Safe to call from any cleanup / no-running path: a no-op when the
+ * record is absent or still has at least one live recorded PID.
+ */
+export function clearStaleRunningClusterRecord(cacheDir) {
+  if (readRunningClusterRecord(cacheDir) && liveRecordedPids(cacheDir).length === 0) {
+    clearRunningClusterRecord(cacheDir);
+  }
+}
+
+/** The still-live PIDs from the durable running-cluster record. */
+export function liveRecordedPids(cacheDir) {
+  const record = readRunningClusterRecord(cacheDir);
+  if (!record) {
+    return [];
+  }
+  return record.pids.filter((pid) => recordedPidIsLive(pid, record.signatures?.[pid]));
+}
+
+/**
+ * Block the calling thread for `ms` without spinning. `recordRunningClusterPids`
+ * is synchronous (its fingerprint source is `execFileSync` anyway), so its
+ * retry backoff has to be synchronous too.
+ */
+function sleepSync(ms) {
+  if (ms > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  }
+}
+
+/**
+ * Fingerprint a PID, retrying while the PID is still alive. `signatureOf` returns
+ * null both for "the process is gone" and for "the platform query failed or timed
+ * out" (a loaded Windows runner can exceed the PowerShell/CIM budget). Only the
+ * second case is transient, and the two are told apart by liveness: a dead PID is
+ * final, a live PID whose query came back empty is retried with backoff. A
+ * signature is still only ever persisted when it was actually captured, so the
+ * retry cannot widen the PID-reuse exposure — it only stops a started process
+ * from being left out of the stop record because of one slow query.
+ */
+function captureSignature(pid, { signatureOf, attempts, retryDelayMs }) {
+  for (let attempt = 1; ; attempt += 1) {
+    const sig = signatureOf(pid);
+    if (sig || attempt >= attempts || !isPidAlive(pid)) {
+      return sig;
+    }
+    sleepSync(retryDelayMs * 2 ** (attempt - 1));
+  }
+}
+
+/**
+ * Snapshot the live c8run PIDs for the just-started version into the durable
+ * cache-root record, so the cluster stays trackable (status/stop) even if its
+ * install dir is later replaced or removed (#560). Each PID is fingerprinted
+ * with a start signature so a later stop/status can tell the recorded process
+ * apart from an unrelated one that reused its PID.
+ * A transient fingerprint failure on a live PID is retried
+ * (`signatureAttempts`, exponential backoff from `signatureRetryDelayMs`)
+ * rather than silently dropping the PID.
+ */
+export function recordRunningClusterPids(
+  config,
+  {
+    signatureOf = processStartSignature,
+    skipEmpty = false,
+    startupFailed = false,
+    signatureAttempts = 3,
+    signatureRetryDelayMs = 250,
+  } = {},
+) {
+  const canFingerprint = platformSupportsProcessSignature();
+  const pids = [];
+  const signatures = {};
+  for (const pid of collectPidfilePids(config.cacheDir, { version: config.version })) {
+    if (canFingerprint) {
+      // Capture identity with a SINGLE combined liveness+fingerprint operation.
+      // processStartSignature runs one `ps`/PowerShell query that already
+      // returns null for a dead PID, so — unlike a separate isPidAlive()
+      // pre-check followed by a later signature capture — there is no window in
+      // which the liveness probe and the fingerprint could observe two
+      // different processes and record a reused PID's identity as c8run's
+      // (#560). A null result means the PID is not a live, fingerprintable
+      // process, so it is omitted: persisting it without a signature would let
+      // a later reuse of the number fall back to numeric liveness and let the
+      // reap path signal an unrelated process.
+      //
+      // A null can also be a transient query failure/timeout on a live process;
+      // captureSignature() retries those, because a PID dropped here is never
+      // signalled by stop and would be left behind as an orphan.
+      const sig = captureSignature(pid, {
+        signatureOf,
+        attempts: signatureAttempts,
+        retryDelayMs: signatureRetryDelayMs,
+      });
+      if (sig) {
+        signatures[pid] = sig;
+        pids.push(pid);
+      } else if (isPidAlive(pid)) {
+        getLogger().warn(
+          `Could not fingerprint running cluster process ${pid}; it will not be tracked for "c8ctl cluster stop" and may need to be stopped manually.`,
+        );
+      }
+    } else if (isPidAlive(pid)) {
+      // This platform can't fingerprint any process, so no recorded PID can
+      // carry a signature; keep the live PID so the cluster stays trackable
+      // (the reuse guard degrades to a liveness-only check everywhere).
+      pids.push(pid);
+    }
+  }
+  if (skipEmpty && pids.length === 0) return 0;
+  writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures, startupFailed });
+  return pids.length;
+}
+
+/**
+ * True when an instance started from the given version is still running,
+ * either via a live `.process` pidfile in its install dir or via the durable
+ * PID record attributing a live process to that version.
+ */
+export function isVersionInstanceRunning(cacheDir, version) {
+  if (collectPidfilePids(cacheDir, { version }).some((pid) => isPidAlive(pid))) {
+    return true;
+  }
+  const record = readRunningClusterRecord(cacheDir);
+  return Boolean(
+    record &&
+      record.version === version &&
+      record.pids.some((pid) => recordedPidIsLive(pid, record.signatures?.[pid])),
+  );
+}
+
+/**
+ * Send SIGTERM to a PID, wait up to `graceMs` for it to exit, then SIGKILL.
+ * Returns true once the process is confirmed gone.
+ */
+async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {}) {
+  // Revalidate the recorded identity before EVERY signal, not just numeric
+  // liveness. If the original process exits and its PID is reused (e.g. during
+  // the SIGTERM grace window), the captured start signature no longer matches
+  // and we must NOT escalate to an unrelated process (#560). recordedPidIsLive
+  // degrades to a liveness-only check when no signature was captured.
+  if (!recordedPidIsLive(pid, signature)) {
+    return false;
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // Already exited or not permitted — fall through to the liveness check.
+  }
+  const deadline = Date.now() + graceMs;
+  // Poll for exit with a CHEAP liveness probe (signal 0 — no subprocess). A
+  // process' start signature is immutable while it lives, so re-running the
+  // external `ps`/PowerShell signature query on every 200 ms poll would spawn
+  // dozens of subprocesses (each with a multi-second timeout) and make stop
+  // block far beyond graceMs on a slow host. We still revalidate the recorded
+  // IDENTITY (signature) immediately before the SIGKILL escalation below, so a
+  // PID reused during the grace window can never be signalled as if it were the
+  // tracked process (#560).
+  while (isPidAlive(pid) && Date.now() < deadline) {
+    await sleep(pollMs);
+  }
+  if (recordedPidIsLive(pid, signature)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Best effort — nothing more we can do.
+    }
+    await sleep(pollMs);
+  }
+  // Confirmed gone once the ORIGINAL recorded process is no longer live — a
+  // signature mismatch (PID reuse) counts as gone: the process we tracked ended.
+  return !recordedPidIsLive(pid, signature);
+}
+
+/**
+ * Terminate any cluster processes still alive under `cacheDir` — those named
+ * by the durable PID record, each of which is validated against its recorded
+ * start signature before we signal it. This is the stop backstop for the
+ * orphan case (#560), where `c8run stop` cannot reach a process whose install
+ * dir / pidfiles were removed. We deliberately do NOT scan raw `.process`
+ * pidfiles here: they carry no start-signature, span every cached version, and
+ * a stale pidfile whose numeric PID was reused would make us SIGTERM/SIGKILL an
+ * unrelated process. Raw pidfiles remain c8run's own responsibility. Never
+ * targets this process (or its parent). Returns the count actually terminated.
+ */
+export async function reapClusterProcesses(cacheDir) {
+  const record = readRunningClusterRecord(cacheDir);
+  const signatures = record?.signatures ?? {};
+  const targets = new Set(liveRecordedPids(cacheDir));
+  // Guard against ever signalling the c8ctl process itself (or its parent) —
+  // a cluster's Java process is never c8ctl, and tests stand in with own PIDs.
+  targets.delete(process.pid);
+  if (typeof process.ppid === 'number') {
+    targets.delete(process.ppid);
+  }
+
+  let reaped = 0;
+  for (const pid of targets) {
+    // Carry the recorded start signature into termination so each signal is
+    // gated on the ORIGINAL identity, not bare numeric liveness (#560).
+    if (await terminatePid(pid, { signature: signatures[pid] })) {
+      reaped += 1;
+    }
+  }
+  return reaped;
+}
+
+export function hasRunningClusterPidfiles(cacheDir) {
+  if (!existsSync(cacheDir)) {
+    return false;
+  }
+
+  // Primary signal: c8run's own .process pidfiles inside the install dirs.
+  if (collectPidfilePids(cacheDir).some((pid) => isPidAlive(pid))) {
+    return true;
+  }
+
+  // Fallback: the durable cache-root PID record. This still resolves after a
+  // running version's install dir (and with it the .process pidfiles) has been
+  // replaced or deleted, which would otherwise make c8ctl report the live
+  // cluster as stopped and leave its process orphaned (#560).
+  return liveRecordedPids(cacheDir).length > 0;
+}
+
+// `c8run stop` only signals the cluster processes; Java can keep running for a
+// while as it shuts down. Wait for them to exit so a follow-up purge does not
+// mistake a shutting-down cluster for a live one. The timeout is a safety net.
+export async function waitForClusterExit(cacheDir, { timeoutMs = 60_000, intervalMs = 250 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (hasRunningClusterPidfiles(cacheDir)) {
+    if (Date.now() >= deadline) return false;
+    await sleep(intervalMs);
+  }
+  return true;
 }
 
 export async function stopC8Run(config, debug = false) {
@@ -974,6 +2446,9 @@ export async function stopC8Run(config, debug = false) {
   const clusterAppearsRunning = hasRunningClusterPidfiles(config.cacheDir);
 
   if (!markerExists && !clusterAppearsRunning) {
+    // Nothing live to stop. Retire any stale record left by a crash/kill so its
+    // dead PIDs cannot later be mistaken for this cluster (#560).
+    clearStaleRunningClusterRecord(config.cacheDir);
     logger.warn(
       'No cluster is currently running.',
     );
@@ -986,13 +2461,17 @@ export async function stopC8Run(config, debug = false) {
     logger.warn(
       'Cluster marker file found, but no running cluster processes detected. Cleaning up stale marker.',
     );
+    let staleVersion = null;
+    if (existsSync(versionFile)) {
+      const v = readFileSync(versionFile, 'utf-8').trim();
+      if (v) staleVersion = v;
+      rmSync(versionFile);
+    }
     if (existsSync(markerFile)) {
       rmSync(markerFile);
     }
-    if (existsSync(versionFile)) {
-      rmSync(versionFile);
-    }
-    return;
+    clearRunningClusterRecord(config.cacheDir);
+    return staleVersion;
   }
 
   if (!markerExists && clusterAppearsRunning) {
@@ -1012,11 +2491,23 @@ export async function stopC8Run(config, debug = false) {
     : [];
 
   const versionsToTry = [];
+  let stoppedVersion = null;
 
   if (existsSync(versionFile)) {
     const markerVersion = readFileSync(versionFile, 'utf-8').trim();
     if (markerVersion) {
+      stoppedVersion = markerVersion;
       versionsToTry.push(markerVersion);
+    }
+  }
+
+  // Fall back to the durable PID record's version when the marker is gone —
+  // this is the version whose install dir may have been removed (#560).
+  if (versionsToTry.length === 0) {
+    const record = readRunningClusterRecord(config.cacheDir);
+    if (record?.version) {
+      stoppedVersion = record.version;
+      versionsToTry.push(record.version);
     }
   }
 
@@ -1109,26 +2600,344 @@ export async function stopC8Run(config, debug = false) {
     }
   }
 
-  // Always clean up markers, even if stop failed — a stale marker
-  // would permanently block future starts.
+  // Reap any cluster processes still alive after the c8run stop attempt(s).
+  // In the orphan case (#560) the version's install dir — and with it the
+  // .process pidfiles c8run's own stop relies on — was replaced or removed
+  // while the process kept running, so `c8run stop` cannot see it. The durable
+  // cache-root PID record lets us find and terminate the process directly.
+  const reaped = await reapClusterProcesses(config.cacheDir);
+  if (reaped > 0) {
+    hadSuccessfulStop = true;
+    logger.warn(
+      `Terminated ${reaped} orphaned cluster process${reaped === 1 ? '' : 'es'} that c8run no longer tracked.`,
+    );
+  }
+
+  // Markers are always cleared (a stale marker or version file would block
+  // future starts), but the durable PID record is the ONLY handle to an orphan.
+  // If reaping could not confirm every recorded process dead — e.g. signalling
+  // returned EPERM, or the kill did not land — keep the record so a later
+  // "c8ctl cluster stop" can retry. Only clear it once every recorded PID is
+  // confirmed gone (#560).
   if (existsSync(markerFile)) {
     rmSync(markerFile);
   }
   if (existsSync(versionFile)) {
     rmSync(versionFile);
   }
-
-  if (attempted === 0) {
-    throw new Error(
-      'Could not find an installed c8run binary to execute stop.',
+  const remainingPids = liveRecordedPids(config.cacheDir);
+  if (remainingPids.length === 0) {
+    clearRunningClusterRecord(config.cacheDir);
+  } else {
+    logger.warn(
+      'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
+        'PID record so "c8ctl cluster stop" can retry.',
     );
   }
 
-  if (!hadSuccessfulStop && lastError) {
+  if (attempted === 0 && !hadSuccessfulStop) {
+    // ...but only when there is nothing left to reap. If a recorded process is
+    // still alive (e.g. reaping hit EPERM), the incomplete-stop diagnostic
+    // below carries the actionable PID/retry guidance and must win over this
+    // generic "no binary" message even though the install dir is gone (#560).
+    if (remainingPids.length === 0) {
+      throw new Error(
+        'Could not find an installed c8run binary to execute stop.',
+      );
+    }
+  } else if (!hadSuccessfulStop && lastError && remainingPids.length === 0) {
     throw lastError;
   }
 
+  // A partial stop is still a FAILED stop: if any recorded PID is confirmed
+  // alive after reaping, the cluster may still hold its ports, so a fresh start
+  // would collide. Surface it as an error (the record was retained above) so
+  // the CLI exits non-zero and the user retries, rather than reporting success
+  // while an orphan lingers (#560).
+  if (remainingPids.length > 0) {
+    throw new Error(
+      `Stop incomplete: ${remainingPids.length} recorded cluster process${
+        remainingPids.length === 1 ? '' : 'es'
+      } could not be confirmed stopped (PID${remainingPids.length === 1 ? '' : 's'}: ${remainingPids.join(', ')}). ` +
+        'The durable PID record was kept — retry with "c8ctl cluster stop".',
+    );
+  }
+
   logger.info('Cluster stopped.');
+  return stoppedVersion;
+}
+
+// ---------------------------------------------------------------------------
+// Secrets passthrough (#314)
+//
+// c8run itself owns secret storage, validation, and locking (`c8run secrets
+// set|list|path|delete|import`). c8ctl adds no store and sees no values —
+// it only locates the right c8run binary and forwards the call to it.
+// ---------------------------------------------------------------------------
+
+/**
+ * `--yes` / `-y` are c8ctl GLOBAL flags, so the host consumes them (it sets
+ * `ctx.yes`) and strips them from a passthrough command's args. c8run's own
+ * `secrets delete` has a `--yes` flag that skips its confirmation prompt, so
+ * restore it when the user asked for it. Physical tenant removal/reset also
+ * require confirmation. Skip physical tenant selectors when locating a secrets verb, and never
+ * append confirmation to a verb that does not accept it. Never mutates `tail`.
+ */
+export function withForwardedYes(tail, ctx, command = 'secrets') {
+  const versionEnd = tail[0]?.startsWith('--c8-version=') ? 1 : tail[0] === '--c8-version' ? 2 : 0;
+  const positions = forwardedPositionals(tail, versionEnd, command === 'secrets');
+  const verbs = command === 'secrets' ? ['delete'] : ['remove', 'rm', 'reset'];
+  if (ctx?.yes !== true || !verbs.includes(tail[positions[0]])) return tail;
+  // Everything after a `--` terminator is literal for c8run, so the flag goes
+  // immediately before it, and a `--yes` that only appears after it does not count.
+  const terminator = tail.indexOf('--');
+  const options = terminator < 0 ? tail : tail.slice(0, terminator);
+  if (options.includes('--yes') || options.includes('-y')) return tail;
+  return terminator < 0
+    ? [...tail, '--yes']
+    : [...tail.slice(0, terminator), '--yes', ...tail.slice(terminator)];
+}
+
+/**
+ * Split a `cluster secrets` argv tail into an optional pinned c8run version
+ * and the passthrough arguments that go to `c8run secrets` unchanged.
+ *
+ * Only strips --c8-version (in either "--c8-version value" or
+ * "--c8-version=value" form, matching how the rest of c8ctl accepts string
+ * flags) when it is the very first token, so any later occurrence reaches
+ * c8run untouched. There is deliberately no verb allowlist here — c8ctl
+ * does not validate or enumerate c8run's own verbs, so an older, newer, or
+ * unreleased c8run's verb set (including one c8ctl has never heard of) is
+ * still forwarded and its own error surfaces as-is.
+ */
+export function parseSecretsArgs(tail, command = 'secrets') {
+  let version = null;
+  let passthrough = tail;
+
+  const first = passthrough[0];
+  const isC8VersionFlag = first === '--c8-version' || (typeof first === 'string' && first.startsWith('--c8-version='));
+  if (isC8VersionFlag) {
+    if (first.startsWith('--c8-version=')) {
+      version = first.slice('--c8-version='.length);
+      passthrough = passthrough.slice(1);
+    } else {
+      version = passthrough[1];
+      passthrough = passthrough.slice(2);
+    }
+    if (!version || version.startsWith('-')) {
+      throw new Error(
+        `Missing value for --c8-version. Example: c8ctl cluster ${command} --c8-version 8.10 list`,
+      );
+    }
+  }
+
+  if (passthrough.length === 0) {
+    throw new Error(
+      `usage: c8ctl cluster ${command} [--c8-version <version>] <${command === 'secrets' ? 'set|list|path|delete|import|...' : 'add|list|remove|reset|path|help|...'}>`,
+    );
+  }
+
+  return { version, passthrough };
+}
+
+/**
+ * Resolve paths in a secrets passthrough call against the caller's cwd, not
+ * c8run's. c8run always runs with its cwd set to its own binary directory
+ * (see startC8Run below), so a relative `import <file>` or
+ * C8RUN_SECRETS_DIR would otherwise resolve against the wrong directory and
+ * silently miss the file the user meant.
+ *
+ * Only touches an `import` positional and the local store environment paths; every other
+ * verb and flag passes through untouched. "-" (stdin) and already-absolute
+ * paths are left alone. Never mutates the passthrough array or env object
+ * it receives.
+ */
+export function resolveSecretsPaths(passthrough, { cwd = process.cwd(), env = process.env } = {}) {
+  let resolvedPassthrough = passthrough;
+  const positions = forwardedPositionals(passthrough, 0, true);
+  const [verbIndex, fileIndex] = positions;
+  if (
+    passthrough[verbIndex] === 'import' &&
+    passthrough[fileIndex] &&
+    passthrough[fileIndex] !== '-' &&
+    !isAbsolute(passthrough[fileIndex])
+  ) {
+    resolvedPassthrough = [...passthrough];
+    resolvedPassthrough[fileIndex] = resolve(cwd, passthrough[fileIndex]);
+  }
+
+  return { passthrough: resolvedPassthrough, env: resolveLocalStoreEnv(env, cwd) };
+}
+
+function forwardedPositionals(args, start, tenantScoped) {
+  const positions = [];
+  for (let i = start; i < args.length; i++) {
+    if (args[i] === '--') break;
+    if (tenantScoped && args[i] === '--physical-tenant') {
+      i++;
+      continue;
+    }
+    if (tenantScoped && args[i].startsWith('--physical-tenant=')) continue;
+    // Unknown options belong to c8run. Do not guess which tokens they consume.
+    positions.push(i);
+  }
+  return positions;
+}
+
+// Tells c8run which command prefix to print in its hints ("c8ctl cluster physical-tenants list"
+// instead of "c8run physical-tenants list"); c8run builds without support ignore it.
+const C8RUN_CLI_NAME = 'c8ctl cluster';
+
+function resolveLocalStoreEnv(env, cwd) {
+  let resolvedEnv = env;
+  for (const name of ['C8RUN_SECRETS_DIR', 'C8RUN_TENANTS_FILE']) {
+    if (env[name] && !isAbsolute(env[name])) {
+      resolvedEnv = { ...resolvedEnv, [name]: resolve(cwd, env[name]) };
+    }
+  }
+  return resolvedEnv;
+}
+
+/**
+ * True when a cluster is currently running, returning its version. Requires
+ * both marker files plus a live pidfile — a stale marker with no live
+ * process must not misdirect a secrets call at a version that is not
+ * actually running.
+ */
+function runningMarkerVersion(cacheDir) {
+  const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
+  const versionFile = join(cacheDir, VERSION_MARKER_FILE);
+  if (!existsSync(markerFile) || !existsSync(versionFile)) return null;
+  if (!hasRunningClusterPidfiles(cacheDir)) return null;
+  const version = readFileSync(versionFile, 'utf-8').trim();
+  return version || null;
+}
+
+/**
+ * Pick which installed c8run binary should handle a `secrets` passthrough
+ * call. Order: an explicit --c8-version always wins; otherwise prefer the
+ * version currently running (its store is the one actually in effect),
+ * otherwise fall back to the highest locally installed version.
+ *
+ * Never triggers a download — fetching a multi-hundred-MB c8run archive to
+ * run `secrets list` would be a surprising side effect. Returns null when
+ * nothing is installed so the caller can point the user at `cluster install`.
+ */
+export async function selectSecretsVersion(cacheDir, { explicit } = {}) {
+  if (explicit) {
+    validateVersionSpec(explicit);
+    return resolveVersion(explicit, { preferLocal: true, cacheDir });
+  }
+
+  const running = runningMarkerVersion(cacheDir);
+  if (running) return running;
+
+  const installed = getInstalledVersionsList(cacheDir)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return installed.length > 0 ? installed[installed.length - 1] : null;
+}
+
+/**
+ * Translate c8run's "unsupported operation" failure into an actionable hint
+ * naming the resolved version, instead of leaving the user to guess why a
+ * documented subcommand didn't work. Any other failure — a validation
+ * error, a permission error, and so on — is c8run's own message, already
+ * streamed to stderr as it was produced; this returns null so the caller
+ * does not print anything extra.
+ */
+export function mapSecretsFailure(exitCode, stderrTail, version) {
+  if (exitCode === 0) return null;
+  if (!/unsupported operation:\s*secrets/i.test(stderrTail)) return null;
+
+  return (
+    `c8run ${version} does not support "secrets" yet.\n` +
+    `Install a c8run build that includes it, e.g.: c8ctl cluster install ${version}\n` +
+    'Until then, pass secrets as environment variables when starting instead:\n' +
+    '  SECRET_MY_KEY=value c8ctl cluster start\n'
+  );
+}
+
+/**
+ * Forward a `cluster secrets` call to the resolved c8run binary's own
+ * `secrets` subcommand, unchanged. stdin/stdout/stderr are inherited so the
+ * no-echo prompt, --stdin, and `import -` all behave exactly as they would
+ * calling c8run directly — c8ctl adds no validation and never sees a value.
+ *
+ * `spawnFn`, `cwd`, and `env` are injectable for testing; production calls
+ * rely on their defaults (the real `spawn`, the current process's cwd and
+ * environment).
+ */
+export async function runClusterSecrets(
+  cacheDir,
+  tail,
+  options = {},
+) {
+  return runClusterLocalCommand('secrets', cacheDir, tail, options);
+}
+
+async function runClusterLocalCommand(
+  command,
+  cacheDir,
+  tail,
+  { explicitVersion, spawnFn = spawn, cwd = process.cwd(), env = process.env } = {},
+) {
+  const logger = getLogger();
+
+  const version = await selectSecretsVersion(cacheDir, { explicit: explicitVersion });
+  if (!version) {
+    logger.error(
+      `No c8run installed locally. Install one first: c8ctl cluster install ${command === 'secrets' ? 'alpha' : '8.10'}`,
+    );
+    process.exit(1);
+    return;
+  }
+
+  let binaryPath;
+  try {
+    binaryPath = getC8RunBinaryPath({ cacheDir, version });
+  } catch (error) {
+    logger.error(`Failed to run ${command} command: ${error.message}`);
+    process.exit(1);
+    return;
+  }
+
+  const { passthrough, env: resolvedEnv } = command === 'secrets'
+    ? resolveSecretsPaths(tail, { cwd, env })
+    : { passthrough: tail, env: resolveLocalStoreEnv(env, cwd) };
+
+  const exitCode = await new Promise((resolvePromise, reject) => {
+    const proc = spawnFn(binaryPath, [command, ...passthrough], {
+      stdio: ['inherit', 'inherit', 'pipe'],
+      cwd: dirname(binaryPath),
+      env: { ...resolvedEnv, C8RUN_CLI_NAME },
+    });
+
+    let stderrTail = '';
+    proc.stderr?.on('data', (chunk) => {
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+      process.stderr.write(text);
+      stderrTail = (stderrTail + text).slice(-4096);
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn c8run: ${err.message}`));
+    });
+    proc.on('close', (code) => {
+      const hint = command === 'secrets'
+        ? mapSecretsFailure(code ?? 1, stderrTail, version)
+        : code !== 0 && /unsupported operation:\s*physical-tenants/i.test(stderrTail)
+          ? `c8run ${version} does not support "physical-tenants" yet. Install a Camunda 8.10+ c8run build containing physical-tenant CLI support with "c8ctl cluster install 8.10"; older cached builds may predate this feature.`
+          : null;
+      if (hint) {
+        logger.error(hint);
+      }
+      resolvePromise(code ?? 1);
+    });
+  });
+
+  if (exitCode !== 0) {
+    process.exit(exitCode);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1149,9 +2958,15 @@ export async function clusterStatus(cacheDir) {
   const versionFile = join(cacheDir, VERSION_MARKER_FILE);
 
   const markerExists = existsSync(markerFile);
-  const version = markerExists && existsSync(versionFile)
+  const record = readRunningClusterRecord(cacheDir);
+  // A live process may exist without (or despite) a marker — e.g. after its
+  // install dir was replaced/removed, orphaning it (#560). Detect it so status
+  // never reports "stopped" while a tracked cluster process is still alive.
+  const processesRunning = hasRunningClusterPidfiles(cacheDir);
+  const markerVersion = markerExists && existsSync(versionFile)
     ? readFileSync(versionFile, 'utf-8').trim() || null
     : null;
+  const version = markerVersion ?? record?.version ?? null;
 
   // Check live health endpoint regardless of marker
   let isHealthy = false;
@@ -1171,8 +2986,20 @@ export async function clusterStatus(cacheDir) {
     // Health endpoint not reachable
   }
 
+  // Only attribute a failure to survivors of that startup, never to unrelated
+  // pidfiles or a shared health endpoint that happens to respond.
+  const startupFailed = record?.startupFailed === true && liveRecordedPids(cacheDir).length > 0;
+  // A missing marker alone does not explain why processes are still running.
+  const untracked = !markerExists && processesRunning;
+
+  // Startup failure and missing-marker diagnostics take precedence over shared
+  // health: a responding endpoint does not establish readiness of every tenant.
   let status;
-  if (isHealthy) {
+  if (startupFailed) {
+    status = 'running after failed startup';
+  } else if (untracked) {
+    status = 'running (untracked)';
+  } else if (isHealthy) {
     status = 'running';
   } else if (markerExists) {
     status = 'starting or unresponsive';
@@ -1180,12 +3007,24 @@ export async function clusterStatus(cacheDir) {
     status = 'stopped';
   }
 
+  const recovery = startupFailed
+    ? 'Cluster processes are still running after a failed startup. Review the startup error or c8run logs; a responding shared health endpoint does not mean all tenants are ready. Run c8ctl cluster stop before retrying.'
+    : untracked
+      ? 'Cluster processes are still running without an active c8ctl marker. The startup outcome is unknown. Stop them with: c8ctl cluster stop'
+      : undefined;
+
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
-    logger.json({ status, version, urls: isHealthy ? CLUSTER_URLS : undefined });
+    // Machine-readable status carries the same recovery guidance as text.
+    logger.json({
+      status,
+      version,
+      urls: isHealthy ? CLUSTER_URLS : undefined,
+      recovery,
+    });
     return;
   }
 
-  if (!markerExists && !isHealthy) {
+  if (!markerExists && !isHealthy && !processesRunning) {
     console.log('Cluster status: stopped');
     console.log('');
     console.log('  Start with: c8ctl cluster start');
@@ -1206,7 +3045,13 @@ export async function clusterStatus(cacheDir) {
     console.log('  - Health:     ' + CLUSTER_URLS.health);
     console.log('');
     console.log('  Default credentials: demo / demo');
-  } else {
+  }
+
+  if (recovery) {
+    // Keep text and JSON diagnostics identical even when shared health is UP.
+    console.log('');
+    console.log(`  ${recovery}`);
+  } else if (!isHealthy) {
     console.log('');
     console.log('  The cluster appears to have been started but is not yet responding.');
     console.log('  Run "c8ctl cluster status" again in a moment, or check the logs.');
@@ -1269,7 +3114,7 @@ export async function listRemoteVersions() {
     html = await response.text();
   } catch (error) {
     logger.error(`Failed to query the Camunda Download Center: ${error}`);
-    logger.info('Check your network connection and try again.');
+    logger.info('Check your network connection and try again.', { essential: true });
     process.exit(1);
   }
 
@@ -1313,6 +3158,37 @@ export async function listRemoteVersions() {
 }
 
 // ---------------------------------------------------------------------------
+// Shared helpers for delete / purge
+// ---------------------------------------------------------------------------
+
+// Validate and resolve a version spec to the locally installed version name.
+// Aliases (stable, alpha) are resolved preferring the local cache so that
+// delete/purge operate on what is actually installed.
+async function resolveVersionArg(cacheDir, versionSpec) {
+  validateVersionSpec(versionSpec);
+  return isVersionAlias(versionSpec)
+    ? await resolveVersion(versionSpec, { preferLocal: true, cacheDir })
+    : versionSpec;
+}
+
+// Return true if the given version appears to be currently running.
+// Requires both marker files to identify the running version, then confirms
+// with live .process pidfiles. Without markers we cannot attribute any
+// running process to a specific version, so we return false — consistent
+// with stopC8Run treating marker absence as "not running".
+function isVersionRunning(cacheDir, version) {
+  const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
+  const versionFile = join(cacheDir, VERSION_MARKER_FILE);
+
+  if (!existsSync(markerFile) || !existsSync(versionFile)) return false;
+
+  const markerVersion = readFileSync(versionFile, 'utf-8').trim();
+  if (markerVersion !== version) return false;
+
+  return hasRunningClusterPidfiles(cacheDir);
+}
+
+// ---------------------------------------------------------------------------
 // Delete cached version
 // ---------------------------------------------------------------------------
 
@@ -1324,39 +3200,135 @@ export async function deleteVersion(cacheDir, versionSpec) {
     process.exit(1);
   }
 
-  validateVersionSpec(versionSpec);
-
-  // Resolve named aliases (stable/alpha) to the actual cached version name.
-  // Use preferLocal so we delete the version that's actually installed,
-  // not whatever the remote currently resolves the alias to.
   // Major.minor patterns like 8.8 are used as-is since the cache dir is named c8run-8.8.
-  const resolvedVersion = isVersionAlias(versionSpec)
-    ? await resolveVersion(versionSpec, { preferLocal: true, cacheDir })
-    : versionSpec;
+  const resolvedVersion = await resolveVersionArg(cacheDir, versionSpec);
 
   // Prevent deleting a currently running version
-  const versionFile = join(cacheDir, VERSION_MARKER_FILE);
-  const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
+  if (isVersionRunning(cacheDir, resolvedVersion)) {
+    logger.error(
+      `Version ${resolvedVersion} is currently running. Stop it first with: c8ctl cluster stop`
+    );
+    process.exit(1);
+  }
 
-  if (existsSync(markerFile) && existsSync(versionFile)) {
-    const runningVersion = readFileSync(versionFile, 'utf-8').trim();
-    if (runningVersion === resolvedVersion) {
-      logger.error(
-        `Version ${resolvedVersion} is currently running. Stop it first with: c8ctl cluster stop`
-      );
-      process.exit(1);
-    }
+  // Safety backstop: if processes are running but either marker is absent we
+  // cannot confirm the version, so refuse rather than risk deleting a live install.
+  if (
+    (!existsSync(join(cacheDir, ACTIVE_MARKER_FILE)) || !existsSync(join(cacheDir, VERSION_MARKER_FILE))) &&
+    hasRunningClusterPidfiles(cacheDir)
+  ) {
+    logger.error(
+      'A cluster appears to be running (processes detected) but the cluster marker is missing. ' +
+      'Run c8ctl cluster stop first.'
+    );
+    process.exit(1);
   }
 
   const config = { cacheDir, version: resolvedVersion };
 
-  if (!isC8RunInstalled(config)) {
+  // Guard on the install dir, not on the binary: the dir can survive
+  // without its launcher (partial/corrupt install), and delete should
+  // still remove what is left rather than report the version unremovable.
+  if (!existsSync(join(cacheDir, `c8run-${resolvedVersion}`))) {
     logger.warn(`Version ${versionSpec} is not installed locally.`);
     return;
   }
 
   purgeInstalledVersion(config, { reason: 'as requested' });
+  // Retire a stale durable record with no live PIDs so its dead (possibly
+  // reused) PIDs are not later mistaken for this cluster (#560).
+  clearStaleRunningClusterRecord(cacheDir);
   logger.info(`Version ${versionSpec} has been deleted.`);
+}
+
+// ---------------------------------------------------------------------------
+// Purge cluster data
+// ---------------------------------------------------------------------------
+
+export async function purgeClusterData(cacheDir, versionSpec) {
+  const logger = getLogger();
+
+  const resolvedVersion = await resolveVersionArg(cacheDir, versionSpec);
+
+  // Prevent purging a currently running version
+  if (isVersionRunning(cacheDir, resolvedVersion)) {
+    logger.error(
+      `Version ${resolvedVersion} is currently running. ` +
+      'Stop it first with: c8ctl cluster stop\n' +
+      `Or stop and purge in one step: c8ctl cluster stop --purge`
+    );
+    process.exit(1);
+  }
+
+  // Safety backstop: if processes are running but either marker is absent we
+  // cannot confirm the version, so refuse rather than risk purging a live cluster.
+  if (
+    (!existsSync(join(cacheDir, ACTIVE_MARKER_FILE)) || !existsSync(join(cacheDir, VERSION_MARKER_FILE))) &&
+    hasRunningClusterPidfiles(cacheDir)
+  ) {
+    logger.error(
+      'A cluster appears to be running (processes detected) but the cluster marker is missing. ' +
+      'Run c8ctl cluster stop first.'
+    );
+    process.exit(1);
+  }
+
+  const config = { cacheDir, version: resolvedVersion };
+  const installDir = join(cacheDir, `c8run-${resolvedVersion}`);
+  if (!existsSync(installDir)) {
+    logger.error(`Version ${resolvedVersion} is not installed locally.`);
+    process.exit(1);
+  }
+
+  // Runtime data normally sits next to the c8run binary. If the binary itself
+  // is missing but the install dir survives — a partial/corrupt install, or the
+  // orphan case where the binary was removed out from under a running cluster
+  // (#560) — fall back to scanning the install dir and its immediate subdirs so
+  // leftover data is still purged instead of being silently left behind.
+  const binaryPath = findC8RunBinaryPath(config);
+  const dataRoots = binaryPath
+    ? [dirname(binaryPath)]
+    : [
+        installDir,
+        ...readdirSync(installDir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => join(installDir, entry.name)),
+      ];
+
+  const deleted = [];
+  for (const dataRoot of dataRoots) {
+    // Delete camunda-data (history data + application state)
+    const camundaDataDir = join(dataRoot, 'camunda-data');
+    if (existsSync(camundaDataDir)) {
+      rmSync(camundaDataDir, { recursive: true });
+      deleted.push('camunda-data');
+    }
+
+    // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
+    if (existsSync(dataRoot)) {
+      for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
+        const dataDir = join(dataRoot, entry.name, 'data');
+        if (existsSync(dataDir)) {
+          rmSync(dataDir, { recursive: true });
+          deleted.push(join(entry.name, 'data'));
+        }
+      }
+    }
+  }
+
+  if (deleted.length > 0) {
+    logger.info(`Purged runtime data for ${resolvedVersion}:`);
+    for (const d of deleted) {
+      logger.info(`  deleted: ${d}`);
+    }
+  } else {
+    logger.info(`No runtime data found for ${resolvedVersion} — nothing to delete.`);
+  }
+  // Retire a stale durable record with no live PIDs so its dead (possibly
+  // reused) PIDs are not later mistaken for this cluster (#560).
+  clearStaleRunningClusterRecord(cacheDir);
+  logger.info(`Binary and installed files preserved. Start fresh with: c8ctl cluster start ${resolvedVersion}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1365,6 +3337,164 @@ export async function deleteVersion(cacheDir, versionSpec) {
 
 const LOG_FILES = ['camunda.log', 'connectors.log'];
 
+// Like `tail -f`: show the last lines of each file, then follow appends.
+const FOLLOW_INITIAL_LINES = 10;
+// Logs can be large, so the initial lines are found by scanning back in blocks.
+const TAIL_BLOCK_BYTES = 64 * 1024;
+const NEWLINE = 0x0a;
+
+function readRange(file, start, end) {
+  const fd = openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(end - start);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, start);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Byte offset at which the last `count` lines of `file` start. Scans back
+ * from the end until enough newlines are found, so a single entry longer
+ * than any fixed window is still shown in full. The offset is always at a
+ * line start, so decoding from it never splits a UTF-8 character. Also
+ * returns the identity of the scanned file, to detect a later replacement.
+ */
+function tailStart(file, count) {
+  const fd = openSync(file, 'r');
+  try {
+    const stats = fstatSync(fd, { bigint: true });
+    const id = fileIdentity(stats);
+    const size = Number(stats.size);
+    const buffer = Buffer.alloc(TAIL_BLOCK_BYTES);
+    let newlines = 0;
+    for (let end = size; end > 0;) {
+      const start = Math.max(0, end - buffer.length);
+      const bytesRead = readSync(fd, buffer, 0, end - start, start);
+      for (let i = bytesRead - 1; i >= 0; i--) {
+        // A trailing newline ends the last line rather than starting a new one.
+        if (buffer[i] !== NEWLINE || start + i === size - 1) continue;
+        if (++newlines === count) return { offset: start + i + 1, id };
+      }
+      end = start;
+    }
+    return { offset: 0, id };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const isMissingFile = error => error?.code === 'ENOENT';
+
+const fileIdentity = stats => `${stats.dev}:${stats.ino}`;
+
+/**
+ * Follow log files without `tail`, which Windows does not ship. Prints the
+ * last lines of each file (with `==> file <==` headers when there are several,
+ * as `tail` does), then polls for appended bytes until `signal` aborts.
+ * A file that shrinks or is replaced (truncated or rotated) is re-read from the start.
+ */
+export async function followLogFiles(files, {
+  signal,
+  write = chunk => process.stdout.write(chunk),
+  intervalMs = 500,
+} = {}) {
+  const multiple = files.length > 1;
+  let current = null;
+  const emit = (file, text) => {
+    if (multiple && current !== file) {
+      write(`${current === null ? '' : '\n'}==> ${file} <==\n`);
+      current = file;
+    }
+    if (text) write(text);
+  };
+
+  // Reads whatever was appended since the last read. A file can vanish at
+  // any point while it is rotated, so a missing file just yields nothing
+  // and is picked up again on a later poll.
+  const readAppended = (file, entry) => {
+    try {
+      const stats = statSync(file, { bigint: true });
+      const size = Number(stats.size);
+      const id = fileIdentity(stats);
+      // A replaced file can be as large as the one it rotated out.
+      const replaced = entry.id !== undefined && entry.id !== id;
+      entry.id = id;
+      if (replaced || size < entry.offset) {
+        entry.offset = 0;
+        entry.decoder = new StringDecoder('utf8');
+      }
+      if (size === entry.offset) return '';
+      const chunk = readRange(file, entry.offset, size);
+      entry.offset += chunk.length;
+      return entry.decoder.write(chunk);
+    } catch (error) {
+      if (isMissingFile(error)) return '';
+      throw error;
+    }
+  };
+
+  const state = new Map();
+  for (const file of files) {
+    let start = { offset: 0, id: undefined };
+    try {
+      start = tailStart(file, FOLLOW_INITIAL_LINES);
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    const entry = { ...start, decoder: new StringDecoder('utf8') };
+    state.set(file, entry);
+    // Emitted even when empty, so every file gets its header up front.
+    emit(file, readAppended(file, entry));
+  }
+
+  const poll = () => {
+    for (const file of files) {
+      const text = readAppended(file, state.get(file));
+      if (text) emit(file, text);
+    }
+  };
+
+  await new Promise((resolve, reject) => {
+    let timer;
+    const settle = error => {
+      clearInterval(timer);
+      signal?.removeEventListener('abort', stop);
+      if (error) reject(error);
+      else resolve();
+    };
+    // An unexpected read error ends following instead of escaping the timer.
+    const tick = () => {
+      try {
+        poll();
+        return true;
+      } catch (error) {
+        settle(error);
+        return false;
+      }
+    };
+    function stop() {
+      if (tick()) settle();
+    }
+    timer = setInterval(tick, intervalMs);
+    if (signal?.aborted) stop();
+    else signal?.addEventListener('abort', stop, { once: true });
+  });
+}
+
+/** Follows log files until Ctrl+C, which ends the command cleanly. */
+export async function followLogsUntilInterrupted(files, options = {}) {
+  const controller = new AbortController();
+  const sigintHandler = () => controller.abort();
+  process.on('SIGINT', sigintHandler);
+  try {
+    await followLogFiles(files, { ...options, signal: controller.signal });
+  } finally {
+    process.removeListener('SIGINT', sigintHandler);
+  }
+}
+
 export async function streamLogs(cacheDir) {
   const logger = getLogger();
   const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
@@ -1372,7 +3502,7 @@ export async function streamLogs(cacheDir) {
 
   if (!existsSync(markerFile)) {
     logger.warn('No cluster is currently running.');
-    logger.info('Start one with: c8ctl cluster start');
+    logger.info('Start one with: c8ctl cluster start', { essential: true });
     return;
   }
 
@@ -1403,12 +3533,18 @@ export async function streamLogs(cacheDir) {
 
   if (existingLogs.length === 0) {
     logger.warn(`No log files found in ${logDir}`);
-    logger.info('The cluster may still be starting. Try again in a moment.');
+    logger.info('The cluster may still be starting. Try again in a moment.', { essential: true });
     return;
   }
 
   logger.info(`Streaming logs from ${logDir} (Ctrl+C to stop)...`);
   logger.info('');
+
+  if (osPlatform() === 'win32') {
+    // Windows has no `tail`, so follow the files in-process.
+    await followLogsUntilInterrupted(existingLogs);
+    return;
+  }
 
   // Use tail -f to follow all log files
   const tailArgs = ['-f', ...existingLogs];
@@ -1442,11 +3578,21 @@ export async function streamLogs(cacheDir) {
 // ---------------------------------------------------------------------------
 
 export function parsePluginArgs(args) {
-  const result = { subcommand: null, version: null, debug: false };
+  const result = { subcommand: null, version: null, debug: false, purge: false };
 
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
+
+    if (arg === '--physical-tenants' || arg.startsWith('--physical-tenants=')) {
+      const value = arg === '--physical-tenants' ? args[i + 1] : arg.slice('--physical-tenants='.length);
+      if (!value || value.startsWith('-')) throw new Error('--physical-tenants requires comma-separated physical tenant IDs');
+      result.startArgs ??= [];
+      result.startArgs.push(arg);
+      if (arg === '--physical-tenants') { result.startArgs.push(value); i++; }
+      i++;
+      continue;
+    }
 
     if (arg === '--c8-version') {
       const next = args[i + 1];
@@ -1460,8 +3606,26 @@ export function parsePluginArgs(args) {
       continue;
     }
 
+    if (arg.startsWith('--c8-version=')) {
+      const value = arg.slice('--c8-version='.length);
+      if (!value) {
+        throw new Error(
+          'Missing value for --c8-version. Please provide a version, for example: c8ctl cluster start --c8-version 8.6.0'
+        );
+      }
+      result.version = value;
+      i += 1;
+      continue;
+    }
+
     if (arg === '--debug') {
       result.debug = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--purge') {
+      result.purge = true;
       i += 1;
       continue;
     }
@@ -1482,6 +3646,9 @@ export function parsePluginArgs(args) {
     i += 1;
   }
 
+  if (result.startArgs && result.subcommand !== 'start') {
+    throw new Error('--physical-tenants can only be used with the start subcommand');
+  }
   return result;
 }
 
@@ -1489,38 +3656,88 @@ export function parsePluginArgs(args) {
 // Plugin commands export
 // ---------------------------------------------------------------------------
 
-const VALID_SUBCOMMANDS = ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'log', 'logs'];
+const VALID_SUBCOMMANDS = ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'purge', 'log', 'logs'];
 
 export const commands = {
-  'cluster': async (args) => {
+  // `cluster` is a passthrough command (see the metadata): `args` is the raw
+  // argv tail after `cluster` with c8ctl's global flags already removed, and
+  // `ctx` is the plugin host context. No need to re-read process.argv.
+  'cluster': async (args, _flags, ctx) => {
     const logger = getLogger();
-    const parsed = parsePluginArgs(args);
+
+    // Local management passthrough is intercepted before parsePluginArgs:
+    // its arguments (verbs, flags, positionals) belong to c8run, not to
+    // c8ctl's own version/--debug/--purge parsing.
+    if (args[0] === 'secrets' || args[0] === 'physical-tenants') {
+      const command = args[0] === 'secrets' ? 'secrets' : 'physical-tenants';
+      let parsedLocal;
+      try {
+        parsedLocal = parseSecretsArgs(withForwardedYes(args.slice(1), ctx, command), command);
+      } catch (error) {
+        logger.error(error.message);
+        process.exit(1);
+        return;
+      }
+      if (ctx?.dryRun) {
+        // Local-only lookup (no download) so the preview shows the c8run that would run.
+        let version = null;
+        try {
+          version = await selectSecretsVersion(getCacheDir(), { explicit: parsedLocal.version });
+        } catch {
+          version = parsedLocal.version;
+        }
+        console.log(JSON.stringify({ dryRun: true, command: `cluster ${command}`, version, args: parsedLocal.passthrough }));
+        return;
+      }
+      await runClusterLocalCommand(command, getCacheDir(), parsedLocal.passthrough, {
+        explicitVersion: parsedLocal.version,
+      });
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = parsePluginArgs(args);
+    } catch (error) {
+      logger.error(error.message);
+      process.exit(1);
+      return;
+    }
 
     if (!parsed.subcommand || !VALID_SUBCOMMANDS.includes(parsed.subcommand)) {
       console.log('Usage:');
       console.log('  c8ctl cluster start [<version>] [--debug]');
-      console.log('  c8ctl cluster stop');
+      console.log('  c8ctl cluster stop [--purge]');
       console.log('  c8ctl cluster status');
       console.log('  c8ctl cluster logs              (alias: log)');
       console.log('  c8ctl cluster list');
       console.log('  c8ctl cluster list-remote');
       console.log('  c8ctl cluster install <version>');
       console.log('  c8ctl cluster delete <version>');
+      console.log('  c8ctl cluster purge <version>');
+      console.log('  c8ctl cluster secrets [--c8-version <version>] [--physical-tenant <id>] <set|list|path|delete|import|...>');
+      console.log('  c8ctl cluster physical-tenants [--c8-version <version>] <add|list|remove|reset|path|help>');
       console.log('');
       console.log('Subcommands:');
       console.log('  start        Download (if needed) and start a local Camunda 8 cluster');
-      console.log('  stop         Stop the running local Camunda 8 cluster');
+      console.log('  stop         Stop the running local Camunda 8 cluster (--purge also deletes runtime data)');
       console.log('  status       Show whether a cluster is running and connection details');
       console.log('  logs         Stream log output from the running cluster');
       console.log('  list         List locally cached versions and available version aliases');
       console.log('  list-remote  List all versions available on the remote download server');
       console.log('  install      Download a version without starting it');
       console.log('  delete       Remove a locally cached version to reclaim disk space');
+      console.log('  purge        Delete runtime data for a version (binary stays intact, next start is fresh)');
+      console.log('  secrets      Manage local development secrets (forwarded to c8run)');
+      console.log('  physical-tenants  Manage local physical tenants (Camunda 8.10+; forwarded to c8run)');
       console.log('');
       console.log('Options:');
       console.log('  <version>              Camunda version, alias, or major.minor (default: stable)');
       console.log('  --c8-version <version> Alternative flag form for version');
       console.log('  --debug                Stream raw c8run output during start');
+      console.log('  --purge                (stop only) also delete runtime data after stopping');
+      console.log('  --physical-tenants <ids> (start only) Extra physical tenants for this run; repeatable');
+      console.log('  --physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (also --physical-tenant=<id>)');
       console.log('');
       console.log('A <version> can be:');
       console.log('  stable / alpha         Named aliases');
@@ -1547,7 +3764,27 @@ export const commands = {
       console.log('  c8ctl cluster list-remote');
       console.log('  c8ctl cluster install 8.8');
       console.log('  c8ctl cluster delete 8.8');
+      console.log('  c8ctl cluster purge 8.8          # Delete runtime data, keep binary');
+      console.log('  c8ctl cluster stop --purge        # Stop cluster and delete its runtime data');
+      console.log('  c8ctl cluster secrets set OPENAI_API_KEY  # Prompts, no-echo; use --stdin for automation');
+      console.log('  c8ctl cluster secrets list');
+      console.log('  c8ctl cluster secrets import .env.secrets');
+      console.log('  c8ctl cluster secrets delete OPENAI_API_KEY --yes');
+      console.log('  c8ctl cluster physical-tenants --c8-version 8.10 add sales');
+      console.log('  c8ctl cluster start 8.10 --physical-tenants sales,hr');
+      console.log('  c8ctl cluster secrets --physical-tenant sales set OPENAI_API_KEY');
+      console.log('');
+      console.log('secrets delegates to c8run\'s own "secrets" command.');
+      console.log('physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.');
+      console.log('c8ctl never sees or stores a secret value. Run "c8ctl cluster secrets help"');
+      console.log('for c8run\'s own secrets help (--help here belongs to c8ctl).');
+      if (parsed.subcommand) process.exitCode = 1;
       return;
+    }
+
+    if (parsed.purge && parsed.subcommand !== 'stop') {
+      logger.error('--purge can only be used with the stop subcommand. Example: c8ctl cluster stop --purge');
+      process.exit(1);
     }
 
     if (parsed.subcommand === 'status') {
@@ -1590,11 +3827,14 @@ export const commands = {
       return;
     }
 
-    // install and delete require an explicit version argument
-    if (!parsed.version && (parsed.subcommand === 'install' || parsed.subcommand === 'delete')) {
-      const example = parsed.subcommand === 'delete'
-        ? 'c8ctl cluster delete 8.8'
-        : 'c8ctl cluster install stable';
+    // install, delete, and purge require an explicit version argument
+    if (!parsed.version && (parsed.subcommand === 'install' || parsed.subcommand === 'delete' || parsed.subcommand === 'purge')) {
+      const example =
+        parsed.subcommand === 'delete'
+          ? 'c8ctl cluster delete 8.8'
+          : parsed.subcommand === 'purge'
+            ? 'c8ctl cluster purge 8.8'
+            : 'c8ctl cluster install stable';
       logger.error(`Please specify a version. Example: ${example}`);
       process.exit(1);
     }
@@ -1604,6 +3844,16 @@ export const commands = {
         await deleteVersion(getCacheDir(), parsed.version);
       } catch (error) {
         logger.error(`Failed to delete version: ${error}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (parsed.subcommand === 'purge') {
+      try {
+        await purgeClusterData(getCacheDir(), parsed.version);
+      } catch (error) {
+        logger.error(`Failed to purge cluster data: ${error}`);
         process.exit(1);
       }
       return;
@@ -1626,15 +3876,18 @@ export const commands = {
       preferLocal: isStart,
       cacheDir: theCacheDir,
     });
+
+    // Dry-run start: report the version a real start would select (same
+    // local-preferred resolution), but skip install and launch.
+    if (ctx?.dryRun && isStart) {
+      console.log(JSON.stringify({ dryRun: true, command: 'cluster start', version, requestedVersion: versionSpec, args: ['start', ...(parsed.startArgs || [])] }));
+      return;
+    }
+
     if (isVersionAlias(versionSpec)) {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }
 
-    // For start with a named alias, check in the background whether the
-    // remote resolves to a different (newer) version and hint if so.
-    if (isStart && isVersionAlias(versionSpec)) {
-      checkBackgroundAliasFreshness(versionSpec, version);
-    }
     const rolling = isRollingVersion(versionSpec);
     const config = {
       cacheDir: theCacheDir,
@@ -1644,19 +3897,56 @@ export const commands = {
       checkForUpdates: parsed.subcommand === 'install' && rolling,
       // start: soft hint about available updates for rolling versions (non-blocking)
       checkForUpdateHint: parsed.subcommand === 'start' && rolling,
+      // --verbose: detailed HTTP diagnostics for the c8run download
+      verbose: ctx?.verbose === true,
     };
+
+    // For start with a named alias, check in the background whether the
+    // remote resolves to a different (newer) version and hint if so.
+    if (isStart && isVersionAlias(versionSpec)) {
+      config._aliasHintPromise = checkBackgroundAliasFreshness(versionSpec, version, theCacheDir);
+    }
 
     if (parsed.subcommand === 'start') {
       try {
         await ensureC8RunInstalled(config);
-        await startC8Run(config, parsed.debug);
+        await startC8Run(config, parsed.debug, parsed.startArgs);
       } catch (error) {
-        logger.error(`Failed to start cluster: ${error}`);
+        logger.error(`Failed to start cluster: ${formatErrorWithCause(error)}`);
+        await flushStartHints(config);
         process.exit(1);
       }
     } else if (parsed.subcommand === 'stop') {
       try {
-        await stopC8Run(config, parsed.debug);
+        const stoppedVersion = await stopC8Run(config, parsed.debug);
+        if (parsed.purge) {
+          if (!stoppedVersion) {
+            logger.warn('Cannot determine which version to purge (version marker is missing). ' +
+                'To purge manually, run: c8ctl cluster purge <version>');
+          } else if (!existsSync(join(theCacheDir, `c8run-${stoppedVersion}`))) {
+            // The install dir itself is already gone — e.g. the orphan case
+            // where it was removed out from under a running cluster (#560).
+            // There is genuinely no runtime data left to purge, so treat it as
+            // already purged rather than letting purgeClusterData exit "not
+            // installed" and fail the combined command. If the install dir
+            // still exists (even with its binary missing), fall through to
+            // purgeClusterData so any leftover data is not silently retained.
+            logger.info(
+              `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
+            );
+          } else {
+            // C8CTL_STOP_WAIT_TIMEOUT_MS is an internal override so tests can bound the wait.
+            const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
+            const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
+            if (!(await waitForClusterExit(theCacheDir, { timeoutMs }))) {
+              throw new Error(
+                'Cluster processes are still shutting down, so runtime data was not purged. ' +
+                  `Once they have exited, run: c8ctl cluster purge ${stoppedVersion}`,
+              );
+            }
+            await purgeClusterData(theCacheDir, stoppedVersion);
+          }
+        }
       } catch (error) {
         logger.error(`Failed to stop cluster: ${error}`);
         process.exit(1);
@@ -1666,7 +3956,7 @@ export const commands = {
         await ensureC8RunInstalled(config);
         logger.info(`Version ${version} is ready. Start it with: c8ctl cluster start ${parsed.version || ''}`);
       } catch (error) {
-        logger.error(`Failed to install version: ${error}`);
+        logger.error(`Failed to install version: ${formatErrorWithCause(error)}`);
         process.exit(1);
       }
     }

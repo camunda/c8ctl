@@ -14,6 +14,11 @@ Build and maintain a plugin that exposes useful commands through `export const c
 - Required export: `commands` object mapping command name -> async handler
 - Optional export: `metadata` object for help descriptions
 - Package keywords must include `c8ctl` or `c8ctl-plugin`
+- `engines.c8ctl` declares the c8ctl version this plugin needs. It ships as `"*"`
+  (any version). Tighten it — e.g. `">=4.0.0-alpha.1"` — as soon as a handler
+  starts using a runtime API that older c8ctl versions do not expose: c8ctl then
+  refuses the install and disables the commands with an explanation, instead of
+  letting them fail somewhere inside this plugin
 
 ## Runtime API (available as global `c8ctl`)
 
@@ -42,6 +47,9 @@ Methods:
 - `c8ctl.createClient(profileFlag?, sdkConfig?)`
 - `c8ctl.resolveTenantId(profileFlag?)`
 - `c8ctl.getLogger(mode?)`
+- `c8ctl.getUserDataDir()`
+- `c8ctl.getModelerDataDir()`
+- `c8ctl.npm({ args, stdout?, stdio? })`
 
 ## Development Loop
 
@@ -57,6 +65,7 @@ Methods:
 - Use `c8ctl.getLogger()` for output-mode-aware logs.
 - Use `c8ctl.createClient()` for Camunda API interactions.
 - Use `c8ctl.resolveTenantId()` instead of duplicating tenant fallback logic.
+- Use `c8ctl.npm()` instead of spawning npm yourself — a bare `npm` spawn breaks on Windows.
 - Prefer clear, actionable error messages.
 - Avoid command names that conflict with built-in c8ctl commands.
 - For any non-trivial implementation or behavior change, always cross-check against upstream `c8ctl` repository: <https://github.com/camunda/c8ctl> before finalizing
@@ -75,3 +84,10 @@ Before considering a change complete:
 - Make the smallest change required for each task.
 - Do not add unrelated commands or refactors.
 - Keep `metadata.commands` descriptions concise and user-facing.
+
+## Git / GitHub CLI output
+
+- `git` and `gh` commands can invoke a pager and hang waiting for keyboard input (e.g. `q` to quit), which looks like the terminal is stuck. Always disable paging before running commands whose output might exceed a screen:
+
+- Prefix `git` read commands with `--no-pager`, e.g. `git --no-pager log`, `git --no-pager diff`, `git --no-pager show`.
+- Pipe `gh` output through `cat`, e.g. `gh pr list | cat`, `gh pr view 123 | cat`, `gh issue list | cat`.

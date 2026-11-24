@@ -16,14 +16,14 @@ All requirements from the plan have been successfully implemented and tested.
    - CLI bin entries: `c8ctl` and `c8` aliases
    - `prepublishOnly` hook ensures build runs before publishing (not on install)
 
-2. **Logger Component** (`src/logger.ts`)
+2. **Logger Component** (`src/core/logger.ts`)
    - Text and JSON output modes
    - Methods: `info()`, `success()`, `error()`, `table()`, `json()`
    - Prominent display of process instance keys
    - Singleton pattern for global access
    - **Tests**: 19 unit tests covering all output modes and formatting
 
-3. **Configuration System** (`src/config.ts`)
+3. **Configuration System** (`src/core/config.ts`)
    - Platform-specific user data directories (Linux, macOS, Windows)
    - Profile storage in `profiles.json`
    - Session state in `session.json`
@@ -31,7 +31,7 @@ All requirements from the plan have been successfully implemented and tested.
    - Tenant resolution: session → profile → env var → `<default>`
    - **Tests**: 27 unit tests covering all resolution paths
 
-4. **SDK Client Factory** (`src/client.ts`)
+4. **SDK Client Factory** (`src/core/client.ts`)
    - Creates `CamundaClient` with resolved configuration
    - Handles OAuth and basic auth
    - Integrates with profile and session systems

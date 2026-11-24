@@ -166,7 +166,7 @@ describe("Plugin Structure", () => {
 			// Dynamic import test
 			try {
 				// Need to inject global for the plugin to work
-				const { c8ctl } = await import("../../src/runtime.js");
+				const { c8ctl } = await import("../../src/core/runtime.ts");
 				Object.assign(globalThis, { c8ctl });
 
 				const pluginPath = join(

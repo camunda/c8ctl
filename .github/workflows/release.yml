@@ -11,80 +11,16 @@ concurrency:
 
 jobs:
   test:
-    name: Test (Node ${{ matrix.node }} - Camunda ${{ matrix.camunda }})
-    runs-on: ubuntu-latest
+    name: Test
+    # Reusable workflows can't exceed the caller's grant, and the permission check is
+    # static: test.yml's agentic-revision job (never runs here) needs these read scopes.
     permissions:
       contents: read
-    strategy:
-      fail-fast: true
-      matrix:
-        node: [22, 24]
-        camunda: ['8.8', '8.9']
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ matrix.node }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run unit tests
-        run: npm run test:unit
-
-      - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
-        working-directory: assets/c8/${{ matrix.camunda }}
-        run: docker compose up -d
-
-      - name: Wait for Camunda to be ready
-        run: |
-          echo "Waiting for Camunda at localhost:8080..."
-          # First wait for topology endpoint
-          for i in {1..60}; do
-            if curl -s -f -u demo:demo http://localhost:8080/v2/topology > /dev/null; then
-              echo "Topology endpoint is ready!"
-              break
-            fi
-            echo "Attempt $i: Topology not ready yet, waiting..."
-            sleep 5
-          done
-
-          # Then wait an additional 30 seconds for broker to fully initialize
-          echo "Waiting additional time for broker to initialize..."
-          sleep 30
-
-          # Verify we can actually deploy
-          echo "Testing deployment capability..."
-          for i in {1..30}; do
-            if curl -s -u demo:demo http://localhost:8080/v2/topology | grep -q '"health":"healthy"'; then
-              echo "Broker is healthy, ready for deployments!"
-              exit 0
-            fi
-            echo "Attempt $i: Broker not fully ready, waiting..."
-            sleep 2
-          done
-
-          echo "Camunda may not be fully ready, but continuing with tests..."
-
-      - name: Run integration tests
-        run: npm run test:integration
-        env:
-          CAMUNDA_VERSION: ${{ matrix.camunda }}
-
-      - name: Stop Camunda
-        if: always()
-        working-directory: assets/c8/${{ matrix.camunda }}
-        run: docker compose down -v
-
-      - name: Show Camunda logs on failure
-        if: failure()
-        working-directory: assets/c8/${{ matrix.camunda }}
-        run: docker compose logs
+      issues: read
+      pull-requests: read
+    uses: ./.github/workflows/test.yml
+    with:
+      os: '["ubuntu-latest"]'
 
   release:
     name: Release
@@ -98,14 +34,14 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Node.js 22.18.0
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: 22.18.0
+          node-version: 24.22.1
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
@@ -131,3 +67,15 @@ jobs:
           # Disabled while repo is private. See: https://github.com/camunda/c8ctl/issues/12
           NPM_CONFIG_PROVENANCE: 'false' 
         run: NODE_AUTH_TOKEN="" npx semantic-release
+
+  notify-release-failure:
+    needs: [test, release]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    permissions: {}
+    uses: camunda/sdk-infra/.github/workflows/sdk-slack-notify.yml@v1.12.5
+    with:
+      repo-name: c8ctl
+      workflow-name: Release
+      mention-group: ${{ vars.SLACK_MENTION_GROUP }}
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_SDK_ALERTS }}

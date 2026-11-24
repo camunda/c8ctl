@@ -6,7 +6,7 @@ This repository uses **semantic-release** + GitHub Actions to build, test, tag, 
 
 The release workflow is [.github/workflows/release.yml](.github/workflows/release.yml).
 
-1. **Tests run first** (unit + integration against Camunda 8 via Docker Compose). This job is copied from the test workflow so release runs are gated on the same checks.
+1. **Tests run first** (lint, typecheck, unit + integration against Camunda 8 via Docker Compose). The job calls the reusable test workflow (`test.yml`, Ubuntu only), so release runs are gated on the same checks.
 2. If tests pass, the workflow runs `npx semantic-release`.
 3. `semantic-release`:
    - determines the next version from commit messages (Conventional Commits)
@@ -59,7 +59,11 @@ Examples:
 
 - `fix: ...` → patch
 - `feat: ...` → minor
-- `feat!: ...` or `BREAKING CHANGE: ...` → major
+- a commit with a `BREAKING CHANGE: ...` footer (a paragraph after the body starting with exactly `BREAKING CHANGE:`) → major
+
+A `!` after the type (`feat!: ...`, `fix(scope)!: ...`) does **not** produce a major on its own: the configured Angular preset can't parse that header, so without the footer the commit triggers no release and is missing from the release notes. A hyphenated `BREAKING-CHANGE:` footer is ignored. See AGENTS.md, *Breaking changes are rare*, for the full table.
+
+Any breaking-change marker in a PR's title or commits blocks the merge until a maintainer applies the `ack-breaking-change` label (the *Breaking change acknowledged* required check).
 
 If you merge commits that don’t follow Conventional Commits, semantic-release may do **no release**.
 
@@ -83,7 +87,7 @@ This is the normal day-to-day prerelease flow.
 
 If the workflow says “no release”:
 
-- Confirm at least one commit since the last tag uses `fix:`, `feat:`, or contains a breaking change marker.
+- Confirm at least one commit since the last tag uses `fix:`, `feat:`, or has a `BREAKING CHANGE:` footer. A `type!:` subject without that footer is not recognized and triggers no release.
 
 ### One-time bootstrap (only if the package does not exist on npm yet)
 
@@ -101,9 +105,22 @@ If npm OIDC requires the package to already exist, you can do a one-time manual 
 
 After this bootstrap, prefer the automated workflow for subsequent alpha releases.
 
-## Procedure: Release a stable version (from `release`)
+## Procedure: Release a stable version (self-service, recommended)
 
-Stable releases are cut by updating the `release` branch.
+Use the **Promote to stable** workflow to cut a stable release without running any git commands locally. It fast-forwards `release` to a commit on `main` and then dispatches the Release workflow (which publishes under the `latest` dist-tag).
+
+1. Go to **Actions → Promote to stable → Run workflow**.
+2. Leave `ref` as `main` to promote the current tip of `main`, or enter a specific commit SHA / branch on `main`.
+3. Run the workflow. It will:
+   - fast-forward the `release` branch to the requested commit (fails if that would not be a fast-forward), then
+   - trigger the **Release** workflow on `release`.
+4. Verify artifacts (see below): the new version appears on the npm **latest** dist-tag and a GitHub release + tag are created.
+
+> The fast-forward guard means you can only promote commits that already contain the current `release` tip — you can never drop or rewrite already-released stable commits.
+
+## Procedure: Release a stable version (from `release`, manual git)
+
+Stable releases can also be cut by updating the `release` branch directly.
 
 1. Decide what goes into the stable release.
    - Typical approach: fast-forward `release` to the desired commit from `main`.

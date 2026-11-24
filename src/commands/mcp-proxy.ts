@@ -10,16 +10,14 @@ import {
 	CallToolRequestSchema,
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createClient } from "../client.ts";
-import { defineCommand } from "../command-framework.ts";
-import { normalizeToError } from "../errors.ts";
-import { getVersion } from "../help.ts";
-import { Logger, type LogWriter } from "../logger.ts";
 import {
-	createCamundaFetch,
-	normalizeRemoteMcpUrl,
-} from "../mcp-proxy-helpers.ts";
-import { c8ctl } from "../runtime.ts";
+	createClient,
+	Logger,
+	type LogWriter,
+	normalizeToError,
+} from "../core/index.ts";
+import { defineCommand, getVersion } from "../framework/index.ts";
+import { createCamundaFetch, normalizeRemoteMcpUrl } from "../utils/index.ts";
 
 /**
  * MCP Proxy that bridges STDIO (local) to HTTP (remote) with Camunda authentication.
@@ -122,8 +120,6 @@ class McpProxy {
 
 			// Connect server to STDIO transport
 			await this.mcpServer.connect(this.serverTransport);
-
-			this.logger.info("MCP proxy started successfully");
 		} catch (error) {
 			this.logger.error(
 				`Failed to start MCP proxy: ${error instanceof Error ? error.message : String(error)}`,
@@ -234,18 +230,21 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 	};
 
 	const logger = new Logger(stderrLogWriter);
-	const camundaClient = createClient(ctx.profile, {
-		log: {
-			transport: (evt) => {
-				logger.json(evt);
-			},
-		},
-	});
-
 	const mcpServerPath = allPositionals[0] ?? "/mcp/cluster";
 
 	let proxy: McpProxy | null = null;
 	try {
+		// Client creation resolves the cluster config (and validates
+		// CAMUNDA_AUTH_STRATEGY), so it must sit inside this try: a config
+		// error escaping to the framework would print hints to stdout and
+		// corrupt the MCP protocol channel.
+		const camundaClient = createClient(ctx.profile, {
+			log: {
+				transport: (evt) => {
+					logger.json(evt);
+				},
+			},
+		});
 		proxy = new McpProxy(camundaClient, logger, mcpServerPath);
 		await proxy.start();
 
@@ -260,6 +259,8 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 			};
 			process.once("SIGINT", () => shutdown("SIGINT"));
 			process.once("SIGTERM", () => shutdown("SIGTERM"));
+			// Publish readiness only after graceful-shutdown signals are registered.
+			logger.info("MCP proxy started successfully");
 		});
 	} catch (error) {
 		const normalizedError = normalizeToError(error, "MCP proxy failed");
@@ -268,9 +269,9 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 
 		// In verbose mode users want the full stack trace, so re-throw and
 		// let Node print it to stderr. The framework's default error handler
-		// short-circuits to a plain rethrow when `c8ctl.verbose` is set
+		// short-circuits to a plain rethrow when verbose is set
 		// (see src/errors.ts), so no stdout hint is emitted in that path.
-		if (c8ctl.verbose) {
+		if (ctx.verbose) {
 			throw normalizedError;
 		}
 

@@ -2,19 +2,48 @@
  * Watch command - monitor files for changes and auto-deploy
  */
 
-import { existsSync, statSync, watch } from "node:fs";
-import { basename, extname, resolve } from "node:path";
-import { defineCommand } from "../command-framework.ts";
-import { deployResources } from "../deployments.ts";
-import { normalizeToError } from "../errors.ts";
-import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "../ignore.ts";
-import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
+import {
+	existsSync,
+	realpathSync,
+	statSync,
+	unwatchFile,
+	watch,
+	watchFile,
+} from "node:fs";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { createClient, normalizeToError, SilentError } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
+	CAMUNDA_PROJECT_FILE,
+	type CamundaProject,
+	DEPLOY_COOLDOWN,
+	DEPLOY_RESOURCES_FIELD,
 	DEPLOYABLE_EXTENSIONS,
-} from "./resource-extensions.ts";
+	DeployResourcesError,
+	deployResourcesStateOf,
+	isIgnored,
+	loadIgnoreRules,
+	readDeployResourcesState,
+	readProjectDescriptor,
+	resolveDeployResources,
+	resolveIgnoreBaseDir,
+} from "../utils/index.ts";
+import {
+	checkServerSupportsExtensions,
+	deployResources,
+	findProjectRoot,
+	logMessage,
+	rejectSelectionFlagsForDescriptor,
+} from "./helpers/deploy-helpers.ts";
 
 export { DEPLOY_COOLDOWN };
+
+/**
+ * The descriptor no longer matches the mode this watch started in, so the
+ * watcher cannot keep going — not even with `--force`.
+ */
+class RestartRequiredError extends Error {}
 
 const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 
@@ -64,10 +93,181 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		}
 	}
 
+	// ── Project mode ───────────────────────────────────────────────────
+	// When --project (or the deprecated aliases --process-application /
+	// --pa) is set, resolve the project root from the watched paths and
+	// expand the watch scope to the project root so the entire Camunda
+	// project tree is monitored for changes. A project root is marked by
+	// a camunda.json descriptor or a legacy .process-application file.
+	const projectMode = Boolean(
+		flags.project || flags["process-application"] || flags.pa,
+	);
+	if (!flags.project && (flags["process-application"] || flags.pa)) {
+		logMessage(
+			"Warning: --process-application/--pa is deprecated, use --project instead.",
+		);
+	}
+	let projectRoot: string | null = null;
+	// The descriptor read while finding the project root: the startup
+	// decisions below use this single read, so an edit landing between
+	// separate reads can't downgrade a deployResources project to the
+	// default scan. Later changes are picked up by the watcher.
+	const startupDescriptors = new Map<string, CamundaProject>();
+	let startupDescriptor: CamundaProject | null = null;
+	if (projectMode) {
+		// Resolve the project root from every watched path and verify they
+		// all belong to the same Camunda project.
+		let resolvedRoot: string | undefined;
+		for (const p of resolvedPaths) {
+			const root = findProjectRoot(p, undefined, startupDescriptors);
+			if (!root) {
+				throw new Error(
+					`--project: no camunda.json or .process-application marker found above ${p}. ` +
+						"Place a camunda.json file at the root of your Camunda project.",
+				);
+			}
+			// Normalize via realpathSync so symlinks and equivalent
+			// spellings of the same directory compare as equal.
+			const normalizedRoot = realpathSync(root);
+			if (resolvedRoot && normalizedRoot !== resolvedRoot) {
+				throw new Error(
+					"--project: all watched paths must belong to the same " +
+						`Camunda project. Path ${p} resolves to ${normalizedRoot}, ` +
+						`but earlier paths resolved to ${resolvedRoot}`,
+				);
+			}
+			resolvedRoot = normalizedRoot;
+			startupDescriptor = startupDescriptors.get(root) ?? null;
+		}
+		// Invariant: resolvedPaths always has ≥1 entry (defaults to ["."]),
+		// so the loop above always runs at least once and sets resolvedRoot.
+		// This guard satisfies the type checker — it cannot fire at runtime.
+		if (!resolvedRoot) {
+			throw new Error("--project requires at least one watch path");
+		}
+		projectRoot = resolvedRoot;
+		// Replace watched paths with the project root so we monitor the
+		// entire project tree, not just the user-specified subdirectory.
+		resolvedPaths.length = 0;
+		resolvedPaths.push(projectRoot);
+	}
+
+	// ── deployResources (project mode) ─────────────────────────────────
+	// When the project descriptor declares `deployResources`, the watcher
+	// tracks the descriptor-selected set instead of an extension list:
+	// changes to selected files (create, modify, delete, rename) redeploy
+	// the re-resolved set, and a camunda.json edit redeploys only when it
+	// changes the set. `--force` keeps its meaning of "continue after
+	// errors" (including invalid configuration / empty selection).
+	const descriptorMode =
+		startupDescriptor !== null &&
+		Object.hasOwn(startupDescriptor, DEPLOY_RESOURCES_FIELD);
+	if (descriptorMode && projectRoot) {
+		rejectSelectionFlagsForDescriptor({
+			descriptorRoots: [projectRoot],
+			extensions: flags.extensions,
+			allExtensions: flags["all-extensions"],
+		});
+	}
+	/**
+	 * Resolve the current selection; throws on invalid config / empty set.
+	 * Returns `null` while camunda.json is momentarily missing (an editor
+	 * saving by delete-and-recreate): the change is resolved again once the
+	 * new file appears, never via the default scan.
+	 */
+	// Descriptor read discipline (see `planDeployPaths`): at startup the
+	// descriptor read while finding the project root decides everything;
+	// afterwards each re-resolution reads it once (`resolveSelection`) and
+	// the redeploy uses exactly that snapshot (`resolvedPatterns`). The
+	// polling and the check after arming only detect changes and route
+	// them to a re-resolution; they never decide what is deployed.
+	// Patterns of the last successful resolution: the redeploy uses them
+	// instead of re-reading camunda.json, which may change mid-deploy.
+	let resolvedPatterns: string[] = [];
+	const resolveSelection = (root: string): string[] | null => {
+		const state = readDeployResourcesState(root);
+		if (state.kind === "no-descriptor") return null;
+		if (state.kind === "no-field") {
+			throw new RestartRequiredError(
+				'"deployResources" was removed from camunda.json. ' +
+					"Restart `c8 watch --project` to watch the default resource scan.",
+			);
+		}
+		const files = resolveDeployResources(root, state.patterns);
+		resolvedPatterns = state.patterns;
+		return files;
+	};
+	let selected: string[] = [];
+	// Real paths of the selected files, so an event reported under another
+	// path of the same file (a symlink alias and its target) still counts
+	// as a change to a selected file. Kept from the previous resolution for
+	// deletions, whose files can no longer be resolved.
+	let selectedIdentities = new Set<string>();
+	/** Real path of a project-relative path; for a missing file, its real
+	 *  parent joined with the name (best effort). */
+	const identityOf = (root: string, rel: string): string => {
+		const abs = join(root, ...rel.split("/"));
+		try {
+			return realpathSync(abs);
+		} catch {
+			try {
+				return join(realpathSync(dirname(abs)), basename(abs));
+			} catch {
+				return abs;
+			}
+		}
+	};
+	if (descriptorMode && projectRoot) {
+		try {
+			const state = deployResourcesStateOf(startupDescriptor, projectRoot);
+			if (state.kind === "patterns") {
+				selected = resolveDeployResources(projectRoot, state.patterns);
+				resolvedPatterns = state.patterns;
+			}
+			const root = projectRoot;
+			selectedIdentities = new Set(
+				selected.map((rel) => identityOf(root, rel)),
+			);
+		} catch (error) {
+			if (!flags.force) throw error;
+			logger.error(
+				"Invalid resource selection",
+				normalizeToError(error, "Invalid resource selection"),
+			);
+		}
+	}
+
+	// ── Pre-flight version check ──
+	// Always perform the topology check for extension-based watching —
+	// --force means "continue after deploy errors", not "bypass extension
+	// filtering". A `deployResources` selection is independent of the
+	// server version, so it needs no check.
+	const serverSupportsExtensions = descriptorMode
+		? true
+		: await checkServerSupportsExtensions(createClient(ctx.profile));
+
+	// Clamp watched extensions on servers that don't support extended types.
+	// Note: explicit file paths bypass extension filtering by design, so
+	// this only gates which fs events trigger a deploy.
+	const userRequestedExtensions =
+		!!flags["all-extensions"] ||
+		!!(flags.extensions && String(flags.extensions).trim());
+	const effectiveExtensions = serverSupportsExtensions
+		? watchedExtensions
+		: DEPLOYABLE_EXTENSIONS;
+
+	if (!serverSupportsExtensions && userRequestedExtensions) {
+		logMessage(
+			`Warning: server does not support extended extensions (requires 8.10+). ` +
+				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}).`,
+		);
+	}
+
 	// Load .c8ignore rules from the target directory (not cwd) so that
 	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
+	// A `deployResources` selection ignores .c8ignore, so it is not read.
 	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
-	const ig = loadIgnoreRules(ignoreBaseDir);
+	const ig = descriptorMode ? null : loadIgnoreRules(ignoreBaseDir);
 
 	// Keep track of recently deployed files to avoid duplicate deploys
 	const recentlyDeployed = new Map<string, number>();
@@ -79,6 +279,161 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	// Set on SIGINT to short-circuit any debounce callback that fires
 	// between signal receipt and the synchronous shutdown work below.
 	let shuttingDown = false;
+	// Rejects the lifecycle promise below — used to stop watching on an
+	// invalid `deployResources` configuration when --force is not set.
+	let failWatch: ((error: Error) => void) | undefined;
+	// Project-relative paths changed since the last descriptor-mode
+	// resolution (collapsed by the debounce window).
+	const pendingChanges = new Set<string>();
+	// Descriptor-mode resolutions and deploys run one at a time, so a
+	// change made during an in-flight deploy is deployed after it and the
+	// newest content always lands last.
+	let descriptorQueue: Promise<void> = Promise.resolve();
+	let descriptorBusy = false;
+
+	/**
+	 * Descriptor mode: re-resolve the selection after a burst of changes
+	 * and redeploy when a selected file changed or the selected set did.
+	 */
+	const onDescriptorModeChange = async (root: string): Promise<void> => {
+		// Pending changes are kept until a resolution succeeds, so edits made
+		// while the descriptor is invalid (--force) are deployed on recovery.
+		const changed = [...pendingChanges];
+
+		let next: string[];
+		try {
+			const resolved = resolveSelection(root);
+			if (resolved === null) {
+				// Keep the pending changes: the descriptor is being replaced,
+				// and its re-creation triggers another resolution.
+				logger.info(
+					"camunda.json is missing — waiting for it to be written again",
+				);
+				return;
+			}
+			next = resolved;
+			pendingChanges.clear();
+		} catch (error) {
+			const err = normalizeToError(error, "Invalid resource selection");
+			logger.error("Invalid resource selection", err);
+			// --force keeps watching after errors, but not after the mode
+			// itself is gone: continuing would redeploy a stale selection.
+			if (flags.force && !(error instanceof RestartRequiredError)) {
+				logger.info("Continuing to watch (--force).");
+				return;
+			}
+			failWatch?.(new SilentError(err.message));
+			return;
+		}
+
+		const previous = new Set(selected);
+		const current = new Set(next);
+		selected = next;
+		const previousIdentities = selectedIdentities;
+		const currentIdentities = new Set(next.map((rel) => identityOf(root, rel)));
+		selectedIdentities = currentIdentities;
+		const setChanged =
+			previous.size !== current.size || next.some((rel) => !previous.has(rel));
+		const identities = [...previousIdentities, ...currentIdentities];
+		const touches = (rel: string) => {
+			if (
+				[...previous, ...current].some(
+					(file) => file === rel || file.startsWith(`${rel}/`),
+				)
+			) {
+				return true;
+			}
+			const identity = identityOf(root, rel);
+			return identities.some(
+				(file) => file === identity || file.startsWith(`${identity}${sep}`),
+			);
+		};
+		const selectedFileChanged = changed.some(
+			(rel) => rel !== CAMUNDA_PROJECT_FILE && touches(rel),
+		);
+		if (!setChanged && !selectedFileChanged) {
+			if (changed.includes(CAMUNDA_PROJECT_FILE)) {
+				logger.info(
+					"camunda.json changed; the selected resources are unchanged — not redeploying",
+				);
+			}
+			return;
+		}
+
+		logger.info(
+			`\n🔄 Change detected: ${changed.join(", ")} — deploying ${next.length} selected resource(s)`,
+		);
+		recentlyDeployed.set(root, Date.now());
+		const ac = new AbortController();
+		inflightDeploys.add(ac);
+		try {
+			await deployResources([root], {
+				profile: ctx.profile,
+				continueOnError: flags.force,
+				continueOnUserError: true,
+				signal: ac.signal,
+				verbose: ctx.verbose,
+				plan: [{ kind: "descriptor", path: root, patterns: resolvedPatterns }],
+			});
+		} catch (error) {
+			if (ac.signal.aborted) return;
+			// A selected file that cannot be read is a selection error, not a
+			// deployment error: nothing was sent, and it stops watching unless
+			// --force is set (same as invalid configuration).
+			if (error instanceof DeployResourcesError) {
+				logger.error("Invalid resource selection", error);
+				if (flags.force) {
+					logger.info("Continuing to watch (--force).");
+					return;
+				}
+				failWatch?.(new SilentError(error.message));
+				return;
+			}
+			logger.error(
+				"Failed to deploy project",
+				normalizeToError(error, "Deployment request failed"),
+			);
+		} finally {
+			inflightDeploys.delete(ac);
+		}
+	};
+
+	/** Debounce descriptor-mode changes into one re-resolution. */
+	const scheduleDescriptorModeChange = (root: string, delay: number): void => {
+		const existing = debounceTimers.get(root);
+		if (existing) clearTimeout(existing);
+		debounceTimers.set(
+			root,
+			setTimeout(() => {
+				debounceTimers.delete(root);
+				if (shuttingDown) return;
+				// Within the cooldown, postpone rather than drop: the pending
+				// changes must still be resolved once the window passes.
+				const lastDeploy = recentlyDeployed.get(root);
+				const remaining = lastDeploy
+					? DEPLOY_COOLDOWN - (Date.now() - lastDeploy)
+					: 0;
+				if (remaining > 0) {
+					scheduleDescriptorModeChange(root, remaining);
+					return;
+				}
+				if (descriptorBusy) {
+					logger.info(
+						"⏳ Waiting for the in-flight deployment to finish before redeploying",
+					);
+				}
+				descriptorQueue = descriptorQueue.then(async () => {
+					if (shuttingDown) return;
+					descriptorBusy = true;
+					try {
+						await onDescriptorModeChange(root);
+					} finally {
+						descriptorBusy = false;
+					}
+				});
+			}, delay),
+		);
+	};
 
 	// Watch each path
 	const watchers = resolvedPaths.map((path) => {
@@ -93,56 +448,84 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 
 				const file = filename;
 
+				if (descriptorMode && projectRoot) {
+					pendingChanges.add(filename.split(sep).join("/"));
+					scheduleDescriptorModeChange(projectRoot, DEBOUNCE_DELAY);
+					return;
+				}
+
 				const ext = extname(filename);
-				if (!watchedExtensions.includes(ext)) {
+				if (!effectiveExtensions.includes(ext)) {
+					return;
+				}
+
+				// The project descriptor is metadata, never a deployable
+				// resource. In project mode a descriptor change still
+				// triggers a full project redeploy below.
+				if (!projectMode && basename(filename) === CAMUNDA_PROJECT_FILE) {
 					return;
 				}
 
 				const fullPath = isDirectory ? resolve(path, filename) : path;
 
 				// Skip files matching .c8ignore rules
-				if (isIgnored(ig, fullPath, ignoreBaseDir)) {
+				if (ig && isIgnored(ig, fullPath, ignoreBaseDir)) {
 					return;
 				}
 
-				// Clear any pending debounce for this file and restart the timer.
+				// In project mode, key debounce/cooldown by the project root
+				// so that a burst of changes to different files collapses
+				// into a single full-project deploy within the debounce window.
+				const debounceKey = projectMode && projectRoot ? projectRoot : fullPath;
+
+				// Clear any pending debounce for this key and restart the timer.
 				// This ensures we wait until the file system is quiet before reading.
-				const existing = debounceTimers.get(fullPath);
+				const existing = debounceTimers.get(debounceKey);
 				if (existing) clearTimeout(existing);
 
 				debounceTimers.set(
-					fullPath,
+					debounceKey,
 					setTimeout(async () => {
-						debounceTimers.delete(fullPath);
+						debounceTimers.delete(debounceKey);
 
 						// SIGINT may have fired between the timer being scheduled
 						// and this callback running. Bail before doing any I/O.
 						if (shuttingDown) return;
 
 						// Check cooldown to prevent duplicate deploys
-						const lastDeploy = recentlyDeployed.get(fullPath);
+						const lastDeploy = recentlyDeployed.get(debounceKey);
 						const now = Date.now();
 						if (lastDeploy && now - lastDeploy < DEPLOY_COOLDOWN) {
 							return;
 						}
 
-						// Check if file still exists (might have been deleted)
-						if (!existsSync(fullPath)) {
+						// Check if file still exists (might have been deleted).
+						// In project mode, deletions are meaningful changes — the
+						// project should be redeployed without the removed file.
+						if (!projectMode && !existsSync(fullPath)) {
 							logger.info(`⚠️  File deleted, skipping: ${basename(file)}`);
 							return;
 						}
 
 						logger.info(`\n🔄 Change detected: ${basename(file)}`);
-						recentlyDeployed.set(fullPath, Date.now());
+						recentlyDeployed.set(debounceKey, Date.now());
+
+						// In project mode, deploy the entire project root instead
+						// of the single changed file.
+						const deployPaths =
+							projectMode && projectRoot ? [projectRoot] : [fullPath];
 
 						const ac = new AbortController();
 						inflightDeploys.add(ac);
 						try {
-							await deployResources([fullPath], {
+							await deployResources(deployPaths, {
 								profile: ctx.profile,
 								continueOnError: flags.force,
 								continueOnUserError: true,
 								signal: ac.signal,
+								verbose: ctx.verbose,
+								loadDeployAlways: serverSupportsExtensions,
+								extensionList: effectiveExtensions,
 							});
 						} catch (error) {
 							// `deployResources()` normally returns early when its signal
@@ -153,7 +536,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 							// user-visible shutdown signal.
 							if (ac.signal.aborted) return;
 							logger.error(
-								`Failed to deploy ${basename(file)}`,
+								`Failed to deploy ${projectMode ? "project" : basename(file)}`,
 								normalizeToError(error, "Deployment request failed"),
 							);
 						} finally {
@@ -172,6 +555,47 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		return watcher;
 	});
 
+	// Editors often save by replacing the file (write a temp file, then
+	// rename). On some platforms (Linux with Node 22) the recursive watcher
+	// then stops reporting later changes to that path, so the descriptor
+	// is also polled by path, which survives replacement. Events from both
+	// sources collapse in the debounce window.
+	const descriptorFile =
+		descriptorMode && projectRoot
+			? join(projectRoot, CAMUNDA_PROJECT_FILE)
+			: null;
+	if (descriptorFile && projectRoot) {
+		const root = projectRoot;
+		// Change detection only (stat polling): never decides the selection.
+		watchFile(descriptorFile, { interval: 250 }, (current, previous) => {
+			if (
+				current.mtimeMs === previous.mtimeMs &&
+				current.ino === previous.ino &&
+				current.size === previous.size
+			) {
+				return;
+			}
+			pendingChanges.add(CAMUNDA_PROJECT_FILE);
+			scheduleDescriptorModeChange(root, DEBOUNCE_DELAY);
+		});
+		// The startup decisions used the descriptor read while finding the
+		// project root. Now that changes are observed, check once whether it
+		// changed in between (edited, removed or broken): if so, resolve it
+		// again through the normal change path.
+		let unchanged = false;
+		try {
+			unchanged =
+				JSON.stringify(readProjectDescriptor(root)) ===
+				JSON.stringify(startupDescriptor);
+		} catch {
+			unchanged = false;
+		}
+		if (!unchanged) {
+			pendingChanges.add(CAMUNDA_PROJECT_FILE);
+			scheduleDescriptorModeChange(root, DEBOUNCE_DELAY);
+		}
+	}
+
 	// Block until SIGINT, then close watchers, cancel any pending debounced
 	// deploys, abort any in-flight HTTP deploys, and resolve so the handler
 	// returns naturally. The framework treats this as `{ kind: "never" }`
@@ -186,17 +610,27 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	//   `signal.aborted` and swallow the AbortError instead of logging.
 	// Together these drain the event loop within one tick, so the framework
 	// can return naturally and own the exit code.
-	await new Promise<void>((resolveSignal) => {
-		process.once("SIGINT", () => {
+	await new Promise<void>((resolveSignal, rejectSignal) => {
+		const shutdown = () => {
 			shuttingDown = true;
-			logger.info("\n\n🍹 - bottoms up.");
 			for (const w of watchers) w.close();
+			if (descriptorFile) unwatchFile(descriptorFile);
 			for (const timer of debounceTimers.values()) clearTimeout(timer);
 			debounceTimers.clear();
 			for (const ac of inflightDeploys) ac.abort();
 			inflightDeploys.clear();
+		};
+		const onSigint = () => {
+			logger.info("\n\n🍹 - bottoms up.");
+			shutdown();
 			resolveSignal();
-		});
+		};
+		failWatch = (error) => {
+			process.off("SIGINT", onSigint);
+			shutdown();
+			rejectSignal(error);
+		};
+		process.once("SIGINT", onSigint);
 
 		// Emit the readiness banner ONLY AFTER both the fs watchers and the
 		// SIGINT handler are registered. Tests poll the "Watching for
@@ -207,7 +641,20 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		// FSEvents on macOS, ReadDirectoryChangesW on Windows) and the
 		// file event is silently lost.
 		logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
-		logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
+		if (descriptorMode) {
+			logger.info(
+				`📋 Monitoring ${selected.length} resource(s) selected by "deployResources" in camunda.json`,
+			);
+		} else {
+			logger.info(
+				`📋 Monitoring extensions: ${effectiveExtensions.join(", ")}`,
+			);
+		}
+		if (projectMode && projectRoot) {
+			logger.info(
+				`📦 Project mode: deploying all resources from ${projectRoot}`,
+			);
+		}
 		if (flags.force) {
 			logger.info(
 				"🔒 Force mode: will continue watching after deployment errors",

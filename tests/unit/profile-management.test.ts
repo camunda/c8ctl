@@ -4,11 +4,18 @@
  * - --from-file for add profile
  * - --from-env for add profile
  * - use profile --none
+ * - --header / --exactBaseUrl for gateway-fronted profiles (#547)
  */
 
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -16,14 +23,24 @@ import {
 	addProfile,
 	clearActiveProfile,
 	envVarsToProfile,
+	getProfile,
 	hasCamundaEnvVars,
 	loadSessionState,
 	parseEnvFile,
+	parseHeaderFlags,
 	resolveClusterConfig,
-} from "../../src/config.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/core/config.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 const CLI_ENTRY = join(process.cwd(), "src", "index.ts");
+
+/**
+ * Safety net only, not a correctness signal: a CLI subprocess cold-starts
+ * Node with type stripping, which can take several seconds on a loaded
+ * runner. A tight deadline here killed healthy children and surfaced as an
+ * empty-output assertion failure.
+ */
+const CLI_SPAWN_TIMEOUT_MS = 60_000;
 
 describe("Profile management", () => {
 	describe("parseEnvFile", () => {
@@ -74,6 +91,7 @@ describe("Profile management", () => {
 				CAMUNDA_CLIENT_SECRET: "secret",
 				CAMUNDA_OAUTH_URL: "https://auth.example.com/token",
 				CAMUNDA_TOKEN_AUDIENCE: "zeebe.example.com",
+				CAMUNDA_OAUTH_SCOPE: "api://my-app/.default",
 				UNRELATED_VAR: "ignored",
 			});
 			assert.strictEqual(profile.name, "test");
@@ -82,6 +100,7 @@ describe("Profile management", () => {
 			assert.strictEqual(profile.clientSecret, "secret");
 			assert.strictEqual(profile.oAuthUrl, "https://auth.example.com/token");
 			assert.strictEqual(profile.audience, "zeebe.example.com");
+			assert.strictEqual(profile.scope, "api://my-app/.default");
 		});
 
 		test("maps Basic auth vars", () => {
@@ -130,6 +149,16 @@ describe("Profile management", () => {
 
 		test("returns true when CAMUNDA_CLIENT_ID is set", () => {
 			process.env.CAMUNDA_CLIENT_ID = "my-client";
+			assert.strictEqual(hasCamundaEnvVars(), true);
+		});
+
+		test("returns true when only CAMUNDA_REST_ADDRESS is set", () => {
+			delete process.env.CAMUNDA_BASE_URL;
+			delete process.env.CAMUNDA_CLIENT_ID;
+			delete process.env.CAMUNDA_CLIENT_SECRET;
+			delete process.env.CAMUNDA_USERNAME;
+			delete process.env.CAMUNDA_PASSWORD;
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
 			assert.strictEqual(hasCamundaEnvVars(), true);
 		});
 
@@ -224,6 +253,27 @@ describe("Profile management", () => {
 			);
 		});
 
+		test("warns when session profile active and only CAMUNDA_REST_ADDRESS is set", () => {
+			addProfile({
+				name: "rest-profile",
+				baseUrl: "https://profile-cluster.example.com",
+			});
+			c8ctl.activeProfile = "rest-profile";
+			delete process.env.CAMUNDA_BASE_URL;
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+
+			const config = resolveClusterConfig();
+
+			assert.strictEqual(config.baseUrl, "https://profile-cluster.example.com");
+			const allOutput = `${consoleErrorSpy.join("\n")}\n${consoleLogSpy.join("\n")}`;
+			assert.ok(
+				allOutput.includes(
+					"Active profile 'rest-profile' is overriding CAMUNDA_*",
+				),
+				`Expected env var conflict warning, got:\nstderr: ${consoleErrorSpy.join("\n")}\nstdout: ${consoleLogSpy.join("\n")}`,
+			);
+		});
+
 		test("no warning when no CAMUNDA_* env vars are present", () => {
 			addProfile({
 				name: "clean-profile",
@@ -301,7 +351,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -341,7 +391,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -374,14 +424,14 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
 
 			const output = (result.stdout ?? "") + (result.stderr ?? "");
 			assert.ok(
-				output.includes("CAMUNDA_BASE_URL not found"),
+				output.includes("CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found"),
 				`Expected missing URL error, got: ${output}`,
 			);
 			assert.notStrictEqual(result.status, 0);
@@ -407,7 +457,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: {
 						...process.env,
 						C8CTL_DATA_DIR: testDataDir,
@@ -451,6 +501,7 @@ describe("Profile management", () => {
 			delete childEnv.CAMUNDA_CLIENT_SECRET;
 			delete childEnv.CAMUNDA_USERNAME;
 			delete childEnv.CAMUNDA_PASSWORD;
+			delete childEnv.CAMUNDA_REST_ADDRESS;
 
 			const result = spawnSync(
 				"node",
@@ -464,14 +515,14 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: childEnv,
 				},
 			);
 
 			const output = (result.stdout ?? "") + (result.stderr ?? "");
 			assert.ok(
-				output.includes("CAMUNDA_BASE_URL not set"),
+				output.includes("CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set"),
 				`Expected missing URL error, got: ${output}`,
 			);
 			assert.notStrictEqual(result.status, 0);
@@ -491,7 +542,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "use", "profile", "local"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -502,7 +553,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "use", "profile", "--none"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -520,7 +571,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "which", "profile"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -532,6 +583,338 @@ describe("Profile management", () => {
 			);
 
 			rmSync(testDataDir, { recursive: true, force: true });
+		});
+	});
+
+	describe("parseHeaderFlags", () => {
+		test("parses a single 'Name: value' entry", () => {
+			const headers = parseHeaderFlags(["X-Api-Key: secret"]);
+			assert.deepStrictEqual(headers, { "X-Api-Key": "secret" });
+		});
+
+		test("parses multiple entries", () => {
+			const headers = parseHeaderFlags([
+				"X-Api-Key: secret",
+				"X-Correlation-Id: abc-123",
+			]);
+			assert.deepStrictEqual(headers, {
+				"X-Api-Key": "secret",
+				"X-Correlation-Id": "abc-123",
+			});
+		});
+
+		test("trims whitespace around name and value", () => {
+			const headers = parseHeaderFlags(["  X-Api-Key  :  secret  "]);
+			assert.deepStrictEqual(headers, { "X-Api-Key": "secret" });
+		});
+
+		test("splits on the first colon only, preserving colons in the value", () => {
+			const headers = parseHeaderFlags(["Authorization: Bearer abc:def"]);
+			assert.deepStrictEqual(headers, { Authorization: "Bearer abc:def" });
+		});
+
+		test("throws when a header is missing its colon separator", () => {
+			assert.throws(
+				() => parseHeaderFlags(["NoColonHere"]),
+				/Invalid --header — expected format/,
+			);
+		});
+
+		test("does not echo the raw entry when the colon separator is missing", () => {
+			// The whole malformed string could itself be a secret the user
+			// forgot to prefix with "Name: " — never echo it back.
+			try {
+				parseHeaderFlags(["super-secret-token-abc123"]);
+				assert.fail("expected parseHeaderFlags to throw");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				assert.ok(!message.includes("super-secret-token-abc123"), message);
+			}
+		});
+
+		test("throws when the header name is empty", () => {
+			assert.throws(
+				() => parseHeaderFlags([": value"]),
+				/header name must not be empty/,
+			);
+		});
+
+		test("allows an empty value", () => {
+			const headers = parseHeaderFlags(["X-Empty:"]);
+			assert.deepStrictEqual(headers, { "X-Empty": "" });
+		});
+
+		test("a later --header replaces an earlier one differing only in case", () => {
+			// HTTP header names are case-insensitive — persisting both
+			// "Authorization" and "authorization" would be confusing and
+			// redundant, and the last one supplied should win.
+			const headers = parseHeaderFlags([
+				"Authorization: Bearer old",
+				"authorization: Bearer new",
+			]);
+			assert.deepStrictEqual(headers, { authorization: "Bearer new" });
+		});
+
+		test("accepts every character allowed in an HTTP header token", () => {
+			const headers = parseHeaderFlags(["X-Api!#$%&'*+-.^_`|~Key: secret"]);
+			assert.deepStrictEqual(headers, {
+				"X-Api!#$%&'*+-.^_`|~Key": "secret",
+			});
+		});
+
+		test("throws when the header name contains a space", () => {
+			assert.throws(
+				() => parseHeaderFlags(["Bad Name: value"]),
+				/Invalid --header "Bad Name" — not a valid HTTP token/,
+			);
+		});
+
+		test("throws when the header name contains a colon-illegal character", () => {
+			assert.throws(
+				() => parseHeaderFlags(['X-"Quoted": value']),
+				/not a valid HTTP token/,
+			);
+		});
+
+		test("throws when the header value contains a line break", () => {
+			assert.throws(
+				() => parseHeaderFlags(["X-Foo: bar\r\nEvil: 1"]),
+				/Invalid --header "X-Foo" — value must not contain a line break/,
+			);
+		});
+
+		test("does not echo the header value when it contains a line break", () => {
+			try {
+				parseHeaderFlags(["X-Foo: super-secret-value\r\nEvil: 1"]);
+				assert.fail("expected parseHeaderFlags to throw");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				assert.ok(!message.includes("super-secret-value"), message);
+			}
+		});
+
+		test("throws when the header value contains only a newline", () => {
+			assert.throws(
+				() => parseHeaderFlags(["X-Foo: bar\nEvil: 1"]),
+				/value must not contain a line break/,
+			);
+		});
+	});
+
+	/**
+	 * Read a persisted profile from a specific data dir. Restores whatever
+	 * C8CTL_DATA_DIR held before (via `finally`) even if getProfile() throws,
+	 * so a failed assertion can't leak the override into later tests running
+	 * in this same process.
+	 */
+	function getProfileFromDataDir(
+		dataDir: string,
+		name: string,
+	): ReturnType<typeof getProfile> {
+		const original = process.env.C8CTL_DATA_DIR;
+		process.env.C8CTL_DATA_DIR = dataDir;
+		try {
+			return getProfile(name);
+		} finally {
+			if (original === undefined) {
+				delete process.env.C8CTL_DATA_DIR;
+			} else {
+				process.env.C8CTL_DATA_DIR = original;
+			}
+		}
+	}
+
+	describe("CLI: c8 add profile --header / --exactBaseUrl (#547)", () => {
+		let testDataDir: string;
+
+		beforeEach(() => {
+			// mkdtempSync (not a Date.now()-suffixed name) avoids a directory
+			// collision if another test file's worker process happens to
+			// create its own temp dir in the same millisecond.
+			testDataDir = mkdtempSync(join(tmpdir(), "c8ctl-gateway-"));
+		});
+
+		afterEach(() => {
+			if (existsSync(testDataDir)) {
+				rmSync(testDataDir, { recursive: true, force: true });
+			}
+		});
+
+		test("stores a single --header on the profile", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--header",
+					"X-Api-Key: secret",
+				],
+				{
+					encoding: "utf-8",
+					timeout: CLI_SPAWN_TIMEOUT_MS,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(
+				result.status,
+				0,
+				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+			);
+			assert.ok(
+				(result.stdout ?? "").includes("Headers: X-Api-Key"),
+				`Expected header name in output, got: ${result.stdout}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway");
+
+			assert.ok(profile);
+			assert.deepStrictEqual(profile.headers, { "X-Api-Key": "secret" });
+		});
+
+		test("repeating --header collects every value", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway-multi",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--header",
+					"X-Api-Key: secret",
+					"--header",
+					"X-Correlation-Id: abc-123",
+				],
+				{
+					encoding: "utf-8",
+					timeout: CLI_SPAWN_TIMEOUT_MS,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(
+				result.status,
+				0,
+				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway-multi");
+
+			assert.ok(profile);
+			assert.deepStrictEqual(profile.headers, {
+				"X-Api-Key": "secret",
+				"X-Correlation-Id": "abc-123",
+			});
+		});
+
+		test("--exactBaseUrl is stored on the profile", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway-exact",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--exactBaseUrl",
+				],
+				{
+					encoding: "utf-8",
+					timeout: CLI_SPAWN_TIMEOUT_MS,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(
+				result.status,
+				0,
+				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+			);
+			assert.ok(
+				(result.stdout ?? "").includes("used exactly as given"),
+				`Expected exact-base-url note in output, got: ${result.stdout}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway-exact");
+
+			assert.ok(profile);
+			assert.strictEqual(profile.exactBaseUrl, true);
+			assert.strictEqual(
+				profile.baseUrl,
+				"https://gateway.example.com/camunda-api",
+			);
+		});
+
+		test("errors on a malformed --header value", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway-bad-header",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--header",
+					"NoColonHere",
+				],
+				{
+					encoding: "utf-8",
+					timeout: CLI_SPAWN_TIMEOUT_MS,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.notStrictEqual(result.status, 0);
+			const output = (result.stdout ?? "") + (result.stderr ?? "");
+			assert.ok(
+				output.includes("Invalid --header"),
+				`Expected invalid header error, got: ${output}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway-bad-header");
+			assert.strictEqual(
+				profile,
+				undefined,
+				"Profile must not be persisted when --header is invalid",
+			);
+		});
+
+		test("profiles without --header or --exactBaseUrl behave exactly as before", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"plain",
+					"--baseUrl=https://plain.example.com/v2",
+				],
+				{
+					encoding: "utf-8",
+					timeout: CLI_SPAWN_TIMEOUT_MS,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(result.status, 0);
+			const output = (result.stdout ?? "") + (result.stderr ?? "");
+			assert.ok(!output.includes("Headers:"));
+			assert.ok(!output.includes("used exactly as given"));
+
+			const profile = getProfileFromDataDir(testDataDir, "plain");
+
+			assert.ok(profile);
+			assert.strictEqual(profile.headers, undefined);
+			assert.strictEqual(profile.exactBaseUrl, undefined);
 		});
 	});
 });

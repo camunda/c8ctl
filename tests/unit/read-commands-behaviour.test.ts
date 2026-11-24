@@ -48,6 +48,18 @@ describe("CLI behavioural: list process-instances", () => {
 			urlSuffix: "/process-instances/search",
 		});
 	});
+
+	test("--dry-run includes businessId filter", async () => {
+		const result = await c8(
+			"list",
+			"pi",
+			"--dry-run",
+			"--businessId",
+			"order-123",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getFilter(parseJson(result)).businessId, "order-123");
+	});
 });
 
 describe("CLI behavioural: search process-instances", () => {
@@ -67,6 +79,18 @@ describe("CLI behavioural: search process-instances", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(getFilter(out).processDefinitionId, "my-process");
+	});
+
+	test("--dry-run includes businessId filter", async () => {
+		const result = await c8(
+			"search",
+			"pi",
+			"--dry-run",
+			"--businessId",
+			"order-123",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getFilter(parseJson(result)).businessId, "order-123");
 	});
 
 	test("--dry-run includes date range filter", async () => {
@@ -522,5 +546,54 @@ describe("CLI behavioural: get mapping-rule", () => {
 			method: "GET",
 			urlSuffix: "/mapping-rules/rule-42",
 		});
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Wait States
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("CLI behavioural: search wait-states", () => {
+	test("--dry-run emits POST to /element-instances/wait-states/search", async () => {
+		const result = await c8("search", "wait-state", "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assertDryRun(parseJson(result), {
+			method: "POST",
+			urlSuffix: "/element-instances/wait-states/search",
+		});
+	});
+
+	test("--dry-run with elementType filter", async () => {
+		const result = await c8(
+			"search",
+			"ws",
+			"--dry-run",
+			"--elementType",
+			"SERVICE_TASK",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		assertDryRun(out, {
+			method: "POST",
+			urlSuffix: "/element-instances/wait-states/search",
+		});
+		assert.strictEqual(getFilter(out).elementType, "SERVICE_TASK");
+	});
+
+	test("--dry-run with waitStateType filter", async () => {
+		const result = await c8(
+			"search",
+			"ws",
+			"--dry-run",
+			"--waitStateType",
+			"JOB",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		assertDryRun(out, {
+			method: "POST",
+			urlSuffix: "/element-instances/wait-states/search",
+		});
+		assert.strictEqual(getFilter(out).waitStateType, "JOB");
 	});
 });

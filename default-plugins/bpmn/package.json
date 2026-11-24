@@ -1,0 +1,15 @@
+{
+  "name": "c8ctl-plugin-bpmn",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "c8ctl plugin to lint BPMN diagrams against recommended and Camunda rules",
+  "keywords": ["c8ctl", "c8ctl-plugin", "bpmn", "lint"],
+  "main": "c8ctl-plugin.ts",
+  "dependencies": {
+    "@bpmn-io/moddle-utils": "^0.3.0",
+    "bpmn-moddle": "^10.2.0",
+    "bpmnlint": "^11.14.0",
+    "bpmnlint-plugin-camunda-compat": "^2.60.2",
+    "zeebe-bpmn-moddle": "^2.0.0"
+  }
+}

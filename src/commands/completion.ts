@@ -8,8 +8,11 @@
  * verb at runtime.
  */
 
-import { defineCommand } from "../command-framework.ts";
-import { installCompletion, showCompletion } from "../completion.ts";
+import {
+	defineCommand,
+	installCompletion,
+	showCompletion,
+} from "../framework/index.ts";
 
 /**
  * `completion` verb dispatcher.
@@ -41,7 +44,10 @@ export const completionCommand = defineCommand(
 		const resource = ctx.resource;
 		if (resource === "install") {
 			const shellFlag = flags.shell;
-			installCompletion(typeof shellFlag === "string" ? shellFlag : undefined);
+			installCompletion(
+				typeof shellFlag === "string" ? shellFlag : undefined,
+				ctx.isDryRun,
+			);
 			return undefined;
 		}
 		// Non-install resource → render the requested shell's completion

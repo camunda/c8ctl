@@ -7,6 +7,7 @@ import { execFileSync, execSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -14,8 +15,83 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { getUserDataDir } from "../../src/config.ts";
-import { getExecErrorOutput, getExecField } from "../utils/guards.ts";
+import { pathToFileURL } from "node:url";
+import { getUserDataDir } from "../../src/core/config.ts";
+import { getExecErrorOutput, getExecField, isRecord } from "../utils/guards.ts";
+
+function loadFixturePlugin({
+	source,
+	dataDir,
+}: {
+	source: string;
+	dataDir: string;
+}) {
+	try {
+		return execFileSync(
+			process.execPath,
+			["src/index.ts", "load", "plugin", "--from", source],
+			{
+				cwd: process.cwd(),
+				stdio: "pipe",
+				timeout: 30000,
+				env: { ...process.env, C8CTL_DATA_DIR: dataDir },
+			},
+		);
+	} catch (error) {
+		const metadata = isRecord(error) ? error : {};
+		throw new Error(
+			`Fixture plugin load failed: ${source}\n` +
+				`cwd=${process.cwd()} node=${process.execPath} version=${process.version} dataDir=${dataDir}\n` +
+				`status=${metadata.status} signal=${metadata.signal} code=${metadata.code}\n` +
+				`stdout:\n${getExecField(error, "stdout")}\n` +
+				`stderr:\n${getExecField(error, "stderr")}`,
+			{ cause: error },
+		);
+	}
+}
+
+test("fixture plugin load failures retain subprocess diagnostics", () => {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-load-diagnostics-"));
+	const missingPluginName = "missing-plugin#% fixture";
+	const source = pathToFileURL(join(dataDir, missingPluginName)).href;
+	try {
+		assert.throws(
+			() => loadFixturePlugin({ source, dataDir }),
+			(error: unknown) => {
+				assert.ok(error instanceof Error);
+				for (const detail of [
+					source,
+					`cwd=${process.cwd()}`,
+					`node=${process.execPath}`,
+					`version=${process.version}`,
+					`dataDir=${dataDir}`,
+					"status=1",
+					"stdout:\n",
+					"Loading plugin from:",
+					"stderr:\n",
+					"ENOENT",
+				]) {
+					assert.ok(
+						error.message.includes(detail),
+						`Missing ${detail}: ${error.message}`,
+					);
+				}
+				assert.ok(error.cause instanceof Error);
+				assert.ok(isRecord(error.cause));
+				assert.strictEqual(error.cause.status, 1);
+				assert.strictEqual(error.cause.signal, null);
+				assert.strictEqual(error.cause.code, undefined);
+				assert.ok(
+					getExecField(error.cause, "stderr").includes(missingPluginName),
+					`Failure must identify the intended missing fixture: ${error.message}`,
+				);
+				return true;
+			},
+		);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+});
 
 describe("Plugin Lifecycle Integration Tests", () => {
 	const testPluginDir = join(process.cwd(), "test-plugin-temp");
@@ -625,18 +701,24 @@ export const commands = {
 
 			writeFileSync(join(scaffoldDir, "src", "c8ctl-plugin.ts"), pluginSource);
 
-			// Step 3: Build the plugin
-			execSync("npm install", {
-				cwd: scaffoldDir,
-				stdio: "pipe",
-				timeout: 30000,
-			});
-
-			execSync("npm run build", {
-				cwd: scaffoldDir,
-				stdio: "pipe",
-				timeout: 10000,
-			});
+			// Step 3: Build the plugin.
+			// No `npm install` is needed: the scaffold is created inside the
+			// c8ctl checkout, so `typescript` and `@types/node` resolve from the
+			// repo's own node_modules. Skipping the install also avoids npm's
+			// blocking audit/fund round-trip on the enclosing file: tree (which
+			// stalls for minutes, #551) and the pointless published-@camunda8/cli
+			// install — the plugin source above imports nothing from it.
+			// We invoke the repo's tsc directly rather than the scaffold's
+			// `npm run build` script, which would need a scaffold-local tsc binary.
+			execFileSync(
+				process.execPath,
+				[join(process.cwd(), "node_modules", "typescript", "bin", "tsc")],
+				{
+					cwd: scaffoldDir,
+					stdio: "pipe",
+					timeout: 30000,
+				},
+			);
 
 			// Verify the build output exists
 			const builtPluginFile = join(scaffoldDir, "dist", "c8ctl-plugin.js");
@@ -649,7 +731,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -784,7 +866,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -903,7 +985,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -1022,7 +1104,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -1140,26 +1222,14 @@ export const commands = {
 			}
 
 			// Load both plugins sequentially via --from
-			execFileSync(
-				"node",
-				["src/index.ts", "load", "plugin", "--from", `file:${pluginOneDir}`],
-				{
-					cwd: process.cwd(),
-					stdio: "pipe",
-					timeout: 10000,
-					env: cliEnv,
-				},
-			);
-			execFileSync(
-				"node",
-				["src/index.ts", "load", "plugin", "--from", `file:${pluginTwoDir}`],
-				{
-					cwd: process.cwd(),
-					stdio: "pipe",
-					timeout: 10000,
-					env: cliEnv,
-				},
-			);
+			loadFixturePlugin({
+				source: pathToFileURL(pluginOneDir).href,
+				dataDir: multiPluginDataDir,
+			});
+			loadFixturePlugin({
+				source: pathToFileURL(pluginTwoDir).href,
+				dataDir: multiPluginDataDir,
+			});
 
 			// Verify both plugins are installed on disk
 			assert.ok(
@@ -1228,7 +1298,7 @@ describe("Plugin help includes examples from plugin metadata", () => {
 	const cliEnv = { ...process.env, C8CTL_DATA_DIR: dataDir };
 	const pluginDir = join(tmpdir(), `plugin-help-test-plugin-${process.pid}`);
 	const pluginName = "help-test-plugin";
-	const PLUGIN_TEST_TIMEOUT = 10000;
+	const PLUGIN_TEST_TIMEOUT = 30000;
 
 	before(() => {
 		mkdirSync(pluginDir, { recursive: true });

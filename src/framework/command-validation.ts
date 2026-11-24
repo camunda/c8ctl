@@ -1,0 +1,328 @@
+/**
+ * CLI boundary validation utilities.
+ *
+ * These functions validate raw CLI string inputs and narrow them to
+ * SDK types. They exit with code 1 on invalid input, so callers
+ * receive only valid, typed values.
+ *
+ * This module is the single chokepoint for input validation — command
+ * handlers receive already-validated types and need no internal guards.
+ */
+
+import { getLogger } from "../core/index.ts";
+import {
+	type FlagDef,
+	GLOBAL_FLAGS,
+	getCommandDef,
+} from "./command-registry.ts";
+
+/**
+ * Validate that a required CLI option is present and non-empty.
+ * Exits with code 1 if missing.
+ */
+export function requireOption(
+	value: string | undefined,
+	flagName: string,
+): string {
+	if (!value) {
+		getLogger().error(`--${flagName} is required`);
+		process.exit(1);
+	}
+	return value;
+}
+
+/**
+ * Validate that a string value is a valid member of an SDK enum.
+ * Uses Object.values().find() so TypeScript narrows to T with no cast.
+ * Exits with code 1 if invalid, listing valid values.
+ */
+export function requireEnum<T extends string>(
+	value: string,
+	enumValues: Record<string, T>,
+	flagName: string,
+): T {
+	const validValues = Object.values(enumValues);
+	const match = validValues.find((v) => v === value);
+	if (match === undefined) {
+		getLogger().error(
+			`Invalid --${flagName} "${value}". Valid values: ${validValues.join(", ")}`,
+		);
+		process.exit(1);
+	}
+	return match;
+}
+
+/**
+ * Validate a comma-separated string where each element must be a
+ * valid member of an SDK enum. Splits on commas, trims whitespace,
+ * and filters empty strings before validation.
+ * Exits with code 1 if any element is invalid.
+ */
+export function requireCsvEnum<T extends string>(
+	value: string,
+	enumValues: Record<string, T>,
+	flagName: string,
+): T[] {
+	const validValues = Object.values(enumValues);
+	const items = value
+		.split(",")
+		.map((p) => p.trim())
+		.filter((p) => p.length > 0);
+
+	if (items.length === 0) {
+		getLogger().error(`--${flagName} is required`);
+		process.exit(1);
+	}
+
+	const result: T[] = [];
+	const invalid: string[] = [];
+	for (const item of items) {
+		const match = validValues.find((v) => v === item);
+		if (match !== undefined) {
+			result.push(match);
+		} else {
+			invalid.push(item);
+		}
+	}
+
+	if (invalid.length > 0) {
+		getLogger().error(
+			`Invalid --${flagName}: ${invalid.join(", ")}. Valid values: ${validValues.join(", ")}`,
+		);
+		process.exit(1);
+	}
+
+	return result;
+}
+
+/**
+ * Run all registered validators for provided flag values, and enforce
+ * `required: true` on any declared-required flag.
+ *
+ * Enforcement order:
+ *   1. Every flag with a `validate` function has it applied (invalid → exit 1).
+ *      For a `multiple: true` flag, every element is validated — not just
+ *      the last — since `deserializeFlags` validates every element too;
+ *      this is the single chokepoint that must catch a bad value before
+ *      dispatch, with a clean `Invalid --<flag>` message rather than an
+ *      uncaught validator throw surfacing later as "Unexpected error".
+ *   2. Every flag with `rejectEmpty: true` that was supplied must have a
+ *      non-empty value in every occurrence (empty or value-less → exit 1
+ *      with `Invalid --<flag>: value must not be empty`).
+ *   3. Every flag with `required: true` must be present as a non-empty string
+ *      (missing → exit 1 with `--<flag> is required`).
+ *
+ * Returns a map of flag name → validated value for flags that had validators.
+ * Flags without validators are not included.
+ *
+ * Note: `validateFlags` expects the **effective** flag set for the dispatched
+ * (verb, resource), i.e. `commandDef.resourceFlags?.[resource] ?? commandDef.flags`.
+ * Passing the raw top-level `commandDef.flags` for verbs with resource-scoped
+ * flags can over-enforce required flags that are only meaningful for certain
+ * resources.
+ */
+export function validateFlags(
+	values: Record<string, string | boolean | (string | boolean)[] | undefined>,
+	flagDefs: Record<string, FlagDef>,
+): Map<string, unknown> {
+	const validated = new Map<string, unknown>();
+	const logger = getLogger();
+
+	for (const [flagName, def] of Object.entries(flagDefs)) {
+		if (!def.validate) continue;
+		const raw = values[flagName];
+
+		if (def.multiple) {
+			// Every element of a repeatable flag is a distinct value —
+			// unlike a non-repeatable flag received twice, none of them is
+			// "overridden" by a later one — so each must be validated.
+			const items = Array.isArray(raw)
+				? raw
+				: typeof raw === "string"
+					? [raw]
+					: [];
+			const strings = items.filter(
+				(v): v is string => typeof v === "string" && v !== "",
+			);
+			if (strings.length === 0) continue;
+			try {
+				validated.set(
+					flagName,
+					strings.map((s) => def.validate?.(s)),
+				);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				logger.error(`Invalid --${flagName}: ${message}`);
+				process.exit(1);
+			}
+			continue;
+		}
+
+		// Pick the value to validate. Accept the last string from a
+		// repeated-flag array so that `--foo a --foo b` (which
+		// `parseArgs({ strict: false })` returns as `["a","b"]`) is
+		// validated rather than silently skipped.
+		const value =
+			typeof raw === "string"
+				? raw
+				: Array.isArray(raw)
+					? lastString(raw)
+					: undefined;
+		if (value === undefined) continue;
+
+		try {
+			validated.set(flagName, def.validate(value));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logger.error(`Invalid --${flagName}: ${message}`);
+			process.exit(1);
+		}
+	}
+
+	// Empty-value enforcement. Must run on the raw values: everything
+	// downstream (validators above, `deserializeFlags`) drops an empty or
+	// value-less occurrence as "not supplied", so the handler never sees it.
+	for (const [flagName, def] of Object.entries(flagDefs)) {
+		if (def.rejectEmpty !== true) continue;
+		const raw = values[flagName];
+		if (raw === undefined || raw === false) continue;
+		const items = Array.isArray(raw) ? raw : [raw];
+		if (items.some((v) => typeof v !== "string" || v === "")) {
+			logger.error(`Invalid --${flagName}: value must not be empty`);
+			process.exit(1);
+		}
+	}
+
+	// Required-flag enforcement (#308). Run after validators so that an
+	// explicitly-invalid value (e.g. bad enum) surfaces its specific error
+	// before the generic "is required" message.
+	//
+	// For a non-`multiple` flag, "present" means: a non-empty string, OR a
+	// non-empty array whose *last* element is a non-empty string.
+	// node:util `parseArgs({ strict: false })` returns an array when the
+	// same flag is supplied more than once (`--foo a --foo b` →
+	// `["a","b"]`), so a strict `typeof === "string"` check would
+	// incorrectly report a supplied flag as missing — and checking the
+	// last element matches that flag's own last-write-wins semantics.
+	//
+	// A `multiple: true` flag has no last-write-wins semantics — every
+	// element is independently meaningful — so it's "present" if *any*
+	// element is a non-empty string, not only the last one (a repeated
+	// flag whose last occurrence happens to be empty, e.g.
+	// `--header "X: 1" --header ""`, must not be reported as missing).
+	for (const [flagName, def] of Object.entries(flagDefs)) {
+		if (def.required !== true) continue;
+		const raw = values[flagName];
+		const present = def.multiple ? isPresentAny(raw) : isPresentString(raw);
+		if (!present) {
+			logger.error(`--${flagName} is required`);
+			process.exit(1);
+		}
+	}
+
+	return validated;
+}
+
+/**
+ * True iff a `multiple: true` flag's raw value contains at least one
+ * non-empty string anywhere — not just the last element. See the
+ * required-flag enforcement comment in `validateFlags` for why.
+ */
+function isPresentAny(
+	raw: string | boolean | (string | boolean)[] | undefined,
+): boolean {
+	const items = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+	return items.some((v) => typeof v === "string" && v !== "");
+}
+
+/**
+ * True iff `raw` is a non-empty string, or an array whose last entry is a
+ * non-empty string. Mirrors the semantics of `--foo` being supplied at least
+ * once with a value (single or repeated).
+ */
+function isPresentString(
+	raw: string | boolean | (string | boolean)[] | undefined,
+): boolean {
+	if (typeof raw === "string") return raw.length > 0;
+	if (Array.isArray(raw)) {
+		const last = lastString(raw);
+		return last !== undefined && last.length > 0;
+	}
+	return false;
+}
+
+/**
+ * Return the last string element of an array (typical "last write wins"
+ * semantics for repeated CLI flags), or undefined if there is none.
+ */
+function lastString(arr: (string | boolean)[]): string | undefined {
+	for (let i = arr.length - 1; i >= 0; i--) {
+		const v = arr[i];
+		if (typeof v === "string") return v;
+	}
+	return undefined;
+}
+
+/** Flag names that are always valid regardless of verb or resource. */
+const GLOBAL_FLAG_NAMES = new Set(Object.keys(GLOBAL_FLAGS));
+
+/**
+ * Detect flags the user provided that are not recognised for the given
+ * verb (and, for verbs with resourceFlags, the specific resource).
+ *
+ * For verbs with resourceFlags (when a resource is provided): valid flags are
+ *   GLOBAL_FLAGS ∪ shared verb flags ∪ resourceFlags[resource]
+ *
+ * Shared verb flags are derived automatically: verb-level flags that do NOT
+ * appear in any resourceFlags entry (e.g. limit/sort for search, but not
+ * resource-specific filter flags).
+ *
+ * For all other verbs: valid flags are
+ *   GLOBAL_FLAGS ∪ verb flags
+ *
+ * Returns an empty array when the verb is not in the registry
+ * (unknown verbs fall through to the plugin system).
+ */
+export function detectUnknownFlags(
+	verb: string,
+	resource: string,
+	values: Record<string, unknown>,
+): string[] {
+	const commandDef = getCommandDef(verb);
+	if (!commandDef) return [];
+
+	const validFlags = new Set(GLOBAL_FLAG_NAMES);
+
+	if (commandDef.resourceFlags && resource) {
+		// Collect all resource-specific flag names
+		const allResourceFlagNames = new Set<string>();
+		for (const rFlags of Object.values(commandDef.resourceFlags)) {
+			for (const f of Object.keys(rFlags)) allResourceFlagNames.add(f);
+		}
+
+		// Shared verb flags = verb-level flags NOT in any resource entry
+		for (const f of Object.keys(commandDef.flags)) {
+			if (!allResourceFlagNames.has(f)) validFlags.add(f);
+		}
+
+		// Resource-specific flags
+		const perResource =
+			commandDef.resourceFlags[resource] ||
+			commandDef.resourceFlags[resource.replace(/s$/, "")];
+		if (perResource) {
+			for (const f of Object.keys(perResource)) validFlags.add(f);
+		}
+	} else {
+		for (const f of Object.keys(commandDef.flags)) {
+			validFlags.add(f);
+		}
+	}
+
+	const unknown: string[] = [];
+	for (const [key, val] of Object.entries(values)) {
+		if (val === undefined || val === false) continue;
+		if (validFlags.has(key)) continue;
+		unknown.push(key);
+	}
+	return unknown;
+}

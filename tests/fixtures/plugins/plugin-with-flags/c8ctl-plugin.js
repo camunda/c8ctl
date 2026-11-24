@@ -3,6 +3,11 @@
  */
 
 export const commands = {
+	// Bare-function command: receives positionals only, declares no flags.
+	'test-bare': async (args) => {
+		console.log(JSON.stringify({ args }));
+	},
+
 	'test-flags': {
 		flags: {
 			source: {
@@ -56,6 +61,20 @@ export const commands = {
 		},
 	},
 
+	'test-short-collision': {
+		flags: {
+			// Long name is free; the `-y` alias collides with the global -y.
+			'label-value': {
+				type: 'string',
+				short: 'y',
+				description: 'Short alias collides with global -y',
+			},
+		},
+		handler: async (args, flags) => {
+			console.log(JSON.stringify({ args, flags: flags || {} }));
+		},
+	},
+
 	'test-required-collision': {
 		flags: {
 			// Collides with built-in --profile AND declared required.
@@ -79,6 +98,11 @@ export const metadata = {
 	commands: {
 		'test-flags': {
 			description: 'Test command with custom flags',
+			subcommands: [
+				{ name: 'list', description: 'List entries' },
+				{ name: 'physical-tenants', description: 'Manage physical tenants' },
+				{ name: 'a-much-longer-subcommand-name', description: 'Manage extended entries' },
+			],
 			examples: [
 				{ command: 'c8ctl test-flags --source Gateway_1 --target Task_2', description: 'Test with flags' },
 			],

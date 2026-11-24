@@ -1,0 +1,431 @@
+/**
+ * c8ctl-plugin-element-template
+ *
+ * Apply Camunda element templates to BPMN elements and inspect template properties.
+ *
+ * Usage:
+ *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
+ *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] [--template <template>] --set key=value
+ *   c8ctl element-template update <template-id> [<element-id>] [<file.bpmn>] [--to <template>[@<n>]] [--recipe <file>] [--map <from>=<to>] [--in-place]
+ *   c8ctl element-template info <template> [--engine-version <x.y.z>]
+ *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed] [--engine-version <x.y.z>]
+ *   c8ctl element-template get <template>
+ *   c8ctl element-template search <query> [--engine-version <x.y.z>]
+ *   c8ctl element-template sync [--prune]
+ *
+ * <template> can be a local path, an https:// URL, or a template id
+ * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13), looked up
+ * in .camunda/element-templates/ first, then in the OOTB cache.
+ * GitHub blob URLs are auto-rewritten to raw.githubusercontent.com.
+ */
+
+import type {} from "../../src/core/runtime.ts";
+import type {
+	PluginCommands,
+	PluginMetadata,
+} from "../../src/framework/plugins/plugin-loader.ts";
+import { applySubcommand } from "./commands/apply.ts";
+import { editSubcommand } from "./commands/edit.ts";
+import { getSubcommand } from "./commands/get.ts";
+import { getPropertiesSubcommand } from "./commands/get-properties.ts";
+import { infoSubcommand } from "./commands/info.ts";
+import { searchSubcommand } from "./commands/search.ts";
+import { syncSubcommand } from "./commands/sync.ts";
+import { updateSubcommand } from "./commands/update.ts";
+
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
+
+/**
+ * Reinject flags pre-parsed by the host (#366/#367) back into the args
+ * array as `--name value` / `--name` tokens, so the plugin's hand-rolled
+ * `parseArgs` still sees them. Repeated string flags arrive as arrays.
+ */
+function injectFlagsIntoArgs(
+	args: readonly string[],
+	flags: Record<string, unknown> | undefined,
+): string[] {
+	const out = [...args];
+	if (!flags) {
+		return out;
+	}
+	for (const [name, value] of Object.entries(flags)) {
+		if (value === undefined || value === null) {
+			continue;
+		}
+		if (typeof value === "boolean") {
+			if (value) {
+				out.push(`--${name}`);
+			}
+		} else if (Array.isArray(value)) {
+			for (const item of value) {
+				if (item !== undefined && item !== null) {
+					out.push(`--${name}`, String(item));
+				}
+			}
+		} else {
+			out.push(`--${name}`, String(value));
+		}
+	}
+	return out;
+}
+
+/**
+ * Subcommand union derived from the metadata literal type. Keeping this
+ * tied to `metadata` rather than restating the names means adding a
+ * subcommand to the metadata `subcommands` array surfaces as a missing-key
+ * error in `subcommandHandlers` below.
+ */
+type Subcommand =
+	(typeof metadata.commands)["element-template"]["subcommands"][number]["name"];
+
+/**
+ * Exhaustive dispatch table. The `Record<Subcommand, ...>` constraint
+ * makes adding a metadata subcommand without a matching handler a type
+ * error.
+ */
+const subcommandHandlers: Record<
+	Subcommand,
+	(args: string[]) => Promise<void>
+> = {
+	search: searchSubcommand,
+	info: infoSubcommand,
+	"get-properties": getPropertiesSubcommand,
+	apply: applySubcommand,
+	edit: editSubcommand,
+	update: updateSubcommand,
+	get: getSubcommand,
+	sync: syncSubcommand,
+};
+
+function isSubcommand(name: string): name is Subcommand {
+	return Object.hasOwn(subcommandHandlers, name);
+}
+
+async function elementTemplateHandler(
+	args: string[] | undefined,
+	flags?: Record<string, unknown>,
+): Promise<void> {
+	const reinjected = injectFlagsIntoArgs(args ?? [], flags);
+	const subcommand = reinjected[0];
+	const subArgs = reinjected.slice(1);
+
+	if (!subcommand || !isSubcommand(subcommand)) {
+		const logger = c8ctl.getLogger();
+		const lead = subcommand
+			? `Unknown subcommand '${subcommand}'.`
+			: "c8ctl element-template requires a subcommand.";
+		const validSubcommands = Object.keys(subcommandHandlers);
+		logger.error(`${lead} Available: ${validSubcommands.join(", ")}`);
+		logger.error("Run 'c8ctl element-template --help' for full usage.");
+		process.exitCode = 1;
+		return;
+	}
+
+	try {
+		await subcommandHandlers[subcommand](subArgs);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		const logger = c8ctl.getLogger();
+		logger.error(`Failed to element-template ${subcommand}: ${message}`);
+		process.exitCode = 1;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plugin API
+// ---------------------------------------------------------------------------
+
+export const metadata = {
+	name: "element-template",
+	description: "Apply, inspect, and export Camunda element templates",
+	commands: {
+		"element-template": {
+			description: "Apply, inspect, and export Camunda element templates",
+			helpDescription:
+				"Apply Camunda element templates to BPMN elements, inspect template metadata and properties, " +
+				"search the out-of-the-box template catalogue, export raw template JSON, " +
+				"and manage the local template cache.\n\n" +
+				"<template> is a local path, an https:// URL, or a template id (optionally @<version>). " +
+				"An id is looked up in .camunda/element-templates/ (next to the BPMN file, or in the current " +
+				"directory, or any parent of either) and in Desktop Modeler's resources/element-templates/ " +
+				"before the OOTB cache.\n\n" +
+				"apply --set name=value targets a property by binding name (run `get-properties` to discover names). " +
+				"Pass --set multiple times to set multiple properties. " +
+				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
+				"is bound across multiple types — e.g. --set input:correlationKey=order-42.\n\n" +
+				"edit --set name=value updates a property on an element that already has a template applied, " +
+				"without re-running template application — it never resets other template-owned content " +
+				"(including hand-customized extension values a template doesn't fully control) and doesn't need " +
+				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element and resolves it from " +
+				".camunda/element-templates/ next to the BPMN file or a parent directory, then the OOTB cache). " +
+				"Pass --template <template> to point at a custom template explicitly; it must match the element's " +
+				"recorded id/version. " +
+				"A property whose condition is not met is rejected; --set args apply in order, so set the " +
+				"property a condition depends on first (e.g. --set method=POST --set body=...). Values are " +
+				"checked against the property's constraints (notEmpty, pattern, length, dropdown choices).\n\n" +
+				"update <template-id> moves every element that uses that template to its latest compatible version, " +
+				"or to the template given with --to <template>[@<n>] (an id, path or URL; an id resolves as above, " +
+				"local templates first); pass an element id to update " +
+				"only that element. Values the target binds under another key are moved when it carries a migration " +
+				"recipe (metadata.migratesFrom) or one is passed with --recipe <file>; --map <from>=<to> moves a value " +
+				"per element when no recipe covers it; the rest carry over by key. " +
+				"A report lists what was dropped, added, moved and changed. --dry-run previews the migration and writes " +
+				"nothing; it exits 1 when an element would fail to migrate or the write would need --allow-lossy. The file is written once, " +
+				"and only if every element migrates.\n\n" +
+				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
+				"For those properties, c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` " +
+				"writes `=orderId` to the BPMN — equivalent to `--set key==orderId`. " +
+				"Properties with feel=optional keep the value verbatim; you must supply the `=` prefix yourself " +
+				"when you want to write a FEEL expression for those. " +
+				"Boolean and Number inputs/outputs (and any Boolean/Number property declaring feel) are stored as FEEL, " +
+				"as the Modeler does — `--set timeout=30` writes `=30`. " +
+				"Three forms for feel=required properties:\n" +
+				"  --set key='=value'    canonical: single-quoted FEEL value (explicit =)\n" +
+				"  --set 'key==value'    compact: whole argument single-quoted (explicit =)\n" +
+				"  --set key=value       shorthand: = auto-prepended (feel=required only)\n" +
+				"Leading/trailing whitespace is stripped from values, and whitespace immediately after a " +
+				"FEEL `=` prefix is also stripped, so `--set 'key== value'` " +
+				"is equivalent to `--set 'key==value'`.",
+			subcommands: [
+				{
+					name: "search",
+					description: "Search out-of-the-box element templates",
+				},
+				{
+					name: "info",
+					description:
+						"Show template metadata (id, version, applies-to, description) and a pointer to get-properties",
+				},
+				{
+					name: "get-properties",
+					description:
+						"List settable properties (use --detailed for full detail cards)",
+				},
+				{
+					name: "apply",
+					description: "Apply a Camunda element template to a BPMN element",
+				},
+				{
+					name: "edit",
+					description:
+						"Update a property on an element that already has a template applied, without re-applying it",
+				},
+				{
+					name: "update",
+					description:
+						"Move all elements of a template to its latest version, or to another template, migrating their values",
+				},
+				{
+					name: "get",
+					description: "Print the raw template JSON to stdout (pipe-friendly)",
+				},
+				{
+					name: "sync",
+					description: "Refresh the local OOTB element template cache",
+				},
+			],
+			examples: [
+				{
+					command: 'c8ctl element-template search "AWS S3"',
+					description: "Search OOTB templates by name",
+				},
+				{
+					command: 'c8ctl element-template search "AWS" --limit 5',
+					description: "Cap the number of results (default 20)",
+				},
+				{
+					command:
+						"c8ctl element-template info io.camunda.connectors.HttpJson.v2",
+					description:
+						"Show the template metadata card (id, version, applies-to, engines, docs)",
+				},
+				{
+					command:
+						"c8ctl element-template info io.camunda.connectors.HttpJson.v2 --engine-version 8.8.0",
+					description:
+						"Resolve the latest template version compatible with a specific Camunda engine version",
+				},
+				{
+					command:
+						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2",
+					description:
+						"List every settable property as a condensed name + description row",
+				},
+				{
+					command:
+						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --detailed 'authentication.*'",
+					description:
+						"Drill into specific properties as full detail cards (quote globs to avoid shell expansion)",
+				},
+				{
+					command:
+						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --group authentication --group endpoint",
+					description:
+						"Filter to one or more group ids (use the id, not the label — group ids appear as headings in `get-properties` output)",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn",
+					description:
+						"Apply an OOTB template (latest compatible with the BPMN engine version)",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn",
+					description: "Apply a specific OOTB template version",
+				},
+				{
+					command:
+						"c8ctl element-template apply template.json Task_1 process.bpmn",
+					description: "Apply a template from a local file or URL",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --set method=POST --set url=https://api.example.com",
+					description:
+						"Set property values via --set name=value (one per --set; discover names via get-properties)",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --set authentication.type=basic --set authentication.username=alice",
+					description:
+						"Conditional properties: child controls (e.g. authentication.username) apply only when the gating property is also set",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --set input:method=POST",
+					description:
+						"Qualify with <binding-type>:name=value when the same name is bound across multiple types",
+				},
+				{
+					command:
+						"c8ctl element-template edit Task_1 process.bpmn --set method=PUT",
+					description:
+						"Update a single property on an already-templated element in place, without touching anything else the template governs",
+				},
+				{
+					command:
+						"c8ctl element-template update io.camunda.connectors.HttpJson.v2 process.bpmn --dry-run",
+					description:
+						"Preview moving all elements of a template to its latest compatible version, with a report of what changes",
+				},
+				{
+					command:
+						"c8ctl element-template update io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --to io.camunda.connectors.HttpJson.v2@15 --in-place",
+					description: "Update one element to a pinned version",
+				},
+				{
+					command:
+						"c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn --to io.camunda.connectors.agenticai.ai-agent-task.v2 --in-place",
+					description:
+						"Move all elements to another template; its embedded recipe moves renamed values",
+				},
+				{
+					command:
+						"c8ctl element-template update old.id process.bpmn --to new-template.json --recipe recipe.json --in-place",
+					description:
+						"Migrate with a recipe from a file instead of the one embedded in the template",
+				},
+				{
+					command:
+						"c8ctl element-template update old.id process.bpmn --to new-template.json --map maxTokens=limit --in-place",
+					description:
+						"Move a value to a key the target binds differently; each element keeps its own value",
+				},
+				{
+					command:
+						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
+					description:
+						"Print the raw template JSON to stdout (redirect to save a copy)",
+				},
+				{
+					command:
+						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon",
+					description:
+						"Drop the icon field (large base64 blob) for pipe-friendly output",
+				},
+				{
+					command: "c8ctl element-template sync",
+					description: "Refresh the local OOTB element template cache",
+				},
+			],
+		},
+	},
+} as const satisfies PluginMetadata;
+
+export const commands = {
+	"element-template": {
+		flags: {
+			"allow-lossy": {
+				type: "boolean",
+				description:
+					"Authorize lossy in-place migration or embedded-recipe fallback [update]",
+			},
+			"in-place": {
+				type: "boolean",
+				short: "i",
+				description: "Modify the BPMN file in place [apply|edit|update]",
+			},
+			set: {
+				type: "string",
+				multiple: true,
+				description:
+					"Set a property value: name=value (repeatable; binding name from get-properties; = auto-prepended for feel=required properties) [apply|edit]",
+			},
+			detailed: {
+				type: "boolean",
+				short: "d",
+				description:
+					"Render full detail cards instead of the condensed list [get-properties]",
+			},
+			group: {
+				type: "string",
+				multiple: true,
+				description:
+					"Filter to one or more group ids (repeatable) [get-properties]",
+			},
+			recipe: {
+				type: "string",
+				description:
+					"Migration recipe file, used instead of the one embedded in the target template [update]",
+			},
+			to: {
+				type: "string",
+				description:
+					"Target template: id[@n], path or URL; default is the latest compatible version of the selected template [update]",
+			},
+			map: {
+				type: "string",
+				multiple: true,
+				description:
+					"Move the original value of binding <from> to binding <to> on every selected element: from=to (repeatable) [update]",
+			},
+			prune: {
+				type: "boolean",
+				description:
+					"Drop cached entries no longer in a selected release [sync]",
+			},
+			"no-icon": {
+				type: "boolean",
+				description:
+					"Drop the icon field (often a large base64 blob) from the output [get]",
+			},
+			limit: {
+				type: "string",
+				description: "Cap the number of matches (default 20) [search]",
+			},
+			template: {
+				type: "string",
+				description:
+					"Template to resolve the element's recorded id/version against (id[@version], path, or URL) [edit]",
+			},
+			"engine-version": {
+				type: "string",
+				description:
+					"Filter to template versions compatible with the given Camunda engine version (e.g. 8.8.0) [search|info|get-properties]",
+			},
+		},
+		handler: elementTemplateHandler,
+	},
+} satisfies PluginCommands;

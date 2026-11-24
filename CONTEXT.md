@@ -21,11 +21,12 @@ c8ctl help          # get structured JSON command reference
 
 ## Output Mode
 
-- Output mode is session-global, not per-command
+- Output mode defaults to the saved session preference; `C8CTL_OUTPUT_MODE` overrides it for one invocation, and `--json` takes precedence over both
 - `c8ctl output json` → all subsequent commands emit JSON to stdout
 - `c8ctl output text` → human-readable table output
 - In JSON mode: operational messages (info/warn/success/error) go to **stderr**;
   data output goes to **stdout**
+- `c8ctl --version` (or `-v`) always writes its result to **stdout**: `c8ctl v<version>` in text mode, or `{"status":"info","message":"c8ctl v<version>"}` in JSON mode. It exits 0, ignores `--fields`, and does not change the saved preference.
 - Exit code 1 + JSON error on stderr on failure
 
 ## Resource Aliases
@@ -38,6 +39,9 @@ c8ctl help          # get structured JSON command reference
 | `inc` | incident(s)          |
 | `msg` | message              |
 | `vars`| variable(s)          |
+| `var` | variable             |
+| `auth`| authorization(s)     |
+| `mr`  | mapping-rule(s)      |
 
 ## Agent Flags
 
@@ -59,21 +63,10 @@ Use this to reduce context window size when parsing output programmatically.
 
 ### `--dry-run`
 
-Applies to all **mutating** commands: `create`, `cancel`, `deploy`,
-`complete`, `fail`, `activate`, `resolve`, `publish`, `correlate`.
+Preview the API request without executing it. Supported by most commands.
+Emits a JSON object to stdout and exits 0:
 
-In dry-run mode:
-- All inputs are validated
-- The target profile/client is resolved
-- The equivalent API request is emitted as JSON to stdout:
-  `{ "dryRun": true, "command": "...", "method": "POST", "url": "...", "body": {...} }`
-- The actual API call is **not** executed
-- Exits 0
-
-**Recommended workflow for mutating operations:**
-1. Run the command with `--dry-run` and inspect the JSON output
-2. Confirm the request with the user (or validate programmatically)
-3. Re-run without `--dry-run` to execute
+`{ "dryRun": true, "command": "...", "method": "...", "url": "...", "body": ... }`
 
 ```sh
 c8ctl create pi --id=my-process --dry-run
@@ -95,6 +88,17 @@ The JSON help structure contains: `commands`, `globalFlags`, `searchFlags`,
 `agentFlags`, `resourceAliases`.
 
 ## MCP Proxy
+
+Configure user-scoped client connections before starting an AI harness:
+
+```sh
+c8ctl mcp install                         # orchestration, all detected harnesses
+c8ctl mcp install --docs                  # docs only, no cluster profile needed
+c8ctl mcp install cursor --docs --orchestration
+c8ctl mcp uninstall cursor --docs         # leaves orchestration untouched
+```
+
+Orchestration references the selected saved profile and does not copy credentials. Use `--profile` and `--alias` for another cluster. `--dry-run` previews the selected entries without writing. See `c8ctl help mcp` for supported harnesses.
 
 An MCP (Model Context Protocol) proxy is available:
 

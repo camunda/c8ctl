@@ -5,31 +5,32 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { defineCommand } from "../command-framework.ts";
 import {
 	addProfile as addProfileConfig,
+	c8ctl,
 	DEFAULT_PROFILE,
 	envVarsToProfile,
 	getAllProfiles,
-	getProfileOrModeler,
+	getLogger,
 	hasCamundaEnvVars,
 	MODELER_PREFIX,
 	type Profile,
 	parseEnvFile,
+	parseHeaderFlags,
 	removeProfile as removeProfileConfig,
-} from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+	resolveEnvBaseUrl,
+} from "../core/index.ts";
+import { confirm, defineCommand, select } from "../framework/index.ts";
 
 /**
  * List all profiles (c8ctl + Modeler)
  */
-export function listProfiles(): void {
+function listProfiles(): void {
 	const logger = getLogger();
 	const profiles = getAllProfiles();
 
 	if (profiles.length === 0) {
-		logger.info("No profiles configured");
+		logger.info("No profiles configured", { essential: true });
 		logger.info("");
 		logger.info(
 			"Add a profile with: c8ctl profiles add <name> --url <cluster-url>",
@@ -73,67 +74,29 @@ export function listProfiles(): void {
 	}
 }
 
-/**
- * Show profile details
- */
-export function showProfile(name: string): void {
-	const logger = getLogger();
-	const profile = getProfileOrModeler(name);
-
-	if (!profile) {
-		throw new Error(`Profile '${name}' not found`);
-	}
-
-	const isModeler = profile.name.startsWith(MODELER_PREFIX);
-
-	logger.info(`Profile: ${profile.name}`);
-	logger.info(
-		`  Source: ${isModeler ? "Camunda Modeler (read-only)" : "c8ctl"}`,
-	);
-	logger.info(`  Base URL: ${profile.baseUrl}`);
-
-	if (profile.username) {
-		logger.info(`  Username: ${profile.username}`);
-		logger.info(`  Password: ${profile.password ? "********" : "(not set)"}`);
-	}
-
-	if (profile.clientId) {
-		logger.info(`  Client ID: ${profile.clientId}`);
-		logger.info(
-			`  Client Secret: ${profile.clientSecret ? "********" : "(not set)"}`,
-		);
-	}
-
-	if (profile.audience) {
-		logger.info(`  Audience: ${profile.audience}`);
-	}
-
-	if (profile.oAuthUrl) {
-		logger.info(`  OAuth URL: ${profile.oAuthUrl}`);
-	}
-
-	if (profile.defaultTenantId) {
-		logger.info(`  Default Tenant: ${profile.defaultTenantId}`);
-	}
-}
-
-export interface AddProfileOptions {
+interface AddProfileOptions {
 	url?: string;
 	clientId?: string;
 	clientSecret?: string;
 	audience?: string;
 	oauthUrl?: string;
+	scope?: string;
 	username?: string;
 	password?: string;
 	tenantId?: string;
 	envFile?: string;
 	fromEnv?: boolean;
+	headers?: string[];
+	exactBaseUrl?: boolean;
 }
 
 /**
  * Describe the auth type of a profile for user feedback.
  */
 function describeAuth(profile: Profile): string {
+	if (profile.authStrategy === "NONE") return "None";
+	if (profile.authStrategy === "BASIC") return "Basic auth";
+	if (profile.authStrategy === "OAUTH") return "OAuth (client credentials)";
 	if (profile.clientId && profile.clientSecret)
 		return "OAuth (client credentials)";
 	if (profile.username && profile.password) return "Basic auth";
@@ -143,13 +106,14 @@ function describeAuth(profile: Profile): string {
 /**
  * Add a c8ctl profile
  */
-export function addProfile(name: string, options: AddProfileOptions): void {
+function addProfile(name: string, options: AddProfileOptions): void {
 	const logger = getLogger();
 
 	// Prevent adding profiles with "modeler:" prefix
 	if (name.startsWith(MODELER_PREFIX)) {
 		logger.info(
 			"Please choose a different name or manage this profile in Camunda Modeler",
+			{ essential: true },
 		);
 		throw new Error(
 			`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`,
@@ -164,6 +128,13 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 		);
 	}
 
+	// --header/--exactBaseUrl apply regardless of how the rest of the
+	// profile is populated (manual flags, --from-file, or --from-env).
+	const headers = options.headers?.length
+		? parseHeaderFlags(options.headers)
+		: undefined;
+	const exactBaseUrl = options.exactBaseUrl || undefined;
+
 	if (options.envFile) {
 		// --from-file: read a .env file and map CAMUNDA_* vars to profile fields
 		if (!existsSync(options.envFile)) {
@@ -171,10 +142,17 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 		}
 		const content = readFileSync(options.envFile, "utf-8");
 		const vars = parseEnvFile(content);
-		profile = envVarsToProfile(name, vars);
+		profile = { ...envVarsToProfile(name, vars), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
-			logger.info("The .env file must contain at least CAMUNDA_BASE_URL.");
-			throw new Error(`CAMUNDA_BASE_URL not found in ${options.envFile}`);
+			logger.info(
+				"The .env file must contain at least CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS).",
+				{
+					essential: true,
+				},
+			);
+			throw new Error(
+				`CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found in ${options.envFile}`,
+			);
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from ${options.envFile})`);
@@ -182,10 +160,17 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 		logger.info(`  Auth: ${describeAuth(profile)}`);
 	} else if (options.fromEnv) {
 		// --from-env: read from current process environment
-		profile = envVarsToProfile(name, process.env);
+		profile = { ...envVarsToProfile(name, process.env), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
-			logger.info("Set CAMUNDA_BASE_URL before using --from-env.");
-			throw new Error("CAMUNDA_BASE_URL not set in environment");
+			logger.info(
+				"Set CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) before using --from-env.",
+				{
+					essential: true,
+				},
+			);
+			throw new Error(
+				"CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set in environment",
+			);
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from environment)`);
@@ -196,10 +181,13 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 		profile = {
 			name,
 			baseUrl: options.url || "http://localhost:8080/v2",
+			headers,
+			exactBaseUrl,
 			clientId: options.clientId,
 			clientSecret: options.clientSecret,
 			audience: options.audience,
 			oAuthUrl: options.oauthUrl,
+			scope: options.scope,
 			username: options.username,
 			password: options.password,
 			defaultTenantId: options.tenantId,
@@ -207,17 +195,26 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added`);
 	}
+
+	if (profile.headers && Object.keys(profile.headers).length > 0) {
+		logger.info(`  Headers: ${Object.keys(profile.headers).join(", ")}`);
+	}
+	if (profile.exactBaseUrl) {
+		logger.info("  Base URL used exactly as given (no /v2 suffix appended)");
+	}
 }
 
 /**
  * Remove a c8ctl profile
  */
-export function removeProfile(name: string): void {
+function removeProfile(name: string): void {
 	const logger = getLogger();
 
 	// Prevent removing Modeler profiles
 	if (name.startsWith(MODELER_PREFIX)) {
-		logger.info("Manage Modeler connections directly in Camunda Modeler");
+		logger.info("Manage Modeler connections directly in Camunda Modeler", {
+			essential: true,
+		});
 		throw new Error("Cannot remove Modeler profiles via c8ctl");
 	}
 
@@ -232,23 +229,25 @@ export function removeProfile(name: string): void {
 /**
  * Show which profile is currently active
  */
-export function whichProfile(): void {
+function whichProfile(): void {
 	const logger = getLogger();
+	// The profile name is the command's answer, so --quiet keeps it.
+	const say = (message: string) => logger.info(message, { essential: true });
 	const active = c8ctl.activeProfile;
 	if (!active) {
-		const hasBaseUrl = !!process.env.CAMUNDA_BASE_URL?.trim();
+		const hasBaseUrl = !!resolveEnvBaseUrl();
 		if (hasBaseUrl) {
-			logger.info("(none — CAMUNDA_* env vars will be used)");
+			say("(none — CAMUNDA_* env vars will be used)");
 		} else if (hasCamundaEnvVars()) {
-			logger.info(
-				`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL to use them)`,
+			say(
+				`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL or CAMUNDA_REST_ADDRESS to use them)`,
 			);
 		} else {
-			logger.info(`${DEFAULT_PROFILE} (default)`);
+			say(`${DEFAULT_PROFILE} (default)`);
 		}
 		return;
 	}
-	logger.info(active);
+	say(active);
 }
 
 // ─── defineCommand wrappers ──────────────────────────────────────────────────
@@ -265,8 +264,52 @@ export const whichProfileCommand = defineCommand(
 export const removeProfileCommand = defineCommand(
 	"remove",
 	"profile",
-	async (_ctx, _flags, args) => {
-		removeProfile(args.name);
+	async (ctx, _flags, args) => {
+		let name = args.name;
+
+		if (!name) {
+			// No name provided — show interactive picker (c8ctl profiles only)
+			const profiles = getAllProfiles().filter(
+				(p) => !p.name.startsWith(MODELER_PREFIX),
+			);
+			if (profiles.length === 0) {
+				throw new Error("No c8ctl profiles to remove");
+			}
+
+			const result = await select({
+				message: "Which profile do you want to remove?",
+				options: profiles.map((p) => ({
+					label: p.name,
+					description: p.baseUrl || "(no URL)",
+					value: p.name,
+				})),
+			});
+
+			if (result.cancelled) {
+				return { kind: "none" };
+			}
+			if (!result.interactive) {
+				throw new Error(
+					"Profile name required. Usage: c8 remove profile <name>",
+				);
+			}
+			name = result.value;
+
+			// Confirm before removing (only when picked interactively)
+			if (!ctx.yes) {
+				const confirmResult = await confirm({
+					message: `Remove profile '${name}'?`,
+					defaultValue: false,
+				});
+				if (!confirmResult.value) {
+					const logger = getLogger();
+					logger.info("Cancelled");
+					return { kind: "none" };
+				}
+			}
+		}
+
+		removeProfile(name);
 		return { kind: "none" };
 	},
 );
@@ -281,11 +324,14 @@ export const addProfileCommand = defineCommand(
 			clientSecret: flags.clientSecret,
 			audience: flags.audience,
 			oauthUrl: flags.oAuthUrl,
+			scope: flags.scope,
 			tenantId: flags.defaultTenantId,
 			username: flags.username,
 			password: flags.password,
 			envFile: flags["from-file"],
 			fromEnv: flags["from-env"],
+			headers: flags.header,
+			exactBaseUrl: flags.exactBaseUrl,
 		});
 		return { kind: "none" };
 	},

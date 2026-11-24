@@ -8,7 +8,7 @@
  *
  * `normalizeToError` is the single shared helper used by:
  *   - `handleCommandError` (src/errors.ts)
- *   - the deploy verbose path (src/deployments.ts)
+ *   - the deploy verbose path (src/commands/helpers/deploy-helpers.ts)
  *   - the watch deploy-failure logger (src/commands/watch.ts)
  *   - the mcp-proxy startup/shutdown failure path (src/commands/mcp-proxy.ts)
  *
@@ -19,7 +19,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { normalizeToError } from "../../src/errors.ts";
+import { normalizeToError } from "../../src/core/errors.ts";
 
 describe("normalizeToError — Error inputs pass through unchanged", () => {
 	test("plain Error is returned by reference (no wrapping)", () => {
