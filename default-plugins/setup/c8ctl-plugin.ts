@@ -420,46 +420,45 @@ interface RunningClusterProbe {
 	readonly version?: string;
 }
 
+function parseClusterStatus(payload: unknown): RunningClusterProbe | undefined {
+	if (!isRecord(payload) || typeof payload.status !== "string") {
+		return undefined;
+	}
+	return {
+		running: payload.status !== "stopped",
+		version:
+			typeof payload.version === "string" && payload.version.length > 0
+				? payload.version
+				: undefined,
+	};
+}
+
 /**
  * The local cluster's status in the owning plugin's own words. Returns
- * undefined when the probe itself fails — callers then fail safe (no stop,
- * and a purge of a genuinely running version is refused by the owner).
+ * undefined when the probe itself fails — callers then fail safe: no stop,
+ * and a purge of a genuinely running version is refused by the owner.
  */
 async function probeRunningCluster(): Promise<RunningClusterProbe | undefined> {
 	try {
-		const payload: unknown = await captureC8ctlJson([
-			"cluster",
-			"status",
-			"--json",
-		]);
-		if (!isRecord(payload) || typeof payload.status !== "string") {
-			return undefined;
-		}
-		return {
-			running: payload.status !== "stopped",
-			version:
-				typeof payload.version === "string" && payload.version.length > 0
-					? payload.version
-					: undefined,
-		};
+		return parseClusterStatus(
+			await captureC8ctlJson(["cluster", "status", "--json"]),
+		);
 	} catch {
 		return undefined;
 	}
 }
 
-/** Whether a local cluster is running — for the removal inventory probe. */
-async function detectClusterRunning(): Promise<boolean> {
-	const payload: unknown = await captureC8ctlJson([
-		"cluster",
-		"status",
-		"--json",
-	]);
-	if (!isRecord(payload) || typeof payload.status !== "string") {
+/** The inventory's throwing variant of the same status probe. */
+async function detectClusterRunning(): Promise<RunningClusterProbe> {
+	const probe = parseClusterStatus(
+		await captureC8ctlJson(["cluster", "status", "--json"]),
+	);
+	if (!probe) {
 		throw new Error(
 			'cluster status --json returned an invalid response: expected a string "status" field.',
 		);
 	}
-	return payload.status !== "stopped";
+	return probe;
 }
 
 async function runClusterStart(ctx: PluginCtx, run: SetupRun): Promise<void> {
@@ -1121,7 +1120,15 @@ async function applySetupRemoval(
 	if (inventory.cluster) {
 		const probe = await probeRunningCluster();
 		let purgedByStop: string | undefined;
-		if (probe?.running) {
+		if (probe === undefined) {
+			// The preview promised a stop; without a working probe we cannot
+			// verify the target, so fail safe (no stop) but count it — a
+			// silent skip would report success over a running cluster.
+			failures += 1;
+			logger.error(
+				"Could not determine whether the local cluster is running (the cluster status probe failed); it was not stopped. Stop it yourself with: c8ctl cluster stop",
+			);
+		} else if (probe.running) {
 			if (probe.version && inventory.cluster.versions.includes(probe.version)) {
 				try {
 					await spawnClusterStopPurge(ctx);
@@ -1130,12 +1137,18 @@ async function applySetupRemoval(
 					failures += 1;
 					removalFailure(ctx, "stop the local cluster", error);
 				}
-			} else if (probe.version) {
+			} else if (
+				probe.version &&
+				probe.version !== inventory.cluster.runningVersion
+			) {
 				failures += 1;
 				logger.error(
 					`Camunda 8 Run ${probe.version} is running but was not in the removal preview; leaving it running and keeping its data. Stop it yourself with: c8ctl cluster stop`,
 				);
 			} else {
+				// No attributable version, or the confirmed stop-only target
+				// whose install dir is gone — plain stop via the owner's
+				// durable PID record; there is no versioned data to purge.
 				try {
 					await spawnClusterStop(ctx);
 				} catch (error) {

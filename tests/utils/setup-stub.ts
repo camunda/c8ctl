@@ -43,6 +43,7 @@
  *   C8CTL_SETUP_STUB_FAIL=step    — the given step's child process fails
  *                                   (e.g. "start-cluster", "stop-cluster",
  *                                   "purge-cluster", "delete-cluster",
+ *                                   "probe-cluster-status",
  *                                   "install-skills", "list-skills",
  *                                   "remove-modeler", "probe-modeler").
  *   C8RUN_CACHE_DIR=dir           — the fake `cluster purge`/`delete`
@@ -217,13 +218,16 @@ function clusterMarkerPath(): string | null {
 	return dir ? join(dir, "cluster.running") : null;
 }
 
-function clusterMarkerExists(): boolean {
+/** The marker doubles as the durable record: its content is the version. */
+function clusterMarkerVersion(): string | null {
 	const marker = clusterMarkerPath();
-	return marker !== null && fs.existsSync(marker);
+	if (marker === null || !fs.existsSync(marker)) return null;
+	const version = fs.readFileSync(marker, "utf-8").trim();
+	return version.length > 0 ? version : null;
 }
 
 function isClusterRunning(): boolean {
-	return clusterRunning || clusterMarkerExists();
+	return clusterRunning || clusterMarkerVersion() !== null;
 }
 
 // ── Child processes ────────────────────────────────────────────────
@@ -494,8 +498,17 @@ Object.defineProperty(childProcess, "spawn", {
 				return deleted;
 			};
 			if (argv.includes("status")) {
+				if (failStep === "probe-cluster-status") {
+					return fakeChild(1, {
+						stderr: "stubbed cluster status failure diagnostics\n",
+					});
+				}
 				const running = isClusterRunning();
-				const version = running ? runningVersion() : null;
+				// Install dirs give the precise version; the durable record's
+				// version survives them, like the real plugin's cluster.pids.
+				const version = running
+					? (runningVersion() ?? clusterMarkerVersion())
+					: null;
 				return fakeChild(0, {
 					stdout: `${JSON.stringify({
 						status: running ? "running" : "stopped",
@@ -515,7 +528,7 @@ Object.defineProperty(childProcess, "spawn", {
 				const marker = clusterMarkerPath();
 				if (marker) {
 					fs.mkdirSync(dirname(marker), { recursive: true });
-					fs.writeFileSync(marker, "running");
+					fs.writeFileSync(marker, runningVersion() ?? "8.10");
 				}
 				return fakeChild(0, {
 					...CLUSTER_CHILD_OUTPUT,
@@ -535,7 +548,7 @@ Object.defineProperty(childProcess, "spawn", {
 						stderr: "No cluster is currently running.\n",
 					});
 				}
-				const stoppedVersion = runningVersion();
+				const stoppedVersion = runningVersion() ?? clusterMarkerVersion();
 				clusterRunning = false;
 				const stoppedMarker = clusterMarkerPath();
 				if (stoppedMarker) fs.rmSync(stoppedMarker, { force: true });

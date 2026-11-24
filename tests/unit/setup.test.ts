@@ -1872,6 +1872,71 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("stops the confirmed running version after its install directory is gone", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+			// The fake start never creates an install dir, so the owner's
+			// durable record (the marker) is the only trace of the running
+			// 8.10 — the status probe still attributes the version.
+
+			const preview = await c8WithOptions(stub.options, "setup", "--remove");
+			assert.strictEqual(preview.status, 0, preview.stderr + preview.stdout);
+			assert.match(preview.stdout, /Stop the local cluster/);
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 0, output);
+			assert.match(output, /Stopped local Camunda 8 cluster/);
+			assert.match(output, /Setup removal finished/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("fails the removal when the post-confirmation cluster status probe fails", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+			plantC8RunInstall(stub.c8runCache, "8.10.0");
+
+			stub.options.env.C8CTL_SETUP_STUB_FAIL = "probe-cluster-status";
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /cluster status probe failed/);
+			// No stop without a verified target — but the independent
+			// purge/delete of the previewed version still ran.
+			assert.doesNotMatch(output, /Stopped local Camunda 8 cluster/);
+			assert.match(output, /Purged runtime data for 8\.10\.0/);
+			assert.ok(!existsSync(join(stub.c8runCache, "c8run-8.10.0")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("keeps a cluster version installed and started after the preview", async () => {
 		const stub = stubbedExecution({ clusterUp: true });
 		try {

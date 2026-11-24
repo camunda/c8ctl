@@ -58,10 +58,22 @@ export interface SetupClusterRemoval {
 	 * is nothing to purge or delete — only to stop).
 	 */
 	readonly versions: readonly string[];
+	/**
+	 * The version found running at preview time while no install dir
+	 * remained — the confirmed stop-only target. The owner still tracks it
+	 * via its durable record, so teardown can attribute the stop to it.
+	 */
+	readonly runningVersion?: string;
 }
 
 export interface SetupClusterInspectionFailure {
 	readonly message: string;
+}
+
+/** The local cluster's running state, as probed from the owning plugin. */
+export interface SetupClusterRunningState {
+	readonly running: boolean;
+	readonly version?: string;
 }
 
 export interface SetupRemovalInventory {
@@ -100,12 +112,13 @@ export async function inspectSetupRemovalInventory({
 	cwd?: string;
 	detectModeler?: () => Promise<SetupModelerRemoval | undefined>;
 	/**
-	 * Whether a local cluster is running, in the cluster plugin's own words
+	 * The local cluster's running state, in the cluster plugin's own words
 	 * (its status command). Needed only when no install dirs remain: a
 	 * cluster whose install dir was deleted out from under it is otherwise
-	 * invisible here, yet still needs stopping.
+	 * invisible here, yet still needs stopping — and the probe's version is
+	 * the confirmed stop target.
 	 */
-	detectClusterRunning?: () => Promise<boolean>;
+	detectClusterRunning?: () => Promise<SetupClusterRunningState>;
 } = {}): Promise<SetupRemovalInventory> {
 	const mcpHarnesses =
 		process.platform === "darwin" || process.platform === "win32"
@@ -192,17 +205,24 @@ export async function inspectSetupRemovalInventory({
 	let clusterInspectionFailure: SetupClusterInspectionFailure | undefined;
 	try {
 		const versions = camunda8RunInstallDirs();
-		let running = false;
+		let probe: SetupClusterRunningState | undefined;
 		if (versions.length === 0 && detectClusterRunning) {
 			try {
-				running = await detectClusterRunning();
+				probe = await detectClusterRunning();
 			} catch (error) {
 				clusterInspectionFailure = {
 					message: error instanceof Error ? error.message : String(error),
 				};
 			}
 		}
-		if (versions.length > 0 || running) cluster = { versions };
+		if (versions.length > 0 || probe?.running) {
+			cluster = {
+				versions,
+				...(probe?.running && probe.version
+					? { runningVersion: probe.version }
+					: {}),
+			};
+		}
 	} catch (error) {
 		clusterInspectionFailure = {
 			message: error instanceof Error ? error.message : String(error),
