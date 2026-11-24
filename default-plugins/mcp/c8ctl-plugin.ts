@@ -1,11 +1,12 @@
 /**
  * c8ctl-plugin-mcp
  *
- * Install or uninstall Camunda MCP connections in AI harnesses.
+ * Install, uninstall, or list Camunda MCP connections in AI harnesses.
  *
  * Usage:
  *   c8ctl mcp install [harness...] [--docs] [--orchestration] [--alias <name>]
  *   c8ctl mcp uninstall [harness...] [--docs] [--orchestration]
+ *   c8ctl mcp list [harness...]
  */
 
 import { existsSync, realpathSync } from "node:fs";
@@ -25,6 +26,7 @@ import type {
 	PluginMetadata,
 } from "../../src/framework/plugins/plugin-loader.ts";
 import {
+	listMcpEntries,
 	type McpConfigPlan,
 	planMcpConfigs,
 	writeMcpConfig,
@@ -32,11 +34,12 @@ import {
 
 export const metadata: PluginMetadata = {
 	name: "mcp",
-	description: "Install or uninstall Camunda MCP connections in AI harnesses",
+	description:
+		"Install, uninstall, or list Camunda MCP connections in AI harnesses",
 	commands: {
 		mcp: {
 			description:
-				"Install or uninstall Camunda MCP connections in AI harnesses",
+				"Install, uninstall, or list Camunda MCP connections in AI harnesses",
 			helpDescription: `Configure user-scoped Camunda orchestration and docs MCP servers.
 
 Harnesses: claude-code, github-copilot, cursor, vscode, claude-desktop (macOS/Windows).
@@ -48,7 +51,8 @@ Docs uses camunda-docs, needs no cluster profile, and requires sign-in on first 
 Claude Desktop docs uses npx mcp-remote; other harnesses connect over HTTP.
 VS Code's editor-managed config uses servers. For the newer Copilot harness, select github-copilot.
 On uninstall, --preserve-conflicts leaves entries that no longer match the c8ctl-managed shape untouched instead of failing.
---dry-run previews selected entries without writing or exposing unrelated config values.`,
+--dry-run previews selected entries without writing or exposing unrelated config values.
+mcp list shows c8ctl-managed entries across all supported (or named) harnesses without touching disk.`,
 			subcommands: [
 				{
 					name: "install",
@@ -59,6 +63,11 @@ On uninstall, --preserve-conflicts leaves entries that no longer match the c8ctl
 					name: "uninstall",
 					description:
 						"Remove MCP connections from detected or named harnesses",
+				},
+				{
+					name: "list",
+					description:
+						"List c8ctl-managed MCP entries across supported harnesses",
 				},
 			],
 			examples: [
@@ -78,6 +87,10 @@ On uninstall, --preserve-conflicts leaves entries that no longer match the c8ctl
 				{
 					command: "c8ctl mcp uninstall claude-code --docs",
 					description: "Remove only the docs MCP entry",
+				},
+				{
+					command: "c8ctl mcp list",
+					description: "List c8ctl-managed MCP entries in all harnesses",
 				},
 			],
 		},
@@ -227,10 +240,14 @@ async function mcpHandler(
 	const { logger } = ctx;
 
 	const operation = args[0];
-	if (operation !== "install" && operation !== "uninstall") {
+	if (
+		operation !== "install" &&
+		operation !== "uninstall" &&
+		operation !== "list"
+	) {
 		if (operation === undefined) {
 			logger.info(
-				"\nUsage: c8ctl mcp install|uninstall [harness...]\n\nAvailable resources:\n  install\n  uninstall",
+				"\nUsage: c8ctl mcp install|uninstall|list [harness...]\n\nAvailable resources:\n  install\n  uninstall\n  list",
 				{ essential: true },
 			);
 		} else {
@@ -242,6 +259,30 @@ async function mcpHandler(
 	}
 
 	try {
+		if (operation === "list") {
+			// Selection flags shape writes; on a read-only listing they would
+			// silently imply a filter that does not exist.
+			const installOnly = [
+				"docs",
+				"orchestration",
+				"alias",
+				"preserve-conflicts",
+			].filter((name) => flags?.[name] !== undefined);
+			if (installOnly.length > 0) {
+				throw new Error(
+					`mcp list takes no ${installOnly.map((name) => `--${name}`).join(", ")} flag. It always lists every c8ctl-managed entry.`,
+				);
+			}
+			const items = listMcpEntries({ requested: args.slice(1) });
+			if (items.length === 0) {
+				logger.info(
+					"No c8ctl-managed MCP entries found. Run 'c8ctl mcp install' to add one.",
+					{ essential: true },
+				);
+			}
+			logger.table(items);
+			return;
+		}
 		// Plugin flag dispatch does not enforce `rejectEmpty`: a valueless
 		// --alias arrives as a non-string and --alias= as an empty string.
 		// Both are validation errors, as for the built-in command — never a

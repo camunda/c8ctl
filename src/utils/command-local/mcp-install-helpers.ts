@@ -140,29 +140,42 @@ export function detectMcpHarnesses(): McpHarness[] {
 	);
 }
 
-function selectHarnesses(requested: readonly string[]): McpHarness[] {
-	const harnesses = buildHarnesses();
-	const aliases: Readonly<Record<string, string>> = {
-		claude: "claude-code",
-		copilot: "github-copilot",
-		code: "vscode",
-	};
-	if (requested.length > 0) {
-		const ids = new Set(
+const HARNESS_ALIASES: Readonly<Record<string, string>> = {
+	claude: "claude-code",
+	copilot: "github-copilot",
+	code: "vscode",
+};
+
+function resolveHarnessIds(requested: readonly string[]): string[] {
+	return [
+		...new Set(
 			requested.map((name) => {
 				const id = name.trim().toLowerCase();
-				return Object.hasOwn(aliases, id) ? aliases[id] : id;
+				return Object.hasOwn(HARNESS_ALIASES, id) ? HARNESS_ALIASES[id] : id;
 			}),
+		),
+	];
+}
+
+function requireHarness(
+	harnesses: readonly McpHarness[],
+	id: string,
+): McpHarness {
+	const harness = harnesses.find((candidate) => candidate.id === id);
+	if (!harness) {
+		throw new Error(
+			`Unsupported MCP harness '${id}' on ${process.platform}. Choose: ${harnesses.map((candidate) => candidate.id).join(", ")}.`,
 		);
-		return [...ids].map((id) => {
-			const harness = harnesses.find((candidate) => candidate.id === id);
-			if (!harness) {
-				throw new Error(
-					`Unsupported MCP harness '${id}' on ${process.platform}. Choose: ${harnesses.map((candidate) => candidate.id).join(", ")}.`,
-				);
-			}
-			return harness;
-		});
+	}
+	return harness;
+}
+
+function selectHarnesses(requested: readonly string[]): McpHarness[] {
+	const harnesses = buildHarnesses();
+	if (requested.length > 0) {
+		return resolveHarnessIds(requested).map((id) =>
+			requireHarness(harnesses, id),
+		);
 	}
 	const detected = detectMcpHarnesses();
 	if (detected.length === 0) {
@@ -462,6 +475,104 @@ export function planMcpConfigs({
 		for (const plan of target.plans) plan.content = target.content;
 	}
 	return plans;
+}
+
+export interface McpListEntry {
+	harness: string;
+	path: string;
+	server?: string;
+	target?: "orchestration" | "docs";
+	profile?: string;
+	error?: string;
+}
+
+/** The profile an orchestration entry points at; undefined for foreign entries. */
+function orchestrationProfile(entry: unknown): string | undefined {
+	if (!isOrchestrationEntry(entry) || !isRecord(entry)) return undefined;
+	const args: unknown = entry.args;
+	if (!Array.isArray(args)) return undefined;
+	const profile: unknown = args[3];
+	return typeof profile === "string" ? profile : undefined;
+}
+
+/**
+ * Read-only listing of the c8ctl-managed MCP entries across harnesses.
+ * With no `requested` names every supported harness is scanned (missing
+ * config files are skipped); named harnesses are validated like install.
+ * A corrupt config is reported in its own row instead of aborting the
+ * listing. Foreign entries are never surfaced — they belong to the user,
+ * not to c8ctl.
+ */
+export function listMcpEntries({
+	requested,
+}: {
+	requested: readonly string[];
+}): McpListEntry[] {
+	const harnesses = buildHarnesses();
+	const selected =
+		requested.length > 0
+			? resolveHarnessIds(requested).map((id) => requireHarness(harnesses, id))
+			: harnesses;
+	const entries: McpListEntry[] = [];
+	for (const harness of selected) {
+		const path = resolve(harness.path);
+		let content: string | undefined;
+		try {
+			content = readOptionalFile(path);
+		} catch {
+			// An unreadable config (a directory, a permission error) is
+			// reported in its own row, like malformed JSON — one broken
+			// harness must not hide the healthy ones.
+			entries.push({ harness: harness.id, path, error: "read error" });
+			continue;
+		}
+		if (content === undefined) continue;
+		const errors: ParseError[] = [];
+		const config: unknown = parse(content, errors, {
+			disallowComments: harness.id !== "vscode",
+			allowTrailingComma: harness.id === "vscode",
+		});
+		const rawServers: unknown = isRecord(config)
+			? config[harness.key]
+			: undefined;
+		if (errors.length > 0 || !isRecord(config)) {
+			entries.push({ harness: harness.id, path, error: "parse error" });
+			continue;
+		}
+		if (rawServers === undefined) continue;
+		if (!isRecord(rawServers)) {
+			entries.push({
+				harness: harness.id,
+				path,
+				error: `'${harness.key}' is not an object`,
+			});
+			continue;
+		}
+		const servers = rawServers;
+		for (const [name, entry] of Object.entries(servers)) {
+			const profile = orchestrationProfile(entry);
+			if (profile !== undefined) {
+				entries.push({
+					harness: harness.id,
+					path,
+					server: name,
+					target: "orchestration",
+					profile,
+				});
+			} else if (
+				name === "camunda-docs" &&
+				matchesServerConfig(entry, docsEntry(harness))
+			) {
+				entries.push({
+					harness: harness.id,
+					path,
+					server: name,
+					target: "docs",
+				});
+			}
+		}
+	}
+	return entries;
 }
 
 export interface WriteMcpConfigOptions {
