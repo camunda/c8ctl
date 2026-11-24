@@ -1640,7 +1640,7 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 				loggedMessages.some(
 					(m: string) =>
 						m.includes("could not be updated") &&
-						m.includes("cluster start 8.10"),
+						/cluster start 8\.10\.4$/.test(m),
 				),
 				`got: ${loggedMessages.join("; ")}`,
 			);

@@ -316,16 +316,18 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion, cach
           const remote = parseVersionsFromHtml(html);
           const remoteVersion = remote?.[versionSpec];
           if (!remoteVersion || !isRemoteMinorNewer(remoteVersion, resolvedVersion)) return;
-          if (cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion, versionSpec)) {
+          const installed = cacheDir && findInstalledAliasTarget(cacheDir, remoteVersion, versionSpec);
+          if (installed) {
             if (storeLocalAliasMapping(cacheDir, versionSpec, remoteVersion)) {
               logger.info(
                 `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed. ` +
                 `The next "c8ctl cluster start ${versionSpec}" will use it.`,
               );
             } else {
+              // Name the exact install: a plain "8.10" would look for c8run-8.10 and download it.
               logger.info(
                 `"${versionSpec}" now resolves to ${remoteVersion}, which is already installed, ` +
-                `but the cached alias could not be updated. Start it with: c8ctl cluster start ${remoteVersion}`,
+                `but the cached alias could not be updated. Start it with: c8ctl cluster start ${installed}`,
               );
             }
           } else {
