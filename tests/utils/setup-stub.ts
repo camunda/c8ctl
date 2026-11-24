@@ -23,7 +23,7 @@
  * Child processes: the `c8ctl cluster start` and `stop` self-invocations
  * are faked (a successful `start` flips the health endpoint to UP), `gh`
  * skill installs report success, and browser openers exit quietly. The
- * `modeler remove` self-invocation is faked too — running it for real
+ * `modeler uninstall` self-invocation is faked too — running it for real
  * could uninstall a developer's actual Desktop Modeler. The modeler
  * install and skills children run their real plugin code under this
  * stub. `C8CTL_SETUP_STUB_FAIL=<step id>` makes one step's child process
@@ -44,7 +44,7 @@
  *                                   (e.g. "start-cluster", "stop-cluster",
  *                                   "install-skills", "list-skills",
  *                                   "remove-modeler", "probe-modeler").
- *   C8CTL_SETUP_STUB_MODELER=absent — the faked `modeler remove --dry-run`
+ *   C8CTL_SETUP_STUB_MODELER=absent — the faked `modeler uninstall --dry-run`
  *                                   probe reports no managed installation,
  *                                   so removal previews omit Modeler.
  *   C8CTL_SETUP_STUB_MODELER=malformed — the probe omits `wouldChange` to
@@ -475,11 +475,11 @@ Object.defineProperty(childProcess, "spawn", {
 				stderr: MODELER_INSTALL_UPDATE_WARNING,
 			});
 		}
-		// `modeler remove` would uninstall a real Modeler — fake it like the
+		// `modeler uninstall` would uninstall a real Modeler — fake it like the
 		// cluster children. The dry-run probe answers a JSON payload; the
 		// actual removal pretends an app-bundle removal. `modeler install`
 		// keeps running its real plugin code under this stub.
-		if (argv.includes("modeler") && argv.includes("remove")) {
+		if (argv.includes("modeler") && argv.includes("uninstall")) {
 			const modelerMode = process.env.C8CTL_SETUP_STUB_MODELER;
 			const modelerTarget =
 				modelerMode === "homebrew"
@@ -499,7 +499,7 @@ Object.defineProperty(childProcess, "spawn", {
 					return fakeChild(0, {
 						stdout: `${JSON.stringify({
 							dryRun: true,
-							command: "modeler remove",
+							command: "modeler uninstall",
 							message: "Unexpected probe response",
 						})}\n`,
 					});
@@ -508,7 +508,7 @@ Object.defineProperty(childProcess, "spawn", {
 					return fakeChild(0, {
 						stdout: `${JSON.stringify({
 							dryRun: true,
-							command: "modeler remove",
+							command: "modeler uninstall",
 							message: "Unexpected probe response",
 							wouldChange: true,
 						})}\n`,
@@ -518,7 +518,7 @@ Object.defineProperty(childProcess, "spawn", {
 				return fakeChild(0, {
 					stdout: `${JSON.stringify({
 						dryRun: true,
-						command: "modeler remove",
+						command: "modeler uninstall",
 						message: absent
 							? "Camunda Modeler is not installed; run `c8ctl modeler install` first."
 							: modelerMode === "homebrew"
@@ -544,7 +544,7 @@ Object.defineProperty(childProcess, "spawn", {
 			}
 			if (failStep === "remove-modeler") {
 				return fakeChild(1, {
-					stderr: "stubbed modeler remove failure diagnostics\n",
+					stderr: "stubbed modeler uninstall failure diagnostics\n",
 				});
 			}
 			return fakeChild(0, {

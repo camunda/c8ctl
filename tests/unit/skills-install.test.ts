@@ -378,6 +378,8 @@ test("skills help documents lifecycle actions and removal selectors", async () =
 	assert.match(result.stdout, /"kind":"plugin"/);
 	assert.match(result.stdout, /"name":"install"/);
 	assert.match(result.stdout, /"name":"list"/);
+	assert.match(result.stdout, /"name":"uninstall"/);
+	// `remove` stays a supported compatibility alias for `uninstall`.
 	assert.match(result.stdout, /"name":"remove"/);
 	assert.match(result.stdout, /--harness/i);
 	assert.match(result.stdout, /--skill-path/i);
@@ -460,7 +462,7 @@ test("skills list reports installed Camunda skills for a selected harness", asyn
 	}
 });
 
-test("skills remove previews first, requires confirmation, and removes only Camunda skills", async () => {
+test("skills uninstall previews first, requires confirmation, and removes only Camunda skills", async () => {
 	const fixture = createSkillFixture();
 	const unrelatedSkillDirectory = join(fixture.skillRoot, "local-only");
 	mkdirSync(unrelatedSkillDirectory);
@@ -468,14 +470,14 @@ test("skills remove previews first, requires confirmation, and removes only Camu
 		const preview = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"--dry-run",
 		);
 
 		assert.equal(preview.status, 0, preview.stderr);
 		assert.deepEqual(JSON.parse(preview.stdout), {
 			dryRun: true,
-			command: "skills remove",
+			command: "skills uninstall",
 			action: "remove",
 			preview: true,
 			items: [
@@ -492,17 +494,17 @@ test("skills remove previews first, requires confirmation, and removes only Camu
 		const unconfirmed = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 		);
 		assert.equal(unconfirmed.status, 0, unconfirmed.stderr);
 		assert.match(unconfirmed.stdout, /Nothing was removed/);
-		assert.match(unconfirmed.stdout, /c8ctl skills remove --yes/);
+		assert.match(unconfirmed.stdout, /c8ctl skills uninstall --yes/);
 		assert.ok(existsSync(fixture.skillDirectory));
 
 		const removed = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"--yes",
 		);
 		assert.equal(removed.status, 0, removed.stderr);
@@ -514,11 +516,40 @@ test("skills remove previews first, requires confirmation, and removes only Camu
 	}
 });
 
-test("skills remove rejects selectors hidden by repeated or pre-verb string flags", async () => {
+test("skills remove remains a compatibility alias for uninstall", async () => {
+	const fixture = createSkillFixture();
+	try {
+		const preview = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"--dry-run",
+		);
+
+		assert.equal(preview.status, 0, preview.stderr);
+		// The payload reports the canonical command regardless of the alias.
+		assert.equal(JSON.parse(preview.stdout).command, "skills uninstall");
+		assert.ok(existsSync(fixture.skillDirectory));
+
+		const removed = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"remove",
+			"--yes",
+		);
+		assert.equal(removed.status, 0, removed.stderr);
+		assert.match(removed.stdout, /Removed Camunda skill "camunda-c8ctl"/);
+		assert.ok(!existsSync(fixture.skillDirectory));
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills uninstall rejects selectors hidden by repeated or pre-verb string flags", async () => {
 	for (const args of [
 		[
 			"skills",
-			"remove",
+			"uninstall",
 			"--fields",
 			"--harnes=cursor",
 			"--fields",
@@ -527,14 +558,14 @@ test("skills remove rejects selectors hidden by repeated or pre-verb string flag
 		],
 		[
 			"skills",
-			"remove",
+			"uninstall",
 			"--fields",
 			"-harness=cursor",
 			"--fields",
 			"name",
 			"--yes",
 		],
-		["--fields", "--harnes=cursor", "skills", "remove", "--yes"],
+		["--fields", "--harnes=cursor", "skills", "uninstall", "--yes"],
 	]) {
 		const fixture = createSkillFixture();
 		const ghCapture = join(fixture.root, "gh-calls.jsonl");
@@ -563,7 +594,7 @@ test("skills remove rejects selectors hidden by repeated or pre-verb string flag
 	}
 });
 
-test("skills remove refuses to delete when the inventory changed after listing", async () => {
+test("skills uninstall refuses to delete when the inventory changed after listing", async () => {
 	const fixture = createSkillFixture();
 	const listState = join(fixture.root, "list-state");
 	try {
@@ -576,7 +607,7 @@ test("skills remove refuses to delete when the inventory changed after listing",
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"--yes",
 		);
 
@@ -588,7 +619,7 @@ test("skills remove refuses to delete when the inventory changed after listing",
 	}
 });
 
-test("skills remove accepts a declared harness after a valueless global flag", async () => {
+test("skills uninstall accepts a declared harness after a valueless global flag", async () => {
 	const fixture = createSkillFixture();
 	const cursorSkillDirectory = join(
 		fixture.home,
@@ -608,7 +639,7 @@ test("skills remove accepts a declared harness after a valueless global flag", a
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"--fields",
 			"--harness",
 			"cursor",
@@ -625,13 +656,13 @@ test("skills remove accepts a declared harness after a valueless global flag", a
 	}
 });
 
-test("skills remove applies --fields to preview and result rows in JSON mode", async () => {
+test("skills uninstall applies --fields to preview and result rows in JSON mode", async () => {
 	const fixture = createSkillFixture();
 	try {
 		const preview = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"--dry-run",
 			"--json",
 			"--fields",
@@ -646,7 +677,7 @@ test("skills remove applies --fields to preview and result rows in JSON mode", a
 		const removed = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"--yes",
 			"--json",
 			"--fields",
@@ -660,7 +691,7 @@ test("skills remove applies --fields to preview and result rows in JSON mode", a
 	}
 });
 
-test("skills remove leaves installations untouched when discovery fails", async () => {
+test("skills uninstall leaves installations untouched when discovery fails", async () => {
 	const fixture = createSkillFixture();
 	try {
 		const result = await c8WithOptions(
@@ -672,7 +703,7 @@ test("skills remove leaves installations untouched when discovery fails", async 
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"--yes",
 		);
 
@@ -684,7 +715,7 @@ test("skills remove leaves installations untouched when discovery fails", async 
 	}
 });
 
-test("skills remove rejects unknown skill names, deleting nothing", async () => {
+test("skills uninstall rejects unknown skill names, deleting nothing", async () => {
 	const fixture = createSkillFixture();
 	try {
 		// "cursor" is a harness id, not an installed skill — a likely slip
@@ -693,7 +724,7 @@ test("skills remove rejects unknown skill names, deleting nothing", async () => 
 			const result = await c8WithOptions(
 				fixture.options,
 				"skills",
-				"remove",
+				"uninstall",
 				positional,
 				"--yes",
 			);
@@ -711,7 +742,7 @@ test("skills remove rejects unknown skill names, deleting nothing", async () => 
 	}
 });
 
-test("skills remove constrains deletion to the named skills", async () => {
+test("skills uninstall constrains deletion to the named skills", async () => {
 	const fixture = createSkillFixture();
 	const otherSkillDirectory = join(fixture.skillRoot, "camunda-bpmn");
 	mkdirSync(otherSkillDirectory);
@@ -724,7 +755,7 @@ test("skills remove constrains deletion to the named skills", async () => {
 		const preview = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"camunda-bpmn",
 			"--dry-run",
 		);
@@ -738,7 +769,7 @@ test("skills remove constrains deletion to the named skills", async () => {
 		const removed = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"camunda-bpmn",
 			"--yes",
 		);
@@ -752,7 +783,7 @@ test("skills remove constrains deletion to the named skills", async () => {
 	}
 });
 
-test("skills remove validates each requested name and exact path pair", async () => {
+test("skills uninstall validates each requested name and exact path pair", async () => {
 	const fixture = createSkillFixture();
 	try {
 		const unlistedPath = join(
@@ -764,7 +795,7 @@ test("skills remove validates each requested name and exact path pair", async ()
 		const rejected = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"camunda-c8ctl",
 			"--skill-path",
 			unlistedPath,
@@ -777,7 +808,7 @@ test("skills remove validates each requested name and exact path pair", async ()
 		const removed = await c8WithOptions(
 			fixture.options,
 			"skills",
-			"remove",
+			"uninstall",
 			"camunda-c8ctl",
 			"--skill-path",
 			fixture.skillDirectory,
@@ -790,7 +821,7 @@ test("skills remove validates each requested name and exact path pair", async ()
 	}
 });
 
-test("skills remove refuses to delete a path whose skill identity changed", async () => {
+test("skills uninstall refuses to delete a path whose skill identity changed", async () => {
 	const fixture = createSkillFixture();
 	try {
 		const result = await c8WithOptions(
@@ -806,7 +837,7 @@ test("skills remove refuses to delete a path whose skill identity changed", asyn
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"camunda-c8ctl",
 			"--skill-path",
 			fixture.skillDirectory,
@@ -840,7 +871,7 @@ test("skills path selector is rejected by non-removal subcommands", async () => 
 	}
 });
 
-test("skills remove rejects a mistyped harness flag before discovery", async () => {
+test("skills uninstall rejects a mistyped harness flag before discovery", async () => {
 	const fixture = createSkillFixture();
 	const ghCapture = join(fixture.root, "gh-calls.jsonl");
 	try {
@@ -853,7 +884,7 @@ test("skills remove rejects a mistyped harness flag before discovery", async () 
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"--harnes=cursor",
 			"--yes",
 		);
@@ -870,7 +901,7 @@ test("skills remove rejects a mistyped harness flag before discovery", async () 
 	}
 });
 
-test("skills remove rejects an option-like value swallowed by a string flag", async () => {
+test("skills uninstall rejects an option-like value swallowed by a string flag", async () => {
 	const fixture = createSkillFixture();
 	const ghCapture = join(fixture.root, "gh-calls.jsonl");
 	try {
@@ -883,7 +914,7 @@ test("skills remove rejects an option-like value swallowed by a string flag", as
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"--fields",
 			"--harnes=cursor",
 			"--yes",
@@ -922,7 +953,7 @@ test("skills list applies --fields to skill rows in JSON mode", async () => {
 	}
 });
 
-test("skills remove supports explicit agent IDs with user-scope skills directories", async () => {
+test("skills uninstall supports explicit agent IDs with user-scope skills directories", async () => {
 	const fixture = createSkillFixture();
 	const cursorSkillDirectory = join(
 		fixture.home,
@@ -944,7 +975,7 @@ test("skills remove supports explicit agent IDs with user-scope skills directori
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"--harness",
 			"cursor",
 			"--yes",
@@ -978,7 +1009,7 @@ test("skills remove supports explicit agent IDs with user-scope skills directori
 	}
 });
 
-test("skills remove rejects paths outside trusted harness user-scope roots", async () => {
+test("skills uninstall rejects paths outside trusted harness user-scope roots", async () => {
 	const fixture = createSkillFixture();
 	const unrelatedSkillDirectory = join(
 		fixture.home,
@@ -999,7 +1030,7 @@ test("skills remove rejects paths outside trusted harness user-scope roots", asy
 					},
 				},
 				"skills",
-				"remove",
+				"uninstall",
 				"--harness",
 				harness,
 				"--yes",
@@ -1014,7 +1045,7 @@ test("skills remove rejects paths outside trusted harness user-scope roots", asy
 	}
 });
 
-test("skills remove rejects a mapped user-scope root that resolves outside home", async () => {
+test("skills uninstall rejects a mapped user-scope root that resolves outside home", async () => {
 	const fixture = createSkillFixture();
 	const cursorDirectory = join(fixture.home, ".cursor");
 	const cursorSkillsRoot = join(cursorDirectory, "skills");
@@ -1041,7 +1072,7 @@ test("skills remove rejects a mapped user-scope root that resolves outside home"
 				},
 			},
 			"skills",
-			"remove",
+			"uninstall",
 			"--harness",
 			"cursor",
 			"--yes",

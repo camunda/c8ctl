@@ -302,7 +302,7 @@ function spawnClusterStop(ctx: PluginCtx): Promise<void> {
 
 /**
  * Run a c8ctl command as a silent child and parse its JSON stdout. Used
- * for read-only probes (`modeler remove --dry-run`) where spawnC8ctl's
+ * for read-only probes (`modeler uninstall --dry-run`) where spawnC8ctl's
  * line forwarding would leak the payload into the removal output. As in
  * spawnC8ctl, process.execArgv carries test preloads into the child.
  */
@@ -362,12 +362,12 @@ async function detectModelerRemoval(): Promise<
 > {
 	const payload: unknown = await captureC8ctlJson([
 		"modeler",
-		"remove",
+		"uninstall",
 		"--dry-run",
 	]);
 	if (!isRecord(payload) || typeof payload.wouldChange !== "boolean") {
 		throw new Error(
-			'modeler remove --dry-run returned an invalid response: expected a boolean "wouldChange" field.',
+			'modeler uninstall --dry-run returned an invalid response: expected a boolean "wouldChange" field.',
 		);
 	}
 	if (!payload.wouldChange) return undefined;
@@ -380,7 +380,7 @@ async function detectModelerRemoval(): Promise<
 		removalTarget.path.length === 0
 	) {
 		throw new Error(
-			'modeler remove --dry-run returned an invalid response: expected a "removalTarget" object with nonempty "method" and "path".',
+			'modeler uninstall --dry-run returned an invalid response: expected a "removalTarget" object with nonempty "method" and "path".',
 		);
 	}
 	return {
@@ -864,7 +864,7 @@ async function executePlan(
 function modelerRemovalLine(message: string): string {
 	const match = /^Dry run: would remove (.+)$/.exec(message);
 	if (match) return `Remove ${match[1]}`;
-	return `Remove Camunda Desktop Modeler with \`c8ctl modeler remove\` (${message})`;
+	return `Remove Camunda Desktop Modeler with \`c8ctl modeler uninstall\` (${message})`;
 }
 
 function setupRemovalPreview(
@@ -1098,7 +1098,7 @@ async function applySetupRemoval(
 				ctx,
 				[
 					"skills",
-					"remove",
+					"uninstall",
 					...names,
 					"--harness",
 					harness,
@@ -1125,7 +1125,7 @@ async function applySetupRemoval(
 	// instead of failing.
 	if (inventory.modeler) {
 		try {
-			await spawnC8ctl(ctx, ["modeler", "remove"], {
+			await spawnC8ctl(ctx, ["modeler", "uninstall"], {
 				promoteStdoutLine: (line) => line.includes("Modeler"),
 				// Registration-cleanup warnings and failure diagnostics ride
 				// stderr — keep them visible in quiet removal runs.
@@ -1450,7 +1450,7 @@ A run without a selection (piped output, CI) installs nothing unless you pass --
 
 Exit code 0: every selected setup step succeeded, or nothing was installed for lack of a go-ahead (wizard cancelled with Escape; a piped, --quiet or JSON-mode run without --yes; --json or --dry-run printing the plan). Ctrl+C ends the wizard by signal (130 on POSIX shells). A re-run reuses finished work where possible; the deploy, process start and skills install repeat by design. Exit code 1: arguments failed validation, or a step failed — other eligible steps still ran, while dependents (and the deploy finale after any failure) were skipped.
 
---remove shows setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, and marker-listed blueprint files before removing them. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Removal runs the owning commands: mcp uninstall, skills remove, and modeler remove. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
+--remove shows setup-managed MCP entries, Camunda skills, a c8ctl-managed Desktop Modeler installation, and marker-listed blueprint files before removing them. Confirm in the interactive prompt or pass --yes in non-interactive use. --json and --dry-run print only the removal preview. Removal runs the owning commands: mcp uninstall, skills uninstall, and modeler uninstall. Local edits in skill folders and listed blueprint files are removed; untracked blueprint files are kept. --remove cannot be combined with --modeler, --no-modeler, or --docs-mcp.
 
 --stop-cluster is available only with --remove. It stops the local cluster without purging runtime data or deleting downloaded binaries.
 

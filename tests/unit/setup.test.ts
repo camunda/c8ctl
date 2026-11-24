@@ -459,7 +459,7 @@ describe("c8ctl setup", () => {
 		// Removal delegates to the owning commands; Modeler is now included.
 		assert.match(
 			result.stdout,
-			/mcp uninstall, skills remove, and modeler remove/,
+			/mcp uninstall, skills uninstall, and modeler uninstall/,
 		);
 		assert.doesNotMatch(result.stdout, /Desktop Modeler is not removed/);
 		// The documented exit-code contract.

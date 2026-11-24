@@ -6,7 +6,7 @@
  * Usage:
  *   c8ctl modeler install
  *   c8ctl modeler update
- *   c8ctl modeler remove
+ *   c8ctl modeler uninstall
  */
 
 import { isRecord, renderCommandFailure } from "../../src/core/index.ts";
@@ -41,9 +41,13 @@ export const metadata: PluginMetadata = {
 						"Update Camunda Desktop Modeler to the latest stable release",
 				},
 				{
-					name: "remove",
+					name: "uninstall",
 					description:
 						"Remove a c8ctl-managed Camunda Desktop Modeler installation",
+				},
+				{
+					name: "remove",
+					description: "Alias for uninstall",
 				},
 			],
 			examples: [
@@ -56,7 +60,7 @@ export const metadata: PluginMetadata = {
 					description: "Update Camunda Desktop Modeler",
 				},
 				{
-					command: "c8ctl modeler remove --dry-run",
+					command: "c8ctl modeler uninstall --dry-run",
 					description: "Preview removal of Camunda Desktop Modeler",
 				},
 			],
@@ -99,13 +103,20 @@ async function modelerHandler(
 
 	if (action === undefined) {
 		logger.info(
-			"\nUsage: c8ctl modeler <install|update|remove>\n\nAvailable commands:\n  install\n  update\n  remove",
+			"\nUsage: c8ctl modeler <install|update|uninstall>\n\nAvailable commands:\n  install\n  update\n  uninstall",
 			{ essential: true },
 		);
 		process.exitCode = 1;
 		return;
 	}
-	if (action !== "install" && action !== "update" && action !== "remove") {
+	// `remove` is the pre-uninstall spelling, kept as a compatibility
+	// alias; payloads and failure messages use the canonical name.
+	const canonicalAction = action === "remove" ? "uninstall" : action;
+	if (
+		canonicalAction !== "install" &&
+		canonicalAction !== "update" &&
+		canonicalAction !== "uninstall"
+	) {
 		logger.error(`Unknown command: modeler ${args.join(" ")}`);
 		logger.info('Run "c8 help" for usage information', { essential: true });
 		process.exitCode = 1;
@@ -116,13 +127,13 @@ async function modelerHandler(
 		const operation = {
 			install: installDesktopModeler,
 			update: updateDesktopModeler,
-			remove: removeDesktopModeler,
-		}[action];
+			uninstall: removeDesktopModeler,
+		}[canonicalAction];
 		const result = await operation({
 			isDryRun: ctx.dryRun,
 			logger,
 			quiet: ctx.quiet,
-			...(action === "remove"
+			...(canonicalAction === "uninstall"
 				? {
 						expectedRemovalTarget: expectedRemovalTargetFromEnvironment(),
 					}
@@ -136,7 +147,7 @@ async function modelerHandler(
 						kind: "dryRun" as const,
 						info: {
 							dryRun: true,
-							command: `modeler ${action}`,
+							command: `modeler ${canonicalAction}`,
 							message: result.message,
 							wouldChange: false,
 						},
@@ -150,9 +161,14 @@ async function modelerHandler(
 			logger.success(normalized.message);
 		}
 	} catch (error) {
-		renderCommandFailure(logger, `Failed to ${action} Camunda Modeler`, error, {
-			verbose: ctx.verbose,
-		});
+		renderCommandFailure(
+			logger,
+			`Failed to ${canonicalAction} Camunda Modeler`,
+			error,
+			{
+				verbose: ctx.verbose,
+			},
+		);
 		process.exitCode = 1;
 	}
 }
