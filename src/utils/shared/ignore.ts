@@ -15,11 +15,10 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import {
+import nodePath, {
 	dirname,
 	isAbsolute,
 	join,
-	matchesGlob,
 	relative,
 	resolve,
 	sep,
@@ -112,6 +111,15 @@ export function matchesParsedPattern(
 	{ globs }: ParsedPattern,
 ): boolean {
 	return globs.some((g) => matchesGlob(path, g));
+}
+
+/**
+ * `path.matchesGlob`, looked up at call time. A named import would make Node.js
+ * releases without it (<20.17, 22.0–22.4) fail to load the whole CLI, before
+ * the unsupported-Node.js warning can print (#839).
+ */
+export function matchesGlob(path: string, pattern: string): boolean {
+	return nodePath.matchesGlob(path, pattern);
 }
 
 function buildIgnoreChecker(
