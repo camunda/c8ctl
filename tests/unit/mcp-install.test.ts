@@ -797,9 +797,67 @@ test("mcp list rejects unknown harnesses and install-only flags", async (t) => {
 	]) {
 		const result = await s.run("mcp", "list", flag);
 		assert.equal(result.status, 1, `mcp list ${flag}`);
-		assert.match(
-			result.stderr,
-			new RegExp(flag.replace(/=.*/, "").replace(/^--/, "--")),
-		);
+		assert.match(result.stderr, new RegExp(flag.replace(/=.*/, "")));
 	}
+});
+
+test("mcp list reports an unreadable config in its row and still lists other harnesses", async (t) => {
+	const s = sandbox(t);
+	// A directory at the config path makes readFileSync fail with EISDIR —
+	// a different failure class than a missing file or malformed JSON.
+	mkdirSync(s.paths.cursor, { recursive: true });
+	s.write("vscode", "{}");
+	assert.equal((await s.run("mcp", "install", "vscode", "--docs")).status, 0);
+
+	const result = await s.run("mcp", "list");
+	assert.equal(result.status, 0, result.stderr);
+	const items = parseJson(result);
+	assert.ok(Array.isArray(items));
+	assert.equal(items.length, 2);
+	const unreadable = items.find(
+		(item: unknown) => isRecord(item) && item.harness === "cursor",
+	);
+	assert.ok(isRecord(unreadable));
+	assert.match(String(unreadable.error), /read/i);
+	assert.ok(
+		items.some((item: unknown) => isRecord(item) && item.harness === "vscode"),
+	);
+});
+
+test("mcp list only treats the reserved camunda-docs entry with the managed shape as docs", async (t) => {
+	const s = sandbox(t);
+	// A foreign stdio server that merely references the docs URL in its args
+	// is not c8ctl-managed: uninstall --docs would reject it as foreign, so
+	// list must not claim it either.
+	s.write(
+		"cursor",
+		JSON.stringify({
+			mcpServers: {
+				"camunda-docs": { command: "wrapper", args: [DOCS_URL] },
+				other: { command: "npx", args: ["-y", "mcp-remote", DOCS_URL] },
+			},
+		}),
+	);
+	const result = await s.run("mcp", "list");
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(parseJson(result), []);
+
+	// A foreign entry squatting on the reserved name blocks install, so
+	// replace it before checking that a genuinely managed entry is listed.
+	s.write(
+		"cursor",
+		JSON.stringify({
+			mcpServers: {
+				other: { command: "npx", args: ["-y", "mcp-remote", DOCS_URL] },
+			},
+		}),
+	);
+	assert.equal((await s.run("mcp", "install", "cursor", "--docs")).status, 0);
+	const items = parseJson(await s.run("mcp", "list"));
+	assert.ok(Array.isArray(items));
+	assert.equal(items.length, 1);
+	const [item] = items;
+	assert.ok(isRecord(item));
+	assert.equal(item.server, "camunda-docs");
+	assert.equal(item.target, "docs");
 });

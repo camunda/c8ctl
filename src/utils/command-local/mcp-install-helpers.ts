@@ -486,14 +486,6 @@ export interface McpListEntry {
 	error?: string;
 }
 
-function isDocsEntry(entry: unknown): boolean {
-	return (
-		isRecord(entry) &&
-		(entry.url === DOCS_URL ||
-			(Array.isArray(entry.args) && entry.args.includes(DOCS_URL)))
-	);
-}
-
 /** The profile an orchestration entry points at; undefined for foreign entries. */
 function orchestrationProfile(entry: unknown): string | undefined {
 	if (!isOrchestrationEntry(entry) || !isRecord(entry)) return undefined;
@@ -524,7 +516,16 @@ export function listMcpEntries({
 	const entries: McpListEntry[] = [];
 	for (const harness of selected) {
 		const path = resolve(harness.path);
-		const content = readOptionalFile(path);
+		let content: string | undefined;
+		try {
+			content = readOptionalFile(path);
+		} catch {
+			// An unreadable config (a directory, a permission error) is
+			// reported in its own row, like malformed JSON — one broken
+			// harness must not hide the healthy ones.
+			entries.push({ harness: harness.id, path, error: "read error" });
+			continue;
+		}
 		if (content === undefined) continue;
 		const errors: ParseError[] = [];
 		const config: unknown = parse(content, errors, {
@@ -558,7 +559,10 @@ export function listMcpEntries({
 					target: "orchestration",
 					profile,
 				});
-			} else if (isDocsEntry(entry)) {
+			} else if (
+				name === "camunda-docs" &&
+				matchesServerConfig(entry, docsEntry(harness))
+			) {
 				entries.push({
 					harness: harness.id,
 					path,
