@@ -83,22 +83,38 @@ function type(io: { input: PassThrough }, ...keys: string[]): void {
  */
 function renderScreen(
 	text: string,
-	{ cols = 80, rows = 100 }: { cols?: number; rows?: number } = {},
+	{
+		cols = 80,
+		rows = 100,
+		state,
+	}: {
+		cols?: number;
+		rows?: number;
+		/** Carries the screen and cursor across calls, so a byte stream
+		 * can be replayed in segments at different widths (a resize). */
+		state?: {
+			screen?: string[];
+			line?: number;
+			col?: number;
+			pendingWrap?: boolean;
+		};
+	} = {},
 ): string[] {
-	const screen: string[] = Array.from({ length: rows }, () => "");
-	let line = 0;
-	let col = 0;
+	const screen: string[] =
+		state?.screen ?? Array.from({ length: rows }, () => "");
+	let line = state?.line ?? 0;
+	let col = state?.col ?? 0;
 	// Delayed autowrap: a character written into the last column leaves
 	// the cursor on that cell; the wrap happens when the next printable
 	// character arrives. erase-to-EOL there erases the last character.
-	let pendingWrap = false;
+	let pendingWrap = state?.pendingWrap ?? false;
 	// ANSI introducer as a string: biome's noControlCharactersInRegex
 	// keeps control characters out of regex literals.
 	const CSI = "\x1b\\[";
-	// Cursor-up, clear-line, clear-to-EOL, cursor-to-col-1, visibility,
-	// styles.
+	// Cursor-up, clear-line, clear-to-EOL, erase-to-end-of-screen,
+	// cursor-to-col-1, visibility, styles.
 	const tokens = text.split(
-		new RegExp(`(${CSI}(?:\\d+A|2K|0K|1G|\\?25[hl]|[0-9;]*m))`),
+		new RegExp(`(${CSI}(?:\\d+A|2K|0K|0J|1G|\\?25[hl]|[0-9;]*m))`),
 	);
 	for (const token of tokens) {
 		const up = new RegExp(`^${CSI}(\\d+)A$`).exec(token);
@@ -109,6 +125,13 @@ function renderScreen(
 		}
 		if (token === "\x1b[2K") {
 			screen[line] = "";
+			pendingWrap = false;
+			continue;
+		}
+		if (token === "\x1b[0J") {
+			// Erase from the cursor position to the end of the screen.
+			screen[line] = screen[line].slice(0, col);
+			for (let r = line + 1; r < rows; r++) screen[r] = "";
 			pendingWrap = false;
 			continue;
 		}
@@ -146,7 +169,42 @@ function renderScreen(
 			if (col === cols) pendingWrap = true;
 		}
 	}
+	if (state) {
+		state.screen = screen;
+		state.line = line;
+		state.col = col;
+		state.pendingWrap = pendingWrap;
+	}
 	return screen;
+}
+
+interface ScreenState {
+	screen?: string[];
+	line?: number;
+	col?: number;
+	pendingWrap?: boolean;
+}
+
+/**
+ * Rewrap every row of the virtual screen at a new width, the way
+ * terminals reflow their content on resize, and move the cursor down
+ * with the content. Assumes the cursor sits below the content (true
+ * for the prompt fixtures here, which always end a render with a
+ * newline).
+ */
+function rewrapScreen(state: ScreenState, cols: number): void {
+	const screen = state.screen ?? [];
+	const wrapRow = (row: string): string[] => {
+		const lines: string[] = [];
+		for (let i = 0; i < row.length; i += cols)
+			lines.push(row.slice(i, i + cols));
+		return lines.length === 0 ? [""] : lines;
+	};
+	const beforeCursor = screen.slice(0, state.line ?? 0);
+	state.line = beforeCursor.reduce((sum, row) => sum + wrapRow(row).length, 0);
+	state.screen = screen.flatMap(wrapRow);
+	state.col = 0;
+	state.pendingWrap = false;
 }
 
 const ENV_KEYS = ["C8CTL_INTERACTIVE", "C8CTL_NON_INTERACTIVE", "CI"] as const;
@@ -264,6 +322,94 @@ describe("select()", () => {
 			assert.ok(io.text().includes(SHOW_CURSOR), "cursor left hidden");
 		});
 	}
+
+	test("a terminal resize mid-prompt re-anchors the menu instead of duplicating rows", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		const done = select({
+			message: "Pick",
+			options: [
+				// Alpha's row wraps to two physical lines at 80 columns but
+				// fits on one at 149.
+				{ label: "Alpha", value: "a", description: "x".repeat(100) },
+				{ label: "Bravo", value: "b" },
+			],
+			io,
+		});
+		// The terminal grows while the menu is open (SIGWINCH updates
+		// `columns`). The next repaint must not trust the stale physical
+		// line count — rows no longer wrap, so the cursor rewind would
+		// overshoot and leave stale fragments behind.
+		io.output.columns = 149;
+		type(io, DOWN, UP, DOWN);
+		// Wait for the initial render plus all three repaints.
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Bravo").length - 1 >= 4) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		const bravoRows = visible.filter((l) => l.includes("Bravo"));
+		assert.strictEqual(
+			bravoRows.length,
+			1,
+			`menu rows duplicated after resize: ${JSON.stringify(visible)}`,
+		);
+		setImmediate(() => io.input.write(ENTER));
+		const result = await done;
+		assert.ok(result.interactive && !result.cancelled);
+		assert.strictEqual(result.value, "b");
+	});
+
+	test("cancel after a terminal resize clears only the prompt", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		// Wraps to two header lines at 80 columns, fits on one at 149.
+		const message = `Pick ${"a very important thing ".repeat(4)}`.trim();
+		const done = select({ message, options: OPTIONS, io });
+		io.output.columns = 149;
+		type(io, DOWN, UP);
+		// Wait for the initial render plus both repaints.
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Bravo").length - 1 >= 3) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		setImmediate(() => io.input.write(ESCAPE));
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		// The prompt is cleared exactly — the output above it survives,
+		// no menu fragment is left behind.
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(visible, ["previous output line"]);
+	});
+
+	test("cancel right after a resize, before any repaint, clears only the prompt", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		const done = select({
+			message: "Pick",
+			options: [
+				// Alpha's row wraps to two physical lines at 80 columns but
+				// fits on one at 149.
+				{ label: "Alpha", value: "a", description: "x".repeat(100) },
+				{ label: "Bravo", value: "b" },
+			],
+			io,
+		});
+		// The terminal grows while the menu is open and no keypress
+		// follows before the cancel: the terminal rewrapped the menu, so
+		// the line counts from render time no longer match the screen.
+		io.output.columns = 149;
+		type(io, ESCAPE);
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(visible, ["previous output line"]);
+	});
 
 	test("non-TTY returns the default with a hint", async () => {
 		const result = await select({
@@ -824,6 +970,204 @@ describe("multiSelect()", () => {
 			assert.deepStrictEqual(result.values, []);
 			assert.match(result.hint, /Blueprint.*needs the local cluster/);
 		});
+	});
+
+	test("a terminal resize mid-prompt re-anchors the menu instead of piling up rows", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		// Wraps to two header lines at 80 columns, fits on one at 149 —
+		// so cancel-after-resize must also re-count the header.
+		const message = `Pick ${"a very important thing ".repeat(4)}`.trim();
+		const done = multiSelect({
+			message,
+			submitLabel: "Start setup",
+			options: [
+				{
+					label: "Local cluster",
+					value: "cluster",
+					checked: true,
+					group: "Essentials",
+					description: "Download and run Camunda 8 Run on this machine",
+				},
+				{
+					label: "Desktop Modeler",
+					value: "modeler",
+					checked: true,
+					group: "Essentials",
+					description:
+						"Install the desktop app to edit BPMN, DMN, and forms visually",
+				},
+				{
+					label: "Example project",
+					value: "blueprint",
+					checked: true,
+					group: "Essentials",
+					description:
+						"Create an example project, then deploy and start it on your local cluster",
+				},
+				{
+					label: "Docs MCP server",
+					value: "docs",
+					group: "AI-assisted development",
+					description:
+						"Search current Camunda 8 docs from your AI assistant (browser sign-in on first use)",
+				},
+			],
+			io,
+		});
+		// The terminal grows from 80 to 149 columns while the menu is
+		// open (SIGWINCH updates `columns`). Three rows no longer wrap,
+		// so a repaint trusting the stale line count rewinds too far and
+		// leaves the menu's tail rows behind — on a full screen this
+		// piles up a copy of the tail on every keypress.
+		io.output.columns = 149;
+		type(io, DOWN, UP, DOWN, UP);
+		// Wait for the initial render plus all four repaints.
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Start setup —").length - 1 >= 5) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		const buttons = visible.filter((l) => l.includes("Start setup —"));
+		assert.strictEqual(
+			buttons.length,
+			1,
+			`menu fragments piled up after resize: ${JSON.stringify(visible)}`,
+		);
+		// The resize recovery repaints from the menu's top — the header
+		// (question and key hint) above it stays intact.
+		assert.ok(
+			visible.some((l) => l.startsWith(`? ${message}`)),
+			`question header lost after resize: ${JSON.stringify(visible)}`,
+		);
+		assert.ok(
+			visible.some((l) => l.includes("↑/↓ move")),
+			`key hint lost after resize: ${JSON.stringify(visible)}`,
+		);
+		// The resize recovery erased everything below the fresh anchor, so
+		// no stray "clear an empty line" writes may follow the repaint —
+		// each would append a blank line and scroll the prompt upward.
+		assert.ok(
+			!io.text().includes("\x1b[2K\n"),
+			"resize repaint left stray line erases that scroll the screen",
+		);
+		setImmediate(() => io.input.write(ESCAPE));
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		// Cancel after the resize clears exactly the prompt — the output
+		// that was above it survives.
+		const after = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(after, ["previous output line"]);
+	});
+
+	test("a resize on the same keypress as a state change rewinds the previous render", async () => {
+		const io = fakeTTY();
+		io.output.columns = 149;
+		io.output.write("previous output line\n");
+		// 90 chars: the blocked row and its footer fit on one line at 149
+		// columns but wrap to two at 100.
+		const reason = "r".repeat(90);
+		const done = multiSelect({
+			message: "Pick",
+			options: [
+				{ label: "Alpha", value: "alpha", checked: true },
+				{
+					label: "Bravo",
+					value: "bravo",
+					checked: true,
+					requires: [{ value: "alpha", reason }],
+				},
+			],
+			io,
+		});
+		// At 149 columns: uncheck Alpha (Bravo becomes blocked), then
+		// focus Bravo so the footer shows the long reason.
+		type(io, " ", DOWN);
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Submit —").length - 1 >= 3) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		// Replay what the terminal shows, then shrink it to 100 columns:
+		// the terminal reflows every row and the cursor follows.
+		const term: ScreenState = {};
+		renderScreen(io.text(), { cols: 149, state: term });
+		const splitAt = io.text().length;
+		rewrapScreen(term, 100);
+		io.output.columns = 100;
+		// The same keypress that first renders at the new width also
+		// changes the state: moving off the blocked row hides the footer.
+		// The rewind must measure the PREVIOUS render (footer visible,
+		// one line taller after reflow), not the state being painted.
+		type(io, UP);
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Submit —").length - 1 >= 4) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		const during = renderScreen(io.text().slice(splitAt), {
+			cols: 100,
+			state: term,
+		}).filter((l) => l !== "");
+		assert.strictEqual(
+			during.filter((l) => l.includes("Alpha")).length,
+			1,
+			`stale row survived the resize: ${JSON.stringify(during)}`,
+		);
+		assert.strictEqual(
+			during.filter((l) => l.includes("Submit —")).length,
+			1,
+			`menu fragments piled up after resize: ${JSON.stringify(during)}`,
+		);
+		const splitAt2 = io.text().length;
+		setImmediate(() => io.input.write(ESCAPE));
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		const after = renderScreen(io.text().slice(splitAt2), {
+			cols: 100,
+			state: term,
+		}).filter((l) => l !== "");
+		assert.deepStrictEqual(after, ["previous output line"]);
+	});
+
+	test("cancel right after a resize, before any repaint, clears only the prompt", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		const done = multiSelect({
+			message: "Pick",
+			submitLabel: "Start setup",
+			options: [
+				{
+					label: "Desktop Modeler",
+					value: "modeler",
+					checked: true,
+					group: "Essentials",
+					description:
+						"Install the desktop app to edit BPMN, DMN, and forms visually",
+				},
+				{
+					label: "Docs MCP server",
+					value: "docs",
+					group: "AI-assisted development",
+					description:
+						"Search current Camunda 8 docs from your AI assistant (browser sign-in on first use)",
+				},
+			],
+			io,
+		});
+		// The terminal grows while the menu is open and no keypress
+		// follows before the cancel: the terminal rewrapped the menu, so
+		// the line counts from render time no longer match the screen.
+		io.output.columns = 149;
+		type(io, ESCAPE);
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(visible, ["previous output line"]);
 	});
 
 	describe("groups", () => {
