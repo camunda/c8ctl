@@ -1479,22 +1479,25 @@ describe("multiSelect()", () => {
 		});
 
 		test("a non-emoji ZWJ cluster counts as its base characters", async () => {
-			const io = fakeTTY();
-			type(io, TAB, ENTER);
-			const submitLabel = "e\u200d"; // e + bare joiner: one cell, not two
-			await multiSelect({
-				message: "Pick",
-				options: CHECKED_OPTIONS,
-				submitLabel,
-				io,
-			});
-			const plain = stripVTControlCharacters(io.text());
-			const inner = `  ${submitLabel} — 2 of 3 selected ➜  `;
-			const border = "─".repeat(25);
-			assert.ok(
-				plain.includes(`╭${border}╮\n  │${inner}│\n  ╰${border}╯`),
-				`box borders are misaligned for a non-emoji ZWJ label:\n${plain}`,
-			);
+			// Bare joiners on letters and on keycap bases (digits, #, *):
+			// one cell for the base, zero for the joiner — never two.
+			for (const submitLabel of ["e\u200d", "1\u200d", "#\u200d", "*\u200d"]) {
+				const io = fakeTTY();
+				type(io, TAB, ENTER);
+				await multiSelect({
+					message: "Pick",
+					options: CHECKED_OPTIONS,
+					submitLabel,
+					io,
+				});
+				const plain = stripVTControlCharacters(io.text());
+				const inner = `  ${submitLabel} — 2 of 3 selected ➜  `;
+				const border = "─".repeat(25);
+				assert.ok(
+					plain.includes(`╭${border}╮\n  │${inner}│\n  ╰${border}╯`),
+					`box borders are misaligned for a non-emoji ZWJ label:\n${plain}`,
+				);
+			}
 		});
 
 		test("a narrow terminal truncates the box instead of wrapping it", async () => {
