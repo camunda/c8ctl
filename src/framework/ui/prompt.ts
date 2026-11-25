@@ -543,9 +543,11 @@ function displayWidth(text: string): number {
 function graphemeWidth(cluster: string): number {
 	// ZWJ-joined emoji (👩‍💻), skin-tone-modified emoji (👍🏽), flag pairs
 	// (🇬🇧) and VS16 emoji forms (❤️, keycaps) render as a single
-	// two-cell glyph.
+	// two-cell glyph. The ZWJ and VS16 shortcuts require an
+	// emoji in the cluster: a bare ZWJ/VS16 in ordinary text (e\u200d)
+	// stays on the zero-width format-control path below.
 	if (
-		cluster.includes("\u200d") ||
+		(cluster.includes("\u200d") && /\p{Emoji}/u.test(cluster)) ||
 		/\p{Emoji_Modifier}/u.test(cluster) ||
 		/\p{Regional_Indicator}/u.test(cluster) ||
 		(cluster.includes("\ufe0f") && /\p{Emoji}/u.test(cluster))
