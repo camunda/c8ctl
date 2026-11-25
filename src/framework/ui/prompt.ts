@@ -289,7 +289,8 @@ export async function select<T>(
 			// physical lines. CURSOR_UP must move by physical lines, not
 			// logical option count, or previous renders bleed through.
 			let cols = out.columns || 80;
-			const headerLines = Math.max(1, Math.ceil((2 + message.length) / cols));
+			const headerLineCount = () =>
+				Math.max(1, Math.ceil((2 + message.length) / cols));
 			const physicalLineCount = () =>
 				options.reduce((sum, opt, i) => {
 					// Visible width: "  ❯ " (4 chars) + "N. " + label + optional " " + description
@@ -306,17 +307,19 @@ export async function select<T>(
 			// Render the menu
 			function render(firstRender: boolean) {
 				if (!firstRender) {
-					// Move cursor back up to overwrite previous render
-					out.write(CURSOR_UP(renderedLines));
 					const width = out.columns || 80;
 					if (width !== cols) {
-						// The terminal was resized while the menu was open:
-						// rewrapping changed the previous render's physical line
-						// count, so the rewind above landed at a stale anchor.
-						// Wipe everything below and repaint from a fresh anchor
-						// at the new width.
+						// The terminal was resized while the menu was open and
+						// rewrapped the previous render: its on-screen height is
+						// now the line count at the NEW width. Rewind by that to
+						// the menu's top, wipe everything below, and repaint from
+						// the fresh anchor.
 						cols = width;
+						out.write(CURSOR_UP(physicalLineCount()));
 						out.write(ERASE_TO_END_OF_SCREEN);
+					} else {
+						// Move cursor back up to overwrite previous render
+						out.write(CURSOR_UP(renderedLines));
 					}
 				}
 				for (let i = 0; i < options.length; i++) {
@@ -393,16 +396,20 @@ export async function select<T>(
 					choose(cursor);
 				} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 					cleanup();
-					// Clear the menu and header
+					// Clear the menu and header. Both counts are recomputed
+					// at the current width — after a resize the prompt's
+					// on-screen height no longer matches the count from
+					// when it was first rendered.
+					const header = headerLineCount();
 					out.write(CURSOR_UP(renderedLines));
 					for (let i = 0; i < renderedLines; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
-					out.write(CURSOR_UP(renderedLines + headerLines));
-					for (let i = 0; i < headerLines; i++) {
+					out.write(CURSOR_UP(renderedLines + header));
+					for (let i = 0; i < header; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
-					out.write(CURSOR_UP(headerLines));
+					out.write(CURSOR_UP(header));
 					// Ctrl+C: re-raise so the process exits naturally
 					if (key.ctrl && key.name === "c") {
 						process.kill(process.pid, "SIGINT");
@@ -660,7 +667,7 @@ export async function multiSelect<T>(
 		// open changes how rows wrap, and trusting the stale width makes
 		// the rewind miss the previous render's anchor.
 		let cols = out.columns || 80;
-		const headerLines =
+		const headerLineCount = () =>
 			Math.max(1, Math.ceil((2 + message.length) / cols)) +
 			Math.max(1, Math.ceil((2 + keyHint.length) / cols));
 		const rowVisibleLength = (row: MultiSelectRow): number => {
@@ -732,16 +739,18 @@ export async function multiSelect<T>(
 
 		function render(firstRender: boolean) {
 			if (!firstRender) {
-				out.write(CURSOR_UP(lastRenderedLines));
 				const width = out.columns || 80;
 				if (width !== cols) {
-					// The terminal was resized while the menu was open:
-					// rewrapping changed the previous render's physical line
-					// count, so the rewind above landed at a stale anchor.
-					// Wipe everything below and repaint from a fresh anchor
-					// at the new width.
+					// The terminal was resized while the menu was open and
+					// rewrapped the previous render: its on-screen height is
+					// now the line count at the NEW width. Rewind by that to
+					// the menu's top, wipe everything below, and repaint from
+					// the fresh anchor.
 					cols = width;
+					out.write(CURSOR_UP(physicalLineCount()));
 					out.write(ERASE_TO_END_OF_SCREEN);
+				} else {
+					out.write(CURSOR_UP(lastRenderedLines));
 				}
 			}
 			for (const row of rows) {
@@ -882,11 +891,15 @@ export async function multiSelect<T>(
 			} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 				cleanup();
 				clearMenu();
-				out.write(CURSOR_UP(headerLines));
-				for (let i = 0; i < headerLines; i++) {
+				// The header count is recomputed at the current width —
+				// after a resize it no longer matches the count from when
+				// the prompt was first rendered.
+				const header = headerLineCount();
+				out.write(CURSOR_UP(header));
+				for (let i = 0; i < header; i++) {
 					out.write(`${CLEAR_LINE}\n`);
 				}
-				out.write(CURSOR_UP(headerLines));
+				out.write(CURSOR_UP(header));
 				// Ctrl+C: re-raise so the process exits naturally
 				if (key.ctrl && key.name === "c") {
 					process.kill(process.pid, "SIGINT");

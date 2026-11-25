@@ -310,6 +310,30 @@ describe("select()", () => {
 		assert.strictEqual(result.value, "b");
 	});
 
+	test("cancel after a terminal resize clears only the prompt", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		// Wraps to two header lines at 80 columns, fits on one at 149.
+		const message = `Pick ${"a very important thing ".repeat(4)}`.trim();
+		const done = select({ message, options: OPTIONS, io });
+		io.output.columns = 149;
+		type(io, DOWN, UP);
+		// Wait for the initial render plus both repaints.
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Bravo").length - 1 >= 3) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		setImmediate(() => io.input.write(ESCAPE));
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		// The prompt is cleared exactly — the output above it survives,
+		// no menu fragment is left behind.
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(visible, ["previous output line"]);
+	});
+
 	test("non-TTY returns the default with a hint", async () => {
 		const result = await select({
 			message: "Pick",
@@ -873,8 +897,12 @@ describe("multiSelect()", () => {
 
 	test("a terminal resize mid-prompt re-anchors the menu instead of piling up rows", async () => {
 		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		// Wraps to two header lines at 80 columns, fits on one at 149 —
+		// so cancel-after-resize must also re-count the header.
+		const message = `Pick ${"a very important thing ".repeat(4)}`.trim();
 		const done = multiSelect({
-			message: "Pick",
+			message,
 			submitLabel: "Start setup",
 			options: [
 				{
@@ -931,9 +959,25 @@ describe("multiSelect()", () => {
 			1,
 			`menu fragments piled up after resize: ${JSON.stringify(visible)}`,
 		);
+		// The resize recovery repaints from the menu's top — the header
+		// (question and key hint) above it stays intact.
+		assert.ok(
+			visible.some((l) => l.startsWith(`? ${message}`)),
+			`question header lost after resize: ${JSON.stringify(visible)}`,
+		);
+		assert.ok(
+			visible.some((l) => l.includes("↑/↓ move")),
+			`key hint lost after resize: ${JSON.stringify(visible)}`,
+		);
 		setImmediate(() => io.input.write(ESCAPE));
 		const result = await done;
 		assert.ok(result.interactive && result.cancelled);
+		// Cancel after the resize clears exactly the prompt — the output
+		// that was above it survives.
+		const after = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(after, ["previous output line"]);
 	});
 
 	describe("groups", () => {
