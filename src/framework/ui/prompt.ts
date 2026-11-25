@@ -289,9 +289,9 @@ export async function select<T>(
 			// physical lines. CURSOR_UP must move by physical lines, not
 			// logical option count, or previous renders bleed through.
 			let cols = out.columns || 80;
-			const headerLineCount = () =>
-				Math.max(1, Math.ceil((2 + message.length) / cols));
-			const physicalLineCount = () =>
+			const headerLineCount = (width: number) =>
+				Math.max(1, Math.ceil((2 + message.length) / width));
+			const physicalLineCount = (width: number) =>
 				options.reduce((sum, opt, i) => {
 					// Visible width: "  ❯ " (4 chars) + "N. " + label + optional " " + description
 					const visible =
@@ -299,8 +299,12 @@ export async function select<T>(
 						numberPrefix(i).length +
 						opt.label.length +
 						(opt.description ? 1 + opt.description.length : 0);
-					return sum + Math.max(1, Math.ceil(visible / cols));
+					return sum + Math.max(1, Math.ceil(visible / width));
 				}, 0);
+			/** Physical lines the last render occupies on screen right now,
+			 * recomputed at the live width: after a resize with no repaint
+			 * since, the terminal has rewrapped the menu. */
+			const menuLinesOnScreen = () => physicalLineCount(out.columns || 80);
 			// Cursor rewinds must traverse the *previous* render's line count.
 			let renderedLines = 0;
 
@@ -315,7 +319,7 @@ export async function select<T>(
 						// the menu's top, wipe everything below, and repaint from
 						// the fresh anchor.
 						cols = width;
-						out.write(CURSOR_UP(physicalLineCount()));
+						out.write(CURSOR_UP(physicalLineCount(width)));
 						out.write(ERASE_TO_END_OF_SCREEN);
 					} else {
 						// Move cursor back up to overwrite previous render
@@ -335,7 +339,7 @@ export async function select<T>(
 						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${number}${label}${desc}\n`,
 					);
 				}
-				renderedLines = physicalLineCount();
+				renderedLines = physicalLineCount(cols);
 			}
 
 			// Print the message header
@@ -354,11 +358,12 @@ export async function select<T>(
 				cleanup();
 				const chosen = options[index];
 				// Replace the menu with the final selection line
-				out.write(CURSOR_UP(renderedLines));
-				for (let i = 0; i < renderedLines; i++) {
+				const menuLines = menuLinesOnScreen();
+				out.write(CURSOR_UP(menuLines));
+				for (let i = 0; i < menuLines; i++) {
 					out.write(`${CLEAR_LINE}\n`);
 				}
-				out.write(CURSOR_UP(renderedLines));
+				out.write(CURSOR_UP(menuLines));
 				out.write(
 					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${CYAN}${chosen.label}${RESET}`,
 				);
@@ -396,16 +401,17 @@ export async function select<T>(
 					choose(cursor);
 				} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 					cleanup();
-					// Clear the menu and header. Both counts are recomputed
-					// at the current width — after a resize the prompt's
-					// on-screen height no longer matches the count from
-					// when it was first rendered.
-					const header = headerLineCount();
-					out.write(CURSOR_UP(renderedLines));
-					for (let i = 0; i < renderedLines; i++) {
+					// Clear the menu and header. Both counts are measured at the
+					// live width — after a resize the terminal has rewrapped the
+					// prompt, so the counts from render time no longer match
+					// what is on screen.
+					const menuLines = menuLinesOnScreen();
+					const header = headerLineCount(out.columns || 80);
+					out.write(CURSOR_UP(menuLines));
+					for (let i = 0; i < menuLines; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
-					out.write(CURSOR_UP(renderedLines + header));
+					out.write(CURSOR_UP(menuLines + header));
 					for (let i = 0; i < header; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
@@ -667,9 +673,9 @@ export async function multiSelect<T>(
 		// open changes how rows wrap, and trusting the stale width makes
 		// the rewind miss the previous render's anchor.
 		let cols = out.columns || 80;
-		const headerLineCount = () =>
-			Math.max(1, Math.ceil((2 + message.length) / cols)) +
-			Math.max(1, Math.ceil((2 + keyHint.length) / cols));
+		const headerLineCount = (width: number) =>
+			Math.max(1, Math.ceil((2 + message.length) / width)) +
+			Math.max(1, Math.ceil((2 + keyHint.length) / width));
 		const rowVisibleLength = (row: MultiSelectRow): number => {
 			if (row.kind === "header") return 2 + row.label.length;
 			const opt = options[row.index];
@@ -730,6 +736,17 @@ export async function multiSelect<T>(
 		 * the new width to find the previous render's on-screen height —
 		 * the current state may already differ from what was painted. */
 		let lastPaintedLengths: number[] = [];
+
+		/** Physical lines the previous render occupies on screen right
+		 * now, at the live width: after a resize with no repaint since,
+		 * the terminal has rewrapped the menu. */
+		const menuLinesOnScreen = (): number => {
+			const width = out.columns || 80;
+			return lastPaintedLengths.reduce(
+				(sum, len) => sum + Math.max(1, Math.ceil(len / width)),
+				0,
+			);
+		};
 
 		/**
 		 * Erase the stale tail of a wrapped row whose new content is
@@ -837,11 +854,14 @@ export async function multiSelect<T>(
 		}
 
 		function clearMenu() {
-			out.write(CURSOR_UP(lastRenderedLines));
-			for (let i = 0; i < lastRenderedLines; i++) {
+			// Measured at the live width: a resize since the last repaint
+			// means the terminal rewrapped the menu.
+			const lines = menuLinesOnScreen();
+			out.write(CURSOR_UP(lines));
+			for (let i = 0; i < lines; i++) {
 				out.write(`${CLEAR_LINE}\n`);
 			}
-			out.write(CURSOR_UP(lastRenderedLines));
+			out.write(CURSOR_UP(lines));
 		}
 
 		// Print the message header and key hint
@@ -908,10 +928,9 @@ export async function multiSelect<T>(
 			} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 				cleanup();
 				clearMenu();
-				// The header count is recomputed at the current width —
-				// after a resize it no longer matches the count from when
-				// the prompt was first rendered.
-				const header = headerLineCount();
+				// The header count is measured at the live width too — the
+				// terminal rewrapped it on a resize.
+				const header = headerLineCount(out.columns || 80);
 				out.write(CURSOR_UP(header));
 				for (let i = 0; i < header; i++) {
 					out.write(`${CLEAR_LINE}\n`);

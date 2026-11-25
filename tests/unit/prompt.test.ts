@@ -385,6 +385,32 @@ describe("select()", () => {
 		assert.deepStrictEqual(visible, ["previous output line"]);
 	});
 
+	test("cancel right after a resize, before any repaint, clears only the prompt", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		const done = select({
+			message: "Pick",
+			options: [
+				// Alpha's row wraps to two physical lines at 80 columns but
+				// fits on one at 149.
+				{ label: "Alpha", value: "a", description: "x".repeat(100) },
+				{ label: "Bravo", value: "b" },
+			],
+			io,
+		});
+		// The terminal grows while the menu is open and no keypress
+		// follows before the cancel: the terminal rewrapped the menu, so
+		// the line counts from render time no longer match the screen.
+		io.output.columns = 149;
+		type(io, ESCAPE);
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(visible, ["previous output line"]);
+	});
+
 	test("non-TTY returns the default with a hint", async () => {
 		const result = await select({
 			message: "Pick",
@@ -1097,6 +1123,44 @@ describe("multiSelect()", () => {
 			state: term,
 		}).filter((l) => l !== "");
 		assert.deepStrictEqual(after, ["previous output line"]);
+	});
+
+	test("cancel right after a resize, before any repaint, clears only the prompt", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		io.output.write("previous output line\n");
+		const done = multiSelect({
+			message: "Pick",
+			submitLabel: "Start setup",
+			options: [
+				{
+					label: "Desktop Modeler",
+					value: "modeler",
+					checked: true,
+					group: "Essentials",
+					description:
+						"Install the desktop app to edit BPMN, DMN, and forms visually",
+				},
+				{
+					label: "Docs MCP server",
+					value: "docs",
+					group: "AI-assisted development",
+					description:
+						"Search current Camunda 8 docs from your AI assistant (browser sign-in on first use)",
+				},
+			],
+			io,
+		});
+		// The terminal grows while the menu is open and no keypress
+		// follows before the cancel: the terminal rewrapped the menu, so
+		// the line counts from render time no longer match the screen.
+		io.output.columns = 149;
+		type(io, ESCAPE);
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		assert.deepStrictEqual(visible, ["previous output line"]);
 	});
 
 	describe("groups", () => {
