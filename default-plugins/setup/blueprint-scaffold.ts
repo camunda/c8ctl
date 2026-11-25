@@ -480,12 +480,17 @@ export function planSetupBlueprintRemovals({
 	onError?: (directory: string, error: unknown) => void;
 } = {}): SetupBlueprintRemoval[] {
 	const root = resolve(cwd);
-	const directories = [
-		root,
-		...readdirSync(root, { withFileTypes: true })
-			.filter((entry) => entry.isDirectory())
-			.map((entry) => resolve(root, entry.name)),
-	];
+	const directories = [root];
+	try {
+		directories.push(
+			...readdirSync(root, { withFileTypes: true })
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => resolve(root, entry.name)),
+		);
+	} catch (error) {
+		if (!onError) throw error;
+		onError(root, error);
+	}
 	const seen = new Set<string>();
 	const removals: SetupBlueprintRemoval[] = [];
 

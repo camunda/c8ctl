@@ -1379,6 +1379,42 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("continues cleanup when blueprint directory enumeration fails", async () => {
+		const stub = stubbedExecution();
+		try {
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+
+			const blueprintDirectory = join(stub.cwd, "rocket-launch");
+			const removal = await c8WithOptions(
+				{
+					...stub.options,
+					cwd: blueprintDirectory,
+					env: {
+						...stub.options.env,
+						C8CTL_SETUP_STUB_FAIL: "list-blueprint-directories",
+					},
+				},
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /stubbed blueprint directory listing failure/);
+			assert.match(output, /Removed MCP server "camunda"/);
+			assert.match(output, /Removed Rocket Launch blueprint files/);
+			assert.ok(!existsSync(join(blueprintDirectory, "rocket-launch.bpmn")));
+			assert.ok(!existsSync(join(blueprintDirectory, ".c8ctl-blueprint.json")));
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("reports blueprint inspection failures when no artifacts are removable", async () => {
 		const stub = stubbedExecution();
 		try {

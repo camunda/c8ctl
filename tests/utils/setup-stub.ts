@@ -45,7 +45,8 @@
  *                                   "purge-cluster", "delete-cluster",
  *                                   "probe-cluster-status",
  *                                   "install-skills", "list-skills",
- *                                   "remove-modeler", "probe-modeler").
+ *                                   "remove-modeler", "probe-modeler",
+ *                                   "list-blueprint-directories").
  *   C8RUN_CACHE_DIR=dir           — the fake `cluster purge`/`delete`
  *                                   children mirror the real plugin's
  *                                   effects, but only inside this dir.
@@ -93,6 +94,27 @@ const originalExistsSync = fs.existsSync;
 fs.existsSync = (path: fs.PathLike): boolean =>
 	/Camunda Modeler\.app$|Camunda Modeler\.exe$/.test(String(path)) ||
 	originalExistsSync(path);
+
+const originalReaddirSync = fs.readdirSync;
+Object.defineProperty(fs, "readdirSync", {
+	value: (...args: unknown[]) => {
+		const options = args[1];
+		if (
+			process.env.C8CTL_SETUP_STUB_FAIL === "list-blueprint-directories" &&
+			String(args[0]) === process.cwd() &&
+			typeof options === "object" &&
+			options !== null &&
+			"withFileTypes" in options &&
+			options.withFileTypes === true
+		) {
+			throw Object.assign(
+				new Error("stubbed blueprint directory listing failure"),
+				{ code: "EACCES" },
+			);
+		}
+		return Reflect.apply(originalReaddirSync, fs, args);
+	},
+});
 
 syncBuiltinESMExports();
 
