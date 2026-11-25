@@ -1339,11 +1339,29 @@ describe("multiSelect()", () => {
 			assert.deepStrictEqual(result, { interactive: true, cancelled: true });
 		});
 
-		test("a divider separates the list from the submit button", async () => {
+		test("the submit button is drawn as a bordered box", async () => {
 			const io = fakeTTY();
 			type(io, TAB, ENTER);
 			await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
-			assert.match(stripVTControlCharacters(io.text()), /─{10,}/);
+			const plain = stripVTControlCharacters(io.text());
+			assert.match(
+				plain,
+				/╭─+╮\n {2}│ {2}Submit — 2 of 3 selected ➜ {2}│\n {2}╰─+╯/,
+			);
+		});
+
+		test("the unfocused submit button border is solid white, not dimmed", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ENTER);
+			await multiSelect({ message: "Pick", options: CHECKED_OPTIONS, io });
+			assert.ok(
+				!io.text().includes("\x1b[2m╭"),
+				"unfocused button border is dimmed",
+			);
+			assert.match(
+				stripVTControlCharacters(io.text()),
+				/╭─+╮\n {2}│ {2}Submit — 2 of 3 selected ➜ {2}│\n {2}╰─+╯/,
+			);
 		});
 
 		test("the button shows the selection count", async () => {
@@ -1356,7 +1374,7 @@ describe("multiSelect()", () => {
 			);
 		});
 
-		test("the focused submit button is rendered in inverse video", async () => {
+		test("the focused submit button inverts its content, not its border", async () => {
 			const io = fakeTTY();
 			const done = multiSelect({
 				message: "Pick",
@@ -1366,14 +1384,20 @@ describe("multiSelect()", () => {
 			type(io, TAB);
 			for (
 				let i = 0;
-				i < 1000 && !io.text().includes("\x1b[7m[ Submit"); // focused button
+				i < 1000 && !io.text().includes("│\x1b[7m"); // focused content
 				i++
 			) {
 				await new Promise((resolveSpin) => setImmediate(resolveSpin));
 			}
 			assert.ok(
-				io.text().includes("\x1b[7m[ Submit — 2 of 3 selected ]\x1b[0m"),
-				"focused button is not inverse",
+				io
+					.text()
+					.includes("│\x1b[7m\x1b[1m  Submit — 2 of 3 selected ➜  \x1b[0m│"),
+				"focused button content is not inverse and bold",
+			);
+			assert.ok(
+				!io.text().includes("\x1b[7m╭"),
+				"focused button border is inverse",
 			);
 			setImmediate(() => io.input.write(ENTER));
 			await done;
@@ -1391,6 +1415,88 @@ describe("multiSelect()", () => {
 			assert.match(
 				stripVTControlCharacters(io.text()),
 				/Start setup — 2 of 3 selected/,
+			);
+		});
+
+		test("a non-ASCII submitLabel keeps the box borders aligned", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				submitLabel: "确认",
+				io,
+			});
+			const plain = stripVTControlCharacters(io.text());
+			// 确认 occupies four terminal cells, so the borders are two
+			// cells wider than the label row's code-unit length.
+			const inner = "  确认 — 2 of 3 selected ➜  ";
+			const border = "─".repeat(28);
+			assert.ok(
+				plain.includes(`╭${border}╮\n  │${inner}│\n  ╰${border}╯`),
+				`box borders are misaligned for a wide label:\n${plain}`,
+			);
+		});
+		test("an emoji submitLabel keeps the box borders aligned", async () => {
+			const io = fakeTTY();
+			type(io, TAB, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				submitLabel: "🚀",
+				io,
+			});
+			const plain = stripVTControlCharacters(io.text());
+			// 🚀 has default emoji presentation: two terminal cells.
+			const inner = "  🚀 — 2 of 3 selected ➜  ";
+			const border = "─".repeat(26);
+			assert.ok(
+				plain.includes(`╭${border}╮\n  │${inner}│\n  ╰${border}╯`),
+				`box borders are misaligned for an emoji label:\n${plain}`,
+			);
+		});
+
+		test("composed-emoji submitLabels keep the box borders aligned", async () => {
+			// ZWJ join, skin-tone modifier, flag pair, VS16 form — each
+			// renders as a single two-cell glyph.
+			for (const submitLabel of ["👩‍💻", "👍🏽", "🇬🇧", "❤️"]) {
+				const io = fakeTTY();
+				type(io, TAB, ENTER);
+				await multiSelect({
+					message: "Pick",
+					options: CHECKED_OPTIONS,
+					submitLabel,
+					io,
+				});
+				const plain = stripVTControlCharacters(io.text());
+				const inner = `  ${submitLabel} — 2 of 3 selected ➜  `;
+				const border = "─".repeat(26);
+				assert.ok(
+					plain.includes(`╭${border}╮\n  │${inner}│\n  ╰${border}╯`),
+					`box borders are misaligned for ${submitLabel}:\n${plain}`,
+				);
+			}
+		});
+
+		test("a narrow terminal truncates the box instead of wrapping it", async () => {
+			const io = fakeTTY();
+			io.output.columns = 26;
+			type(io, TAB, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				// 20 ASCII + 确认 (4 cells): far wider than the terminal —
+				// the wrap-boundary case that used to miscount rows.
+				submitLabel: `${"A".repeat(20)}确认`,
+				io,
+			});
+			const plain = stripVTControlCharacters(io.text());
+			// 26 columns − indent (2) − borders (2) − slack (2) = 20-cell
+			// inner, cut at a grapheme boundary with an ellipsis.
+			const border = "─".repeat(20);
+			assert.ok(
+				plain.includes(`╭${border}╮\n  │  AAAAAAAAAAAAAAAAA…│\n  ╰${border}╯`),
+				`box wrapped or borders misaligned at 26 columns:\n${plain}`,
 			);
 		});
 	});
