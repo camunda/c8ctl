@@ -760,6 +760,7 @@ export async function multiSelect<T>(
 			visibleLength % cols === 0 ? "" : CLEAR_TO_EOL;
 
 		function render(firstRender: boolean) {
+			let resized = false;
 			if (!firstRender) {
 				const width = out.columns || 80;
 				if (width !== cols) {
@@ -776,6 +777,7 @@ export async function multiSelect<T>(
 					);
 					out.write(CURSOR_UP(rewind));
 					out.write(ERASE_TO_END_OF_SCREEN);
+					resized = true;
 				} else {
 					out.write(CURSOR_UP(lastRenderedLines));
 				}
@@ -833,13 +835,19 @@ export async function multiSelect<T>(
 			// A repaint can be shorter than the previous render (a reason
 			// or the footer collapsed to fewer wrapped lines). Erase the
 			// leftover lines — otherwise their stale text survives below
-			// the menu, out of reach of the final clearMenu().
+			// the menu, out of reach of the final clearMenu(). Skip this
+			// after a resize recovery: the erase-to-end-of-screen already
+			// cleared everything below the fresh anchor, and each erased
+			// "leftover" would be a stray newline scrolling the freshly
+			// painted prompt upward.
 			const painted = physicalLineCount();
-			for (let i = painted; i < lastRenderedLines; i++) {
-				out.write(`${CLEAR_LINE}\n`);
-			}
-			if (painted < lastRenderedLines) {
-				out.write(CURSOR_UP(lastRenderedLines - painted));
+			if (!resized) {
+				for (let i = painted; i < lastRenderedLines; i++) {
+					out.write(`${CLEAR_LINE}\n`);
+				}
+				if (painted < lastRenderedLines) {
+					out.write(CURSOR_UP(lastRenderedLines - painted));
+				}
 			}
 			lastRenderedLines = painted;
 			lastPaintedLengths = paintedLengths;

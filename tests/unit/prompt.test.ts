@@ -1046,6 +1046,13 @@ describe("multiSelect()", () => {
 			visible.some((l) => l.includes("↑/↓ move")),
 			`key hint lost after resize: ${JSON.stringify(visible)}`,
 		);
+		// The resize recovery erased everything below the fresh anchor, so
+		// no stray "clear an empty line" writes may follow the repaint —
+		// each would append a blank line and scroll the prompt upward.
+		assert.ok(
+			!io.text().includes("\x1b[2K\n"),
+			"resize repaint left stray line erases that scroll the screen",
+		);
 		setImmediate(() => io.input.write(ESCAPE));
 		const result = await done;
 		assert.ok(result.interactive && result.cancelled);
