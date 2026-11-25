@@ -342,6 +342,28 @@ if (process.argv[2] === 'start') {
 		assert.equal((await cluster("DOWN", "stop")).status, 0);
 	});
 
+	test("status uses the recorded port when process tracking is lost", async () => {
+		await launcher(0);
+		assert.equal(
+			(await cluster("UP", "start", "8.10.1", "--port=9091")).status,
+			0,
+		);
+		rmSync(join(cacheDir, "cluster.active"));
+		rmSync(join(cacheDir, "cluster.pids"));
+		for (const name of ["camunda", "connectors", "connectors-sales"]) {
+			rmSync(join(installDir, `${name}.process`));
+		}
+
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
+		const json = parseJson(await cluster("UP", "status", "--json"));
+		assert.equal(
+			asRecord(json.urls, "status urls").operate,
+			"http://localhost:9091/operate",
+		);
+	});
+
 	test("a failed stop keeps the recorded port while pidfile-only survivors remain", async () => {
 		await launcher(0);
 		assert.equal(

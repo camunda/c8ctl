@@ -197,6 +197,12 @@ exit 7
 		assert.match(result.stderr, /SERVER_PORT:\n/);
 	});
 
+	test("removes the recorded port when a failed start leaves no survivors", async () => {
+		const result = await cluster({}, "start", "8.10.1", "--port=9091");
+		assert.equal(result.status, 7);
+		assert.equal(existsSync(join(cacheDir, "cluster.port")), false);
+	});
+
 	test("explains when the cached c8run does not support --port", async () => {
 		const result = await cluster(
 			{},

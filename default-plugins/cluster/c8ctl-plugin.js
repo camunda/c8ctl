@@ -1913,6 +1913,7 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
 
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
+  const portFile = join(config.cacheDir, PORT_MARKER_FILE);
 
   if (existsSync(markerFile)) {
     // Check whether actual cluster processes are still alive.
@@ -1935,7 +1936,7 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     logger.warn('Found stale cluster marker (no running processes detected). Cleaning up.');
     if (existsSync(markerFile)) rmSync(markerFile);
     if (existsSync(versionFile)) rmSync(versionFile);
-    rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
+    rmSync(portFile, { force: true });
   } else if (hasRunningClusterPidfiles(config.cacheDir)) {
     // No active marker, but a live process is still tracked — typically an
     // orphan recorded only in the durable cache-root PID record after its
@@ -1962,8 +1963,8 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
   // below ever running — and `cluster status` reads the recorded port whenever
   // tracked processes survive. Without this early write, recovery status would
   // advertise the default port for a cluster actually serving on the custom
-  // one. The later writes re-persist the same value, so this is idempotent.
-  writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
+  // one.
+  writeFileSync(portFile, String(port));
 
   // c8run passes its environment to every Java process it launches. An
   // inherited SERVER_PORT would therefore move the bundled Connectors runtime
@@ -1980,6 +1981,9 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     // spawn() reports this failure via an async 'error' event; without a
     // listener it would crash the process while the hints are flushed below.
     proc.on('error', (err) => logger.error(`Failed to spawn c8run: ${err.message}`));
+    if (!hasRunningClusterPidfiles(config.cacheDir)) {
+      rmSync(portFile, { force: true });
+    }
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
     logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
@@ -2009,16 +2013,23 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
   let exitCode = null;
   let exitSignal = null;
 
-  await new Promise((resolve, reject) => {
-    proc.on('error', (err) => {
-      reject(new Error(`Failed to spawn c8run: ${err.message}`));
+  try {
+    await new Promise((resolve, reject) => {
+      proc.on('error', (err) => {
+        reject(new Error(`Failed to spawn c8run: ${err.message}`));
+      });
+      proc.on('close', (code, signal) => {
+        exitCode = code;
+        exitSignal = signal;
+        resolve();
+      });
     });
-    proc.on('close', (code, signal) => {
-      exitCode = code;
-      exitSignal = signal;
-      resolve();
-    });
-  });
+  } catch (error) {
+    if (!hasRunningClusterPidfiles(config.cacheDir)) {
+      rmSync(portFile, { force: true });
+    }
+    throw error;
+  }
 
   if (exitCode !== 0) {
     // A failed tenant probe leaves healthy engines alive; preserve their identity
@@ -2029,9 +2040,12 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
       // below never runs on this path, so without it a failed custom-port
       // start would leave status reporting the default port for processes
       // that actually serve on the custom one.
-      writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
+      writeFileSync(portFile, String(port));
     } catch (error) {
       logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
+    if (!hasRunningClusterPidfiles(config.cacheDir)) {
+      rmSync(portFile, { force: true });
     }
     if (startupOutput.trim()) {
       logger.error(`c8run output:\n${startupOutput.trim()}`);
@@ -2078,7 +2092,7 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     }
     writeFileSync(markerFile, 'running');
     writeFileSync(versionFile, config.version);
-    writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
+    writeFileSync(portFile, String(port));
     printSummary(startupOutput, config.version, port);
   } else {
     // Readiness can fail even after c8run exits successfully. Retain the same
@@ -2088,9 +2102,12 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
       // Persist the port for the survivors too (same reason as the nonzero
       // launcher exit path above): without it, status would report the
       // default port for processes serving on the custom one.
-      writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
+      writeFileSync(portFile, String(port));
     } catch (error) {
       logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
+    if (!hasRunningClusterPidfiles(config.cacheDir)) {
+      rmSync(portFile, { force: true });
     }
     logger.error(
       'Cluster failed to start within timeout.',
@@ -3214,7 +3231,7 @@ export function clusterUrls(port = DEFAULT_HTTP_PORT) {
   };
 }
 
-/** HTTP port recorded by the last successful start, or the c8run default. */
+/** HTTP port recorded by the latest start attempt, or the c8run default. */
 export function readClusterPort(cacheDir) {
   const portFile = join(cacheDir, PORT_MARKER_FILE);
   if (!existsSync(portFile)) return DEFAULT_HTTP_PORT;
@@ -3234,11 +3251,10 @@ export async function clusterStatus(cacheDir) {
   // install dir was replaced/removed, orphaning it (#560). Detect it so status
   // never reports "stopped" while a tracked cluster process is still alive.
   const processesRunning = hasRunningClusterPidfiles(cacheDir);
-  // Read the recorded port whenever the cluster may be serving: after a
-  // successful start (marker present) AND when tracked processes survive a
-  // failed start or marker loss. Without the second case, recovery status for
-  // a custom-port cluster would advertise the default port.
-  const CLUSTER_URLS = clusterUrls(markerExists || processesRunning ? readClusterPort(cacheDir) : DEFAULT_HTTP_PORT);
+  // The port is persisted before c8run starts and may be the only surviving
+  // endpoint record after an interrupted launch. Trust it whenever present;
+  // readClusterPort falls back to the c8run default when it is absent or invalid.
+  const CLUSTER_URLS = clusterUrls(readClusterPort(cacheDir));
   const markerVersion = markerExists && existsSync(versionFile)
     ? readFileSync(versionFile, 'utf-8').trim() || null
     : null;
