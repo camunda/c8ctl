@@ -73,6 +73,12 @@ const CLEAR_LINE = `${ESC}2K`;
 /** Erase from the cursor to end of line: clears the stale tail of a
  * wrapped row whose new content is shorter than the previous render's. */
 const CLEAR_TO_EOL = `${ESC}0K`;
+/** Erase from the cursor to the end of the screen: the recovery wipe
+ * when a terminal resize invalidates the cursor anchor — the previous
+ * render's physical line count no longer matches what the terminal
+ * painted, so everything from the (best-effort) rewind point down is
+ * cleared and the menu repaints from a fresh anchor. */
+const ERASE_TO_END_OF_SCREEN = `${ESC}0J`;
 const CURSOR_UP = (n: number) => `${ESC}${n}A`;
 const CURSOR_TO_COL = (n: number) => `${ESC}${n}G`;
 const HIDE_CURSOR = `${ESC}?25l`;
@@ -278,28 +284,40 @@ export async function select<T>(
 		(resolve) => {
 			let cursor = initialIndex;
 
-			// Pre-compute the number of physical terminal lines the menu
-			// occupies. When an option line is wider than the terminal, it
-			// wraps to multiple physical lines. CURSOR_UP must move by
-			// physical lines, not logical option count, or previous
-			// renders bleed through.
-			const cols = out.columns || 80;
+			// Count the physical terminal lines the menu occupies. When an
+			// option line is wider than the terminal, it wraps to multiple
+			// physical lines. CURSOR_UP must move by physical lines, not
+			// logical option count, or previous renders bleed through.
+			let cols = out.columns || 80;
 			const headerLines = Math.max(1, Math.ceil((2 + message.length) / cols));
-			const physicalLines = options.reduce((sum, opt, i) => {
-				// Visible width: "  ❯ " (4 chars) + "N. " + label + optional " " + description
-				const visible =
-					4 +
-					numberPrefix(i).length +
-					opt.label.length +
-					(opt.description ? 1 + opt.description.length : 0);
-				return sum + Math.max(1, Math.ceil(visible / cols));
-			}, 0);
+			const physicalLineCount = () =>
+				options.reduce((sum, opt, i) => {
+					// Visible width: "  ❯ " (4 chars) + "N. " + label + optional " " + description
+					const visible =
+						4 +
+						numberPrefix(i).length +
+						opt.label.length +
+						(opt.description ? 1 + opt.description.length : 0);
+					return sum + Math.max(1, Math.ceil(visible / cols));
+				}, 0);
+			// Cursor rewinds must traverse the *previous* render's line count.
+			let renderedLines = 0;
 
 			// Render the menu
 			function render(firstRender: boolean) {
 				if (!firstRender) {
 					// Move cursor back up to overwrite previous render
-					out.write(CURSOR_UP(physicalLines));
+					out.write(CURSOR_UP(renderedLines));
+					const width = out.columns || 80;
+					if (width !== cols) {
+						// The terminal was resized while the menu was open:
+						// rewrapping changed the previous render's physical line
+						// count, so the rewind above landed at a stale anchor.
+						// Wipe everything below and repaint from a fresh anchor
+						// at the new width.
+						cols = width;
+						out.write(ERASE_TO_END_OF_SCREEN);
+					}
 				}
 				for (let i = 0; i < options.length; i++) {
 					const opt = options[i];
@@ -314,6 +332,7 @@ export async function select<T>(
 						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${number}${label}${desc}\n`,
 					);
 				}
+				renderedLines = physicalLineCount();
 			}
 
 			// Print the message header
@@ -332,11 +351,11 @@ export async function select<T>(
 				cleanup();
 				const chosen = options[index];
 				// Replace the menu with the final selection line
-				out.write(CURSOR_UP(physicalLines));
-				for (let i = 0; i < physicalLines; i++) {
+				out.write(CURSOR_UP(renderedLines));
+				for (let i = 0; i < renderedLines; i++) {
 					out.write(`${CLEAR_LINE}\n`);
 				}
-				out.write(CURSOR_UP(physicalLines));
+				out.write(CURSOR_UP(renderedLines));
 				out.write(
 					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${CYAN}${chosen.label}${RESET}`,
 				);
@@ -375,11 +394,11 @@ export async function select<T>(
 				} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 					cleanup();
 					// Clear the menu and header
-					out.write(CURSOR_UP(physicalLines));
-					for (let i = 0; i < physicalLines; i++) {
+					out.write(CURSOR_UP(renderedLines));
+					for (let i = 0; i < renderedLines; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
-					out.write(CURSOR_UP(physicalLines + headerLines));
+					out.write(CURSOR_UP(renderedLines + headerLines));
 					for (let i = 0; i < headerLines; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
@@ -636,8 +655,11 @@ export async function multiSelect<T>(
 		const rows = buildRows(options);
 
 		// Same wrap accounting as select(): rows wider than the terminal
-		// occupy extra physical lines that CURSOR_UP must traverse.
-		const cols = out.columns || 80;
+		// occupy extra physical lines that CURSOR_UP must traverse. `cols`
+		// is re-read on every repaint: a terminal resize while the menu is
+		// open changes how rows wrap, and trusting the stale width makes
+		// the rewind miss the previous render's anchor.
+		let cols = out.columns || 80;
 		const headerLines =
 			Math.max(1, Math.ceil((2 + message.length) / cols)) +
 			Math.max(1, Math.ceil((2 + keyHint.length) / cols));
@@ -671,9 +693,11 @@ export async function multiSelect<T>(
 			return text === undefined ? 0 : 2 + text.length;
 		};
 		// The divider and submit button sit below the footer line. Both
-		// are fixed-height (one logical line each) but can wrap.
-		const dividerWidth = Math.max(8, Math.min(60, cols - 4));
-		const dividerVisibleLength = 2 + dividerWidth;
+		// are fixed-height (one logical line each) but can wrap. The
+		// divider tracks the current terminal width, so it is a function
+		// of the (possibly resized) `cols`.
+		const dividerWidth = () => Math.max(8, Math.min(60, cols - 4));
+		const dividerVisibleLength = () => 2 + dividerWidth();
 		/** `${submitLabel} — ${n} of ${total} selected` */
 		const buttonText = (): string => {
 			const selected = state.effective.filter(Boolean).length;
@@ -690,7 +714,7 @@ export async function multiSelect<T>(
 				0,
 			) +
 			Math.max(1, Math.ceil(footerVisibleLength() / cols)) +
-			Math.max(1, Math.ceil(dividerVisibleLength / cols)) +
+			Math.max(1, Math.ceil(dividerVisibleLength() / cols)) +
 			Math.max(1, Math.ceil(buttonVisibleLength() / cols));
 		// Cursor rewinds must traverse the *previous* render's line count.
 		let lastRenderedLines = 0;
@@ -709,6 +733,16 @@ export async function multiSelect<T>(
 		function render(firstRender: boolean) {
 			if (!firstRender) {
 				out.write(CURSOR_UP(lastRenderedLines));
+				const width = out.columns || 80;
+				if (width !== cols) {
+					// The terminal was resized while the menu was open:
+					// rewrapping changed the previous render's physical line
+					// count, so the rewind above landed at a stale anchor.
+					// Wipe everything below and repaint from a fresh anchor
+					// at the new width.
+					cols = width;
+					out.write(ERASE_TO_END_OF_SCREEN);
+				}
 			}
 			for (const row of rows) {
 				if (row.kind === "header") {
@@ -744,7 +778,7 @@ export async function multiSelect<T>(
 				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${eraseTail(footerVisibleLength())}\n`,
 			);
 			out.write(
-				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${DIM}${"─".repeat(dividerWidth)}${RESET}${eraseTail(dividerVisibleLength)}\n`,
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${DIM}${"─".repeat(dividerWidth())}${RESET}${eraseTail(dividerVisibleLength())}\n`,
 			);
 			const text = buttonText();
 			const button =

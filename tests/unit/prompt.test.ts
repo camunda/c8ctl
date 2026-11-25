@@ -95,10 +95,10 @@ function renderScreen(
 	// ANSI introducer as a string: biome's noControlCharactersInRegex
 	// keeps control characters out of regex literals.
 	const CSI = "\x1b\\[";
-	// Cursor-up, clear-line, clear-to-EOL, cursor-to-col-1, visibility,
-	// styles.
+	// Cursor-up, clear-line, clear-to-EOL, erase-to-end-of-screen,
+	// cursor-to-col-1, visibility, styles.
 	const tokens = text.split(
-		new RegExp(`(${CSI}(?:\\d+A|2K|0K|1G|\\?25[hl]|[0-9;]*m))`),
+		new RegExp(`(${CSI}(?:\\d+A|2K|0K|0J|1G|\\?25[hl]|[0-9;]*m))`),
 	);
 	for (const token of tokens) {
 		const up = new RegExp(`^${CSI}(\\d+)A$`).exec(token);
@@ -109,6 +109,13 @@ function renderScreen(
 		}
 		if (token === "\x1b[2K") {
 			screen[line] = "";
+			pendingWrap = false;
+			continue;
+		}
+		if (token === "\x1b[0J") {
+			// Erase from the cursor position to the end of the screen.
+			screen[line] = screen[line].slice(0, col);
+			for (let r = line + 1; r < rows; r++) screen[r] = "";
 			pendingWrap = false;
 			continue;
 		}
@@ -264,6 +271,44 @@ describe("select()", () => {
 			assert.ok(io.text().includes(SHOW_CURSOR), "cursor left hidden");
 		});
 	}
+
+	test("a terminal resize mid-prompt re-anchors the menu instead of duplicating rows", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		const done = select({
+			message: "Pick",
+			options: [
+				// Alpha's row wraps to two physical lines at 80 columns but
+				// fits on one at 149.
+				{ label: "Alpha", value: "a", description: "x".repeat(100) },
+				{ label: "Bravo", value: "b" },
+			],
+			io,
+		});
+		// The terminal grows while the menu is open (SIGWINCH updates
+		// `columns`). The next repaint must not trust the stale physical
+		// line count — rows no longer wrap, so the cursor rewind would
+		// overshoot and leave stale fragments behind.
+		io.output.columns = 149;
+		type(io, DOWN, UP, DOWN);
+		// Wait for the initial render plus all three repaints.
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Bravo").length - 1 >= 4) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		const bravoRows = visible.filter((l) => l.includes("Bravo"));
+		assert.strictEqual(
+			bravoRows.length,
+			1,
+			`menu rows duplicated after resize: ${JSON.stringify(visible)}`,
+		);
+		setImmediate(() => io.input.write(ENTER));
+		const result = await done;
+		assert.ok(result.interactive && !result.cancelled);
+		assert.strictEqual(result.value, "b");
+	});
 
 	test("non-TTY returns the default with a hint", async () => {
 		const result = await select({
@@ -824,6 +869,71 @@ describe("multiSelect()", () => {
 			assert.deepStrictEqual(result.values, []);
 			assert.match(result.hint, /Blueprint.*needs the local cluster/);
 		});
+	});
+
+	test("a terminal resize mid-prompt re-anchors the menu instead of piling up rows", async () => {
+		const io = fakeTTY(); // starts at 80 columns
+		const done = multiSelect({
+			message: "Pick",
+			submitLabel: "Start setup",
+			options: [
+				{
+					label: "Local cluster",
+					value: "cluster",
+					checked: true,
+					group: "Essentials",
+					description: "Download and run Camunda 8 Run on this machine",
+				},
+				{
+					label: "Desktop Modeler",
+					value: "modeler",
+					checked: true,
+					group: "Essentials",
+					description:
+						"Install the desktop app to edit BPMN, DMN, and forms visually",
+				},
+				{
+					label: "Example project",
+					value: "blueprint",
+					checked: true,
+					group: "Essentials",
+					description:
+						"Create an example project, then deploy and start it on your local cluster",
+				},
+				{
+					label: "Docs MCP server",
+					value: "docs",
+					group: "AI-assisted development",
+					description:
+						"Search current Camunda 8 docs from your AI assistant (browser sign-in on first use)",
+				},
+			],
+			io,
+		});
+		// The terminal grows from 80 to 149 columns while the menu is
+		// open (SIGWINCH updates `columns`). Three rows no longer wrap,
+		// so a repaint trusting the stale line count rewinds too far and
+		// leaves the menu's tail rows behind — on a full screen this
+		// piles up a copy of the tail on every keypress.
+		io.output.columns = 149;
+		type(io, DOWN, UP, DOWN, UP);
+		// Wait for the initial render plus all four repaints.
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Start setup —").length - 1 >= 5) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		const visible = renderScreen(io.text(), { cols: 149 }).filter(
+			(l) => l !== "",
+		);
+		const buttons = visible.filter((l) => l.includes("Start setup —"));
+		assert.strictEqual(
+			buttons.length,
+			1,
+			`menu fragments piled up after resize: ${JSON.stringify(visible)}`,
+		);
+		setImmediate(() => io.input.write(ESCAPE));
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
 	});
 
 	describe("groups", () => {
