@@ -520,6 +520,58 @@ const defaultMultiSelectKeyHint = (submitLabel: string): string =>
 	`↑/↓ move · space/enter toggle · a all · tab to ${submitLabel} · esc cancel`;
 
 /**
+ * Terminal display width of a string in cells: East-Asian wide and
+ * fullwidth code points occupy two cells; combining marks, format
+ * controls and variation selectors occupy none. Sizes the submit
+ * button's box so its borders stay aligned for non-ASCII labels.
+ */
+function displayWidth(text: string): number {
+	let width = 0;
+	for (const char of text) {
+		const code = char.codePointAt(0) ?? 0;
+		if (
+			// combining marks, format controls (incl. ZWJ), variation selectors
+			/^[\p{Mn}\p{Me}\p{Cf}]$/u.test(char) ||
+			(code >= 0xfe00 && code <= 0xfe0f) ||
+			(code >= 0xe0100 && code <= 0xe01ef)
+		) {
+			continue;
+		}
+		width += isWideCodePoint(code) || isEmojiPresentation(char) ? 2 : 1;
+	}
+	return width;
+}
+
+/**
+ * Code points terminals render two cells wide by default emoji
+ * presentation (🚀, ✅, …). The Unicode property covers what the
+ * hand-maintained wide table cannot: emoji are added every release.
+ */
+function isEmojiPresentation(char: string): boolean {
+	return /^\p{Emoji_Presentation}$/u.test(char);
+}
+
+/** East-Asian wide/fullwidth ranges that occupy two terminal cells. */
+function isWideCodePoint(code: number): boolean {
+	return (
+		(code >= 0x1100 && code <= 0x115f) || // Hangul Jamo
+		(code >= 0x2e80 && code <= 0x303e) || // CJK radicals, Kangxi, symbols
+		(code >= 0x3041 && code <= 0x33ff) || // Hiragana … CJK compatibility
+		(code >= 0x3400 && code <= 0x4dbf) || // CJK Unified Ext A
+		(code >= 0x4e00 && code <= 0x9fff) || // CJK Unified
+		(code >= 0xa000 && code <= 0xa4cf) || // Yi syllables and radicals
+		(code >= 0xac00 && code <= 0xd7a3) || // Hangul syllables
+		(code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+		(code >= 0xfe30 && code <= 0xfe6f) || // CJK compatibility forms
+		(code >= 0xff00 && code <= 0xff60) || // fullwidth forms
+		(code >= 0xffe0 && code <= 0xffe6) || // fullwidth signs
+		(code >= 0x1f300 && code <= 0x1f64f) || // emoji
+		(code >= 0x1f900 && code <= 0x1f9ff) || // supplemental emoji
+		(code >= 0x20000 && code <= 0x3fffd) // CJK Unified Ext B and beyond
+	);
+}
+
+/**
  * Evaluate a checkbox list with dependencies: an option counts as
  * checked only when every option it requires is itself effectively
  * checked. Passes only ever uncheck options, so the fixpoint settles
@@ -584,7 +636,7 @@ function buildRows<T>(
  *
  * - **Interactive**: renders one row per option on stderr, grouped
  *   under non-interactive header rows when options carry a `group`,
- *   with a submit button pinned below a divider. Arrow keys move the
+ *   with a bordered submit button pinned below the list. Arrow keys move the
  *   highlight through the options and the button, Space (or the row's
  *   number) toggles an option, Enter toggles the focused option, `a`
  *   toggles all, Tab jumps to the button — and only Enter on the
@@ -705,19 +757,23 @@ export async function multiSelect<T>(
 			const text = footerText();
 			return text === undefined ? 0 : 2 + text.length;
 		};
-		// The divider and submit button sit below the footer line. Both
-		// are fixed-height (one logical line each) but can wrap. The
-		// divider tracks the current terminal width, so it is a function
-		// of the (possibly resized) `cols`.
-		const dividerWidth = () => Math.max(8, Math.min(60, cols - 4));
-		const dividerVisibleLength = () => 2 + dividerWidth();
-		/** `${submitLabel} — ${n} of ${total} selected` */
+		// The submit button sits below the footer line, drawn as a
+		// bordered box (top border, label, bottom border) so it reads as
+		// a clickable button rather than another list row. All three
+		// lines are fixed-height but can wrap.
+		/** `${submitLabel} — ${n} of ${total} selected ➜` — the trailing
+		 * arrow is the wizard affordance: this button advances to the
+		 * next step. */
 		const buttonText = (): string => {
 			const selected = state.effective.filter(Boolean).length;
-			return `${submitLabel} — ${selected} of ${options.length} selected`;
+			return `${submitLabel} — ${selected} of ${options.length} selected ➜`;
 		};
-		// "  ❯ " (4) + "[ " + text + " ]" (4 + text)
-		const buttonVisibleLength = (): number => 8 + buttonText().length;
+		/** Button label with two spaces of padding on each side. */
+		const buttonInner = (): string => `  ${buttonText()}  `;
+		// "  " (2) + "│" (1) + inner + "│" (1); inner is measured in
+		// terminal cells, not code units, so CJK labels keep the box
+		// borders aligned.
+		const buttonVisibleLength = (): number => 4 + displayWidth(buttonInner());
 		// Recomputed per render: dependency reasons appear and disappear
 		// as options are toggled, changing how rows wrap.
 		const physicalLineCount = (): number =>
@@ -727,8 +783,7 @@ export async function multiSelect<T>(
 				0,
 			) +
 			Math.max(1, Math.ceil(footerVisibleLength() / cols)) +
-			Math.max(1, Math.ceil(dividerVisibleLength() / cols)) +
-			Math.max(1, Math.ceil(buttonVisibleLength() / cols));
+			3 * Math.max(1, Math.ceil(buttonVisibleLength() / cols));
 		// Cursor rewinds must traverse the *previous* render's line count.
 		let lastRenderedLines = 0;
 		/** Visible length of each line the previous render painted, in
@@ -819,18 +874,25 @@ export async function multiSelect<T>(
 			out.write(
 				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${eraseTail(footerVisibleLength())}\n`,
 			);
-			paintedLengths.push(dividerVisibleLength());
-			out.write(
-				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${DIM}${"─".repeat(dividerWidth())}${RESET}${eraseTail(dividerVisibleLength())}\n`,
-			);
-			const text = buttonText();
-			const button =
-				cursor === SUBMIT
-					? `${CYAN}❯${RESET} ${INVERSE}[ ${text} ]${RESET}`
-					: `  [ ${text} ]`;
+			// Bordered-box submit button: while focused, the button's
+			// content inverts (the pre-box affordance) with a bold
+			// label; the border itself always renders in solid terminal
+			// white — the button is active, and a dim border would
+			// suggest it is disabled.
+			const inner = buttonInner();
+			const innerWidth = displayWidth(inner);
+			const focused = cursor === SUBMIT;
+			const label = focused ? `${INVERSE}${BOLD}${inner}${RESET}` : inner;
+			const tail = eraseTail(buttonVisibleLength());
 			paintedLengths.push(buttonVisibleLength());
 			out.write(
-				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${button}${eraseTail(buttonVisibleLength())}\n`,
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ╭${"─".repeat(innerWidth)}╮${tail}\n`,
+			);
+			paintedLengths.push(buttonVisibleLength());
+			out.write(`${CLEAR_LINE}${CURSOR_TO_COL(1)}  │${label}│${tail}\n`);
+			paintedLengths.push(buttonVisibleLength());
+			out.write(
+				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ╰${"─".repeat(innerWidth)}╯${tail}\n`,
 			);
 			// A repaint can be shorter than the previous render (a reason
 			// or the footer collapsed to fewer wrapped lines). Erase the
