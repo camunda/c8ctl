@@ -725,6 +725,11 @@ export async function multiSelect<T>(
 			Math.max(1, Math.ceil(buttonVisibleLength() / cols));
 		// Cursor rewinds must traverse the *previous* render's line count.
 		let lastRenderedLines = 0;
+		/** Visible length of each line the previous render painted, in
+		 * order. Width-independent: the resize recovery re-wraps these at
+		 * the new width to find the previous render's on-screen height —
+		 * the current state may already differ from what was painted. */
+		let lastPaintedLengths: number[] = [];
 
 		/**
 		 * Erase the stale tail of a wrapped row whose new content is
@@ -743,18 +748,25 @@ export async function multiSelect<T>(
 				if (width !== cols) {
 					// The terminal was resized while the menu was open and
 					// rewrapped the previous render: its on-screen height is
-					// now the line count at the NEW width. Rewind by that to
-					// the menu's top, wipe everything below, and repaint from
-					// the fresh anchor.
+					// the previous render's own line lengths wrapped at the
+					// NEW width (the current state may already differ from
+					// what was painted). Rewind by that to the menu's top,
+					// wipe everything below, and repaint from the fresh anchor.
 					cols = width;
-					out.write(CURSOR_UP(physicalLineCount()));
+					const rewind = lastPaintedLengths.reduce(
+						(sum, len) => sum + Math.max(1, Math.ceil(len / cols)),
+						0,
+					);
+					out.write(CURSOR_UP(rewind));
 					out.write(ERASE_TO_END_OF_SCREEN);
 				} else {
 					out.write(CURSOR_UP(lastRenderedLines));
 				}
 			}
+			const paintedLengths: number[] = [];
 			for (const row of rows) {
 				if (row.kind === "header") {
+					paintedLengths.push(2 + row.label.length);
 					out.write(
 						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${BOLD}${row.label}${RESET}${eraseTail(2 + row.label.length)}\n`,
 					);
@@ -781,11 +793,14 @@ export async function multiSelect<T>(
 				out.write(
 					`${CLEAR_LINE}${CURSOR_TO_COL(1)}${indent}${pointer} ${box} ${label}${desc}${why}${eraseTail(rowVisibleLength(row))}\n`,
 				);
+				paintedLengths.push(rowVisibleLength(row));
 			}
 			const footer = footerText();
+			paintedLengths.push(footerVisibleLength());
 			out.write(
 				`${CLEAR_LINE}${CURSOR_TO_COL(1)}${footer === undefined ? "" : `  ${YELLOW}${footer}${RESET}`}${eraseTail(footerVisibleLength())}\n`,
 			);
+			paintedLengths.push(dividerVisibleLength());
 			out.write(
 				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${DIM}${"─".repeat(dividerWidth())}${RESET}${eraseTail(dividerVisibleLength())}\n`,
 			);
@@ -794,6 +809,7 @@ export async function multiSelect<T>(
 				cursor === SUBMIT
 					? `${CYAN}❯${RESET} ${INVERSE}[ ${text} ]${RESET}`
 					: `  [ ${text} ]`;
+			paintedLengths.push(buttonVisibleLength());
 			out.write(
 				`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${button}${eraseTail(buttonVisibleLength())}\n`,
 			);
@@ -809,6 +825,7 @@ export async function multiSelect<T>(
 				out.write(CURSOR_UP(lastRenderedLines - painted));
 			}
 			lastRenderedLines = painted;
+			lastPaintedLengths = paintedLengths;
 		}
 
 		/** Re-evaluate dependencies after a toggle, then repaint. */

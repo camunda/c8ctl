@@ -83,15 +83,31 @@ function type(io: { input: PassThrough }, ...keys: string[]): void {
  */
 function renderScreen(
 	text: string,
-	{ cols = 80, rows = 100 }: { cols?: number; rows?: number } = {},
+	{
+		cols = 80,
+		rows = 100,
+		state,
+	}: {
+		cols?: number;
+		rows?: number;
+		/** Carries the screen and cursor across calls, so a byte stream
+		 * can be replayed in segments at different widths (a resize). */
+		state?: {
+			screen?: string[];
+			line?: number;
+			col?: number;
+			pendingWrap?: boolean;
+		};
+	} = {},
 ): string[] {
-	const screen: string[] = Array.from({ length: rows }, () => "");
-	let line = 0;
-	let col = 0;
+	const screen: string[] =
+		state?.screen ?? Array.from({ length: rows }, () => "");
+	let line = state?.line ?? 0;
+	let col = state?.col ?? 0;
 	// Delayed autowrap: a character written into the last column leaves
 	// the cursor on that cell; the wrap happens when the next printable
 	// character arrives. erase-to-EOL there erases the last character.
-	let pendingWrap = false;
+	let pendingWrap = state?.pendingWrap ?? false;
 	// ANSI introducer as a string: biome's noControlCharactersInRegex
 	// keeps control characters out of regex literals.
 	const CSI = "\x1b\\[";
@@ -153,7 +169,42 @@ function renderScreen(
 			if (col === cols) pendingWrap = true;
 		}
 	}
+	if (state) {
+		state.screen = screen;
+		state.line = line;
+		state.col = col;
+		state.pendingWrap = pendingWrap;
+	}
 	return screen;
+}
+
+interface ScreenState {
+	screen?: string[];
+	line?: number;
+	col?: number;
+	pendingWrap?: boolean;
+}
+
+/**
+ * Rewrap every row of the virtual screen at a new width, the way
+ * terminals reflow their content on resize, and move the cursor down
+ * with the content. Assumes the cursor sits below the content (true
+ * for the prompt fixtures here, which always end a render with a
+ * newline).
+ */
+function rewrapScreen(state: ScreenState, cols: number): void {
+	const screen = state.screen ?? [];
+	const wrapRow = (row: string): string[] => {
+		const lines: string[] = [];
+		for (let i = 0; i < row.length; i += cols)
+			lines.push(row.slice(i, i + cols));
+		return lines.length === 0 ? [""] : lines;
+	};
+	const beforeCursor = screen.slice(0, state.line ?? 0);
+	state.line = beforeCursor.reduce((sum, row) => sum + wrapRow(row).length, 0);
+	state.screen = screen.flatMap(wrapRow);
+	state.col = 0;
+	state.pendingWrap = false;
 }
 
 const ENV_KEYS = ["C8CTL_INTERACTIVE", "C8CTL_NON_INTERACTIVE", "CI"] as const;
@@ -977,6 +1028,74 @@ describe("multiSelect()", () => {
 		const after = renderScreen(io.text(), { cols: 149 }).filter(
 			(l) => l !== "",
 		);
+		assert.deepStrictEqual(after, ["previous output line"]);
+	});
+
+	test("a resize on the same keypress as a state change rewinds the previous render", async () => {
+		const io = fakeTTY();
+		io.output.columns = 149;
+		io.output.write("previous output line\n");
+		// 90 chars: the blocked row and its footer fit on one line at 149
+		// columns but wrap to two at 100.
+		const reason = "r".repeat(90);
+		const done = multiSelect({
+			message: "Pick",
+			options: [
+				{ label: "Alpha", value: "alpha", checked: true },
+				{
+					label: "Bravo",
+					value: "bravo",
+					checked: true,
+					requires: [{ value: "alpha", reason }],
+				},
+			],
+			io,
+		});
+		// At 149 columns: uncheck Alpha (Bravo becomes blocked), then
+		// focus Bravo so the footer shows the long reason.
+		type(io, " ", DOWN);
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Submit —").length - 1 >= 3) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		// Replay what the terminal shows, then shrink it to 100 columns:
+		// the terminal reflows every row and the cursor follows.
+		const term: ScreenState = {};
+		renderScreen(io.text(), { cols: 149, state: term });
+		const splitAt = io.text().length;
+		rewrapScreen(term, 100);
+		io.output.columns = 100;
+		// The same keypress that first renders at the new width also
+		// changes the state: moving off the blocked row hides the footer.
+		// The rewind must measure the PREVIOUS render (footer visible,
+		// one line taller after reflow), not the state being painted.
+		type(io, UP);
+		for (let i = 0; i < 1000; i++) {
+			if (io.text().split("Submit —").length - 1 >= 4) break;
+			await new Promise((resolveSpin) => setImmediate(resolveSpin));
+		}
+		const during = renderScreen(io.text().slice(splitAt), {
+			cols: 100,
+			state: term,
+		}).filter((l) => l !== "");
+		assert.strictEqual(
+			during.filter((l) => l.includes("Alpha")).length,
+			1,
+			`stale row survived the resize: ${JSON.stringify(during)}`,
+		);
+		assert.strictEqual(
+			during.filter((l) => l.includes("Submit —")).length,
+			1,
+			`menu fragments piled up after resize: ${JSON.stringify(during)}`,
+		);
+		const splitAt2 = io.text().length;
+		setImmediate(() => io.input.write(ESCAPE));
+		const result = await done;
+		assert.ok(result.interactive && result.cancelled);
+		const after = renderScreen(io.text().slice(splitAt2), {
+			cols: 100,
+			state: term,
+		}).filter((l) => l !== "");
 		assert.deepStrictEqual(after, ["previous output line"]);
 	});
 
