@@ -14,7 +14,7 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
@@ -25,10 +25,36 @@ const tsPlugins = readdirSync(pluginsDir).filter((name) =>
 	existsSync(join(pluginsDir, name, "c8ctl-plugin.ts")),
 );
 
+/**
+ * Load c8ctl's own modules (`src/`) from what tsc emits to `dist/` instead
+ * of inlining a copy. Default plugins ship inside the package, so a plugin
+ * calls the core's services and shares its `C8ctlError`; the cluster
+ * client stays out of the bundles.
+ */
+function srcFromDist(outfile) {
+	const srcDir = join(root, "src");
+	return {
+		name: "c8ctl-src-from-dist",
+		setup(build) {
+			build.onResolve({ filter: /^\.\.?\// }, (args) => {
+				const target = resolve(args.resolveDir, args.path);
+				if (!target.startsWith(srcDir + sep)) return undefined;
+				const emitted = join(root, "dist", relative(srcDir, target)).replace(
+					/\.ts$/,
+					".js",
+				);
+				const path = relative(dirname(outfile), emitted).split(sep).join("/");
+				return { path, external: true };
+			});
+		},
+	};
+}
+
 for (const name of tsPlugins) {
+	const outfile = join(root, "dist", "default-plugins", name, "c8ctl-plugin.js");
 	await build({
 		entryPoints: [join(pluginsDir, name, "c8ctl-plugin.ts")],
-		outfile: join(root, "dist", "default-plugins", name, "c8ctl-plugin.js"),
+		outfile,
 		bundle: true,
 		format: "esm",
 		platform: "node",
@@ -37,6 +63,7 @@ for (const name of tsPlugins) {
 		// jsonc-parser's) keeps runtime require() calls that fail inside an
 		// ESM bundle.
 		mainFields: ["module", "main"],
+		plugins: [srcFromDist(outfile)],
 		logLevel: "warning",
 	});
 	console.log(`build:plugins — bundled default-plugins/${name}`);
