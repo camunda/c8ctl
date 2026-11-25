@@ -120,20 +120,10 @@ const PLOT_DESTINATION_DMN = `<?xml version="1.0" encoding="UTF-8"?>
 </definitions>
 `;
 
-const ORDER_PROCESS_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_2" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="order-process" isExecutable="true">
-    <bpmn:startEvent id="start" />
-    <bpmn:serviceTask id="charge-credit-card" />
-  </bpmn:process>
-</bpmn:definitions>
-`;
-
 /** Blueprint project files, keyed by basename, served from raw.githubusercontent.com. */
 const FILES: Record<string, string> = {
 	"rocket-launch.bpmn": ROCKET_LAUNCH_BPMN,
 	"plot-destination.dmn": PLOT_DESTINATION_DMN,
-	"order-process.bpmn": ORDER_PROCESS_BPMN,
 	"README.md": "# Blueprint\n",
 };
 
@@ -143,12 +133,6 @@ const TREE = {
 		{ path: "1-rocket-launch/rocket-launch.bpmn", type: "blob" },
 		{ path: "1-rocket-launch/plot-destination.dmn", type: "blob" },
 		{ path: "1-rocket-launch/README.md", type: "blob" },
-		{ path: "2-order-process-with-service-workers", type: "tree" },
-		{ path: "2-order-process-with-service-workers/bpmn", type: "tree" },
-		{
-			path: "2-order-process-with-service-workers/bpmn/order-process.bpmn",
-			type: "blob",
-		},
 	],
 };
 

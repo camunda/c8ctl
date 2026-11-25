@@ -500,7 +500,8 @@ describe("c8ctl setup", () => {
 		// The documented exit-code contract.
 		assert.match(result.stdout, /Exit code 0/);
 		assert.match(result.stdout, /Exit code 1: arguments failed validation/);
-		// The blueprint is a wizard choice, not a CLI flag.
+		assert.match(result.stdout, /Setup always uses the Rocket Launch example/);
+		// The setup blueprint has no standalone CLI flag.
 		assert.doesNotMatch(result.stdout, /--blueprint/);
 	});
 
@@ -1327,12 +1328,13 @@ describe("c8ctl setup", () => {
 
 			const malformedMarkerPath = join(stub.cwd, ".c8ctl-blueprint.json");
 			writeFileSync(malformedMarkerPath, "{");
-			const unreadableMarkerPath = join(
-				stub.cwd,
-				"service-worker",
-				".c8ctl-blueprint.json",
+			const retiredDirectory = join(stub.cwd, "retired-blueprint");
+			mkdirSync(retiredDirectory);
+			writeFileSync(join(retiredDirectory, "README.md"), "# Retired\n");
+			writeFileSync(
+				join(retiredDirectory, ".c8ctl-blueprint.json"),
+				JSON.stringify({ id: "retired-blueprint", files: ["README.md"] }),
 			);
-			mkdirSync(unreadableMarkerPath, { recursive: true });
 
 			const removal = await c8WithOptions(
 				stub.options,
@@ -1347,13 +1349,14 @@ describe("c8ctl setup", () => {
 					output.match(/Warning: Could not inspect setup blueprint marker/g) ??
 					[]
 				).length,
-				2,
+				1,
 				output,
 			);
 			assert.match(output, /Removed MCP server "camunda"/);
 			assert.match(output, /Removed Camunda skill "camunda-c8ctl"/);
+			assert.match(output, /Removed retired-blueprint blueprint files/);
 			assert.strictEqual(readFileSync(malformedMarkerPath, "utf-8"), "{");
-			assert.ok(statSync(unreadableMarkerPath).isDirectory());
+			assert.ok(!existsSync(join(retiredDirectory, "README.md")));
 			assert.ok(
 				!existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 			);
@@ -2478,10 +2481,7 @@ describe("c8ctl setup", () => {
 		const stub = stubbedExecution();
 		try {
 			const result = await runInteractive(
-				[
-					{ waitFor: "Docs MCP server", keys: "\t\r" },
-					{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\r" },
-				],
+				[{ waitFor: "Docs MCP server", keys: "\t\r" }],
 				{
 					nodeArgs: stub.options.nodeArgs,
 					env: stub.options.env,
@@ -2490,9 +2490,10 @@ describe("c8ctl setup", () => {
 			);
 			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
-			assert.ok(
-				result.stderr.includes(BLUEPRINT_PROMPT_TEXT),
-				"blueprint prompt not rendered",
+			assert.doesNotMatch(
+				result.stderr,
+				new RegExp(BLUEPRINT_PROMPT_TEXT),
+				"setup should not ask a second blueprint question",
 			);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
 			stepLine(out, "Check prerequisites", "SUCCESS");
@@ -2501,6 +2502,12 @@ describe("c8ctl setup", () => {
 			assert.ok(
 				existsSync(join(stub.cwd, "rocket-launch", "rocket-launch.bpmn")),
 			);
+			assert.strictEqual((out.match(/What's next/g) ?? []).length, 1);
+			assert.match(
+				out,
+				/Watch it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
+			);
+			assert.doesNotMatch(out, /Start a worker in your language/);
 		} finally {
 			stub.cleanup();
 		}
@@ -2528,100 +2535,11 @@ describe("c8ctl setup", () => {
 		assert.doesNotMatch(result.stdout, /Check prerequisites/);
 	});
 
-	test("interactive: Escape at the blueprint choice cancels too", async () => {
-		const result = await runInteractive([
-			{ waitFor: "Docs MCP server", keys: "\t\r" },
-			{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\x1b" },
-		]);
-		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
-		assert.match(result.stdout, /Cancelled — nothing was changed\./);
-		assert.doesNotMatch(result.stdout, /Setup finished\./);
-	});
-
-	test("interactive: the service worker blueprint ends with worker instructions", async () => {
-		const stub = stubbedExecution();
-		try {
-			const result = await runInteractive(
-				[
-					{ waitFor: "Docs MCP server", keys: "\t\r" },
-					// Down past "Rocket Launch" to "Service worker", then Enter.
-					{ waitFor: BLUEPRINT_PROMPT_TEXT, keys: "\x1b[B\r" },
-				],
-				{
-					nodeArgs: stub.options.nodeArgs,
-					env: stub.options.env,
-					cwd: stub.cwd,
-				},
-			);
-			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
-			const out = stripVTControlCharacters(result.stdout + result.stderr);
-			stepLine(out, "Create the blueprint project", "SUCCESS");
-			stepLine(out, "Deploy and start the process", "SUCCESS");
-			assert.ok(
-				existsSync(
-					join(stub.cwd, "service-worker", "bpmn", "order-process.bpmn"),
-				),
-				"service-worker blueprint was not scaffolded",
-			);
-			// The instance stalls at its service task until a worker
-			// connects — the closing box says so, deeplinks it in Operate
-			// (naming the local credentials), and hands over one worker
-			// block per shipped language.
-			assert.match(out, /Process instance is running on the local cluster\./);
-			assert.match(
-				out,
-				/waits at the first service task until a worker connects/,
-			);
-			assert.match(
-				out,
-				/Open it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
-			);
-			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
-			assert.match(out, /Start a worker in your language:/);
-			// Paths are quoted (the working directory may contain spaces);
-			// either path separator, so the Windows matrix sees its own.
-			// Node.js and Python cd into the worker directory: npm misreads
-			// a bare --prefix install on Windows, and the Python worker
-			// needs a virtualenv (pip into an externally managed system
-			// Python fails). Java and C# address the project directly.
-			assert.match(out, /Node\.js:\s+cd ".*service-worker[/\\]nodejs"/);
-			assert.match(out, /npm install/);
-			assert.match(out, /npm start/);
-			assert.match(out, /Python:\s+cd ".*service-worker[/\\]python"/);
-			assert.match(out, /python -m venv \.venv/);
-			assert.match(
-				out,
-				/source \.venv\/bin\/activate\s+# Windows: \.venv\\Scripts\\activate/,
-			);
-			assert.match(out, /pip install -r requirements\.txt/);
-			assert.match(out, /python main\.py/);
-			assert.match(
-				out,
-				/Java:\s+mvn -f ".*service-worker[/\\]java" spring-boot:run/,
-			);
-			assert.match(
-				out,
-				/C#:\s+dotnet run --project ".*service-worker[/\\]csharp"/,
-			);
-			// Never suggest the Windows-broken prefix form.
-			assert.doesNotMatch(out, /--prefix/);
-			// Install and start stay on separate lines: && is a syntax
-			// error in Windows PowerShell 5.1.
-			assert.doesNotMatch(out, /&&/);
-			assert.match(
-				out,
-				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,
-			);
-		} finally {
-			stub.cleanup();
-		}
-	});
-
 	test("interactive: without a blueprint the box suggests the first run", async () => {
 		const stub = stubbedExecution();
 		try {
 			const result = await runInteractive(
-				// Down, down to "Starter blueprint", space to deselect, then
+				// Down, down to "Example project", space to deselect, then
 				// Tab to the submit button and Enter to confirm.
 				[{ waitFor: "Docs MCP server", keys: "\x1b[B\x1b[B \t\r" }],
 				{
@@ -2644,7 +2562,7 @@ describe("c8ctl setup", () => {
 			assert.match(out, /c8ctl use tenant "<default>"/);
 			assert.match(out, /c8ctl run my-process\.bpmn --profile local/);
 			assert.doesNotMatch(out, /&&/);
-			assert.match(out, /re-run "c8ctl setup" and pick a starter blueprint/);
+			assert.match(out, /re-run "c8ctl setup" and include the example project/);
 			assert.match(
 				out,
 				/Operate: http:\/\/localhost:8080\/operate \(demo\/demo\)/,

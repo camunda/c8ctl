@@ -70,21 +70,18 @@ function resolvedCommitResponse(): BlueprintResponse {
 }
 
 describe("SETUP_BLUEPRINTS", () => {
-	test("contains exactly the two setup projects and their guides", () => {
+	test("contains only the Rocket Launch setup project", () => {
 		assert.deepStrictEqual(
 			SETUP_BLUEPRINTS.map((blueprint) => blueprint.id),
-			["rocket-launch", "service-worker"],
+			["rocket-launch"],
 		);
 		assert.deepStrictEqual(
 			SETUP_BLUEPRINTS.map((blueprint) => blueprint.guideUrl),
-			[
-				"https://docs.camunda.io/docs/guides/getting-started-hello-world/",
-				"https://docs.camunda.io/docs/guides/getting-started-example/",
-			],
+			["https://docs.camunda.io/docs/guides/getting-started-hello-world/"],
 		);
 		assert.deepStrictEqual(
 			SETUP_BLUEPRINTS.map((blueprint) => blueprint.source.path),
-			["1-rocket-launch", "2-order-process-with-service-workers"],
+			["1-rocket-launch"],
 		);
 	});
 });
@@ -114,10 +111,6 @@ describe("scaffoldSetupBlueprint()", () => {
 						},
 						{
 							path: "1-rocket-launch/assets/diagram.bpmn",
-							type: "blob",
-						},
-						{
-							path: "2-order-process-with-service-workers/README.md",
 							type: "blob",
 						},
 					],
@@ -253,7 +246,7 @@ describe("scaffoldSetupBlueprint()", () => {
 			(error: unknown) => {
 				assert.ok(error instanceof BlueprintScaffoldError);
 				assert.match(error.message, /Unknown blueprint "unknown"/);
-				assert.match(error.message, /rocket-launch, service-worker/);
+				assert.match(error.message, /Available blueprints: rocket-launch\./);
 				return true;
 			},
 		);
@@ -382,7 +375,7 @@ describe("scaffoldSetupBlueprint()", () => {
 		mkdirSync(destination, { recursive: true });
 		writeFileSync(
 			join(destination, ".c8ctl-blueprint.json"),
-			JSON.stringify({ id: "service-worker", files: ["README.md"] }),
+			JSON.stringify({ id: "retired-blueprint", files: ["README.md"] }),
 		);
 		let fetchCount = 0;
 		const fetch: BlueprintFetch = async () => {
@@ -401,9 +394,9 @@ describe("scaffoldSetupBlueprint()", () => {
 					assert.ok(error instanceof BlueprintScaffoldError);
 					assert.match(
 						error.message,
-						/already contains the "service-worker" blueprint/,
+						/already contains the "retired-blueprint" blueprint/,
 					);
-					assert.match(error.hint ?? "", /pick the "service-worker" blueprint/);
+					assert.match(error.hint ?? "", /Remove the directory to start over/);
 					return true;
 				},
 			);
