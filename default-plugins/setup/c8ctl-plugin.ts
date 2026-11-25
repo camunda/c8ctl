@@ -1,8 +1,8 @@
 /**
  * `c8ctl setup` — guided first-run setup for local Camunda 8 development.
  *
- * Prints the welcome banner, asks what to set up (checkbox list with
- * dependencies plus a blueprint choice), then runs every selected step.
+ * Prints the welcome banner, asks what to set up, then runs every selected
+ * step.
  * While a step runs on a terminal, a braille spinner ticks on its open
  * title line so long steps don't look frozen (piped and --quiet output
  * stays static). Each step ends in a `[SUCCESS]`, `[ERROR]` or
@@ -73,7 +73,6 @@ import {
 	removeSetupBlueprint,
 	SETUP_BLUEPRINTS,
 	scaffoldSetupBlueprint,
-	setupBlueprintById,
 } from "./blueprint-scaffold.ts";
 import { checkLocalClusterHealth } from "./detectors.ts";
 import {
@@ -118,10 +117,10 @@ interface SetupFlags {
  * cluster does not know.
  */
 const LOCAL_TENANT_ID = "<default>";
+const SETUP_BLUEPRINT = SETUP_BLUEPRINTS[0];
 
 /** State one step hands to a later one. */
 interface SetupRun {
-	blueprintId: string | undefined;
 	blueprintDir?: string;
 	/** Set when the cluster step succeeded — drives the final Operate hint. */
 	clusterStarted?: boolean;
@@ -146,15 +145,13 @@ function applyComponentFlags(
 }
 
 /**
- * The blueprint a non-interactive run installs: the first curated one.
- * Blueprints are deliberately not selectable via a CLI flag — the
- * wizard prompt is the only choice point.
+ * The Rocket Launch blueprint is the example setup always installs.
  */
 function effectiveBlueprint(
 	selected: ReadonlySet<SetupComponentId>,
 ): string | undefined {
 	if (!selected.has("blueprint")) return undefined;
-	return SETUP_BLUEPRINTS[0].id;
+	return SETUP_BLUEPRINT.id;
 }
 
 // ── Step executors ─────────────────────────────────────────────────
@@ -497,9 +494,8 @@ async function runBlueprintScaffold(
 	ctx: PluginCtx,
 	run: SetupRun,
 ): Promise<void> {
-	const id = run.blueprintId ?? SETUP_BLUEPRINTS[0].id;
 	const scaffolded = await scaffoldSetupBlueprint({
-		id,
+		id: SETUP_BLUEPRINT.id,
 		// The completion line is the step's takeaway — fresh or reused —
 		// so it survives the success collapse; progress chatter does not.
 		onProgress: (event) =>
@@ -515,14 +511,11 @@ async function runBlueprintDeploy(
 	run: SetupRun,
 ): Promise<void> {
 	const { logger } = ctx;
-	const blueprint = setupBlueprintById(
-		run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
-	);
 	const directory = run.blueprintDir;
 	if (!directory) {
 		throw new Error("The blueprint project was not created.");
 	}
-	const deployDir = join(directory, blueprint.deployPath ?? ".");
+	const deployDir = directory;
 
 	// The cluster was started moments ago; re-check so a cluster that
 	// died in between gets a next action instead of a connection dump.
@@ -570,19 +563,21 @@ async function runBlueprintDeploy(
 		rmSync(deployDataDir, { recursive: true, force: true });
 	}
 
-	const processFile = join(directory, blueprint.processFile);
+	const processFile = join(directory, SETUP_BLUEPRINT.processFile);
 	const processId = extractProcessId(readFileSync(processFile, "utf-8"));
 	if (!processId) {
-		throw new Error(`Could not find a process id in ${blueprint.processFile}.`);
+		throw new Error(
+			`Could not find a process id in ${SETUP_BLUEPRINT.processFile}.`,
+		);
 	}
-	logger.info(`Starting a ${blueprint.name} process instance...`);
+	logger.info(`Starting a ${SETUP_BLUEPRINT.name} process instance...`);
 	const created = await c8ctl
 		.createClient(DEFAULT_PROFILE)
 		.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists(processId),
 			tenantId: TenantId.assumeExists(LOCAL_TENANT_ID),
-			...(blueprint.startVariables !== undefined && {
-				variables: blueprint.startVariables,
+			...(SETUP_BLUEPRINT.startVariables !== undefined && {
+				variables: SETUP_BLUEPRINT.startVariables,
 			}),
 		});
 	logger.info(`Process instance created: ${created.processInstanceKey}`);
@@ -768,11 +763,10 @@ function withBufferedOutput(
 async function executePlan(
 	ctx: PluginCtx,
 	selected: ReadonlySet<SetupComponentId>,
-	blueprintId: string | undefined,
 	{ color }: { color: boolean },
 ): Promise<{ failures: number; run: SetupRun }> {
 	const { logger } = ctx;
-	const run: SetupRun = { blueprintId };
+	const run: SetupRun = {};
 	const succeeded = new Set<SetupStepId>();
 	let failures = 0;
 	const width = Math.max(...SETUP_STEPS.map((step) => step.title.length));
@@ -1451,23 +1445,7 @@ async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 	}
 	selected = applyComponentFlags(selected, flags);
 
-	// Every question comes before any work: pick the blueprint next.
-	let blueprintId = effectiveBlueprint(selected);
-	if (selected.has("blueprint") && interactive) {
-		const choice = await ctx.prompt.select({
-			message: "Which starter blueprint should we install?",
-			options: SETUP_BLUEPRINTS.map((b) => ({
-				label: b.name,
-				description: `${b.description} — guide: ${b.guideUrl}`,
-				value: b.id,
-			})),
-		});
-		if (choice.cancelled) {
-			logger.info("Cancelled — nothing was changed.");
-			return;
-		}
-		blueprintId = choice.value;
-	}
+	const blueprintId = effectiveBlueprint(selected);
 
 	if (jsonMode) {
 		logger.json(setupPlanPayload(selected, { blueprint: blueprintId }));
@@ -1494,9 +1472,7 @@ async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 		);
 	}
 
-	const { failures, run } = await executePlan(ctx, selected, blueprintId, {
-		color,
-	});
+	const { failures, run } = await executePlan(ctx, selected, { color });
 
 	// The takeaway of the whole run, boxed so it stands apart from the
 	// step report above it. A blueprint owns its actionable lines (what
@@ -1504,22 +1480,19 @@ async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 	// running cluster, point at the first process run instead.
 	const nextSteps: string[] = [];
 	if (run.blueprintDir) {
-		const blueprint = setupBlueprintById(
-			run.blueprintId ?? SETUP_BLUEPRINTS[0].id,
-		);
 		// Outcome lines describe the started instance — claim them only
 		// when the deploy step actually started one. On a failed deploy
 		// the Project/Guide references below still apply.
 		if (run.processInstanceKey !== undefined) {
 			nextSteps.push(
-				...blueprint.nextSteps({
+				...SETUP_BLUEPRINT.nextSteps({
 					projectDir: run.blueprintDir,
 					processInstanceKey: run.processInstanceKey,
 				}),
 			);
 		}
 		nextSteps.push(`Project: ${run.blueprintDir}`);
-		nextSteps.push(`Guide: ${blueprint.guideUrl}`);
+		nextSteps.push(`Guide: ${SETUP_BLUEPRINT.guideUrl}`);
 	} else if (run.clusterStarted) {
 		// Both suggestions pin the local profile and its <default> tenant —
 		// the session's active profile and tenant may point at a remote
@@ -1528,7 +1501,7 @@ async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 		nextSteps.push("Run your first process:");
 		nextSteps.push('  c8ctl use tenant "<default>"');
 		nextSteps.push("  c8ctl run my-process.bpmn --profile local");
-		nextSteps.push('Or re-run "c8ctl setup" and pick a starter blueprint.');
+		nextSteps.push('Or re-run "c8ctl setup" and include the example project.');
 	}
 	if (run.clusterStarted) {
 		nextSteps.push("Operate: http://localhost:8080/operate (demo/demo)");
@@ -1586,15 +1559,15 @@ async function setupHandler(
 	}
 }
 
-const SETUP_HELP_DESCRIPTION = `Guided first-run setup: install a local cluster, a starter blueprint project, and AI assistant tooling.
+const SETUP_HELP_DESCRIPTION = `Guided first-run setup: install a local cluster, the Rocket Launch example, and AI assistant tooling.
 
-The wizard offers to start a local cluster (downloading Camunda 8 Run on first run), install Desktop Modeler, create a starter project from a blueprint, deploy and run it, and set up AI assistant tooling. Nothing is installed without your say.
+The wizard offers to start a local cluster (downloading Camunda 8 Run on first run), install Desktop Modeler, create the Rocket Launch example, deploy and run it, and set up AI assistant tooling. Nothing is installed without your say.
 
 Each step announces its title and ends in [SUCCESS], [ERROR] or [SKIPPED]; a step's own output is shown only when it fails, and a failed step does not stop the rest. The blueprint and the cluster MCP server need the local cluster — deselect the cluster and both options are disabled.
 
 A browser window opens when the local cluster reports healthy; the docs MCP server asks you to sign in in a browser on first use — announced up front.
 
-A run without a selection (piped output, CI) installs nothing unless you pass --yes; --json prints the plan without executing. The starter blueprint is chosen in the wizard; a non-interactive --yes run uses Rocket Launch.
+A run without a selection (piped output, CI) installs nothing unless you pass --yes; --json prints the plan without executing. Setup always uses the Rocket Launch example.
 
 Exit code 0: every selected setup step succeeded, or nothing was installed for lack of a go-ahead (wizard cancelled with Escape; a piped, --quiet or JSON-mode run without --yes; --json or --dry-run printing the plan). Ctrl+C ends the wizard by signal (130 on POSIX shells). A re-run reuses finished work where possible; the deploy, process start and skills install repeat by design. Exit code 1: arguments failed validation, or a step failed — other eligible steps still ran, while dependents (and the deploy finale after any failure) were skipped.
 

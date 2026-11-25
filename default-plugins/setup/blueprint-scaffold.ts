@@ -36,16 +36,8 @@ export interface BlueprintSource {
 export interface SetupBlueprint {
 	readonly id: string;
 	readonly name: string;
-	readonly description: string;
 	readonly guideUrl: string;
 	readonly source: BlueprintSource;
-	/**
-	 * Directory to deploy, relative to the scaffolded project root. Some
-	 * projects carry several copies of a model (e.g. one per worker
-	 * language); deploying the whole project would deploy the same
-	 * definition twice, which Camunda rejects. Default: the project root.
-	 */
-	readonly deployPath?: string;
 	/**
 	 * The BPMN file whose process setup starts after deploying, relative
 	 * to the scaffolded project root.
@@ -78,7 +70,6 @@ export const SETUP_BLUEPRINTS = [
 	{
 		id: "rocket-launch",
 		name: "Rocket Launch",
-		description: "A fully automated hello-world process with a decision.",
 		guideUrl:
 			"https://docs.camunda.io/docs/guides/getting-started-hello-world/",
 		source: {
@@ -109,55 +100,7 @@ export const SETUP_BLUEPRINTS = [
 			`Run again:  c8ctl run "${join(projectDir, "rocket-launch.bpmn")}" --profile local --variables '${JSON.stringify(ROCKET_LAUNCH_START_VARIABLES)}'`,
 		],
 	},
-	{
-		id: "service-worker",
-		name: "Service worker",
-		description: "An order process with service worker implementations.",
-		guideUrl: "https://docs.camunda.io/docs/guides/getting-started-example/",
-		source: {
-			owner: "camunda",
-			repo: "camunda-8-get-started",
-			ref: "main",
-			path: "2-order-process-with-service-workers",
-		},
-		// The worker implementations each embed a copy of the model; only
-		// the bpmn/ directory is deployed.
-		deployPath: "bpmn",
-		processFile: "bpmn/order-process.bpmn",
-		// The started instance stalls at its first service task until a
-		// worker connects — starting one is the whole point of the box.
-		// One block per shipped worker language. Node.js and Python cd
-		// into the worker directory: a bare `npm install --prefix <dir>`
-		// is misread by npm on Windows as a global install of the
-		// caller's directory, and the Python worker needs a virtualenv —
-		// pip into an externally managed system Python fails (PEP 668).
-		// Java and C# can address the project directly: -f and --project
-		// share neither defect. Paths are quoted (the working directory
-		// may contain spaces), every command gets its own line (&& is a
-		// syntax error in Windows PowerShell 5.1), and all lines stay
-		// printable ASCII so the box keeps its borders.
-		nextSteps: ({ projectDir, processInstanceKey }) => [
-			"Process instance is running on the local cluster.",
-			"It waits at the first service task until a worker connects.",
-			`Open it:  http://localhost:8080/operate/processes/${processInstanceKey}`,
-			"          (login using demo / demo as username / password)",
-			"",
-			"Start a worker in your language:",
-			`  Node.js:  cd "${join(projectDir, "nodejs")}"`,
-			"            npm install",
-			"            npm start",
-			`  Python:   cd "${join(projectDir, "python")}"`,
-			"            python -m venv .venv",
-			"            source .venv/bin/activate   # Windows: .venv\\Scripts\\activate",
-			"            pip install -r requirements.txt",
-			"            python main.py",
-			`  Java:     mvn -f "${join(projectDir, "java")}" spring-boot:run`,
-			`  C#:       dotnet run --project "${join(projectDir, "csharp")}"`,
-		],
-	},
 ] as const satisfies readonly SetupBlueprint[];
-
-export type SetupBlueprintId = (typeof SETUP_BLUEPRINTS)[number]["id"];
 
 export interface BlueprintResponse {
 	readonly ok: boolean;
@@ -205,7 +148,7 @@ export interface ScaffoldedSetupBlueprint {
 }
 
 export interface SetupBlueprintRemoval {
-	readonly blueprint: SetupBlueprint;
+	readonly blueprint: Pick<SetupBlueprint, "id" | "name">;
 	readonly directory: string;
 	readonly files: readonly string[];
 	readonly markerContent: string;
@@ -506,14 +449,6 @@ function readRemovalMarker(
 		);
 	}
 
-	const blueprint = SETUP_BLUEPRINTS.find(
-		(candidate) => candidate.id === value.id,
-	);
-	if (!blueprint) {
-		throw new BlueprintScaffoldError(
-			`Cannot safely remove the blueprint in ${directory}: "${value.id}" is not a supported setup blueprint.`,
-		);
-	}
 	if (
 		value.files.some(
 			(file) => !isSafeRelativePath(file) || file === MARKER_FILE,
@@ -534,7 +469,8 @@ function readRemovalMarker(
 
 /**
  * Find setup-generated blueprint projects in the current directory or its
- * immediate children. Only projects with a valid setup marker are included.
+ * immediate children. Markers remain removable after their catalog entry is
+ * retired, so upgrades do not strand previously installed projects.
  */
 export function planSetupBlueprintRemovals({
 	cwd = process.cwd(),
@@ -544,10 +480,17 @@ export function planSetupBlueprintRemovals({
 	onError?: (directory: string, error: unknown) => void;
 } = {}): SetupBlueprintRemoval[] {
 	const root = resolve(cwd);
-	const directories = [
-		root,
-		...SETUP_BLUEPRINTS.map((blueprint) => resolve(root, blueprint.id)),
-	];
+	const directories = [root];
+	try {
+		directories.push(
+			...readdirSync(root, { withFileTypes: true })
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => resolve(root, entry.name)),
+		);
+	} catch (error) {
+		if (!onError) throw error;
+		onError(root, error);
+	}
 	const seen = new Set<string>();
 	const removals: SetupBlueprintRemoval[] = [];
 
@@ -560,12 +503,10 @@ export function planSetupBlueprintRemovals({
 			if (!result) continue;
 			const blueprint = SETUP_BLUEPRINTS.find(
 				(candidate) => candidate.id === result.marker.id,
-			);
-			if (!blueprint) {
-				throw new BlueprintScaffoldError(
-					`Cannot safely remove the blueprint in ${directory}: its marker is unsupported.`,
-				);
-			}
+			) ?? {
+				id: result.marker.id,
+				name: result.marker.id,
+			};
 			removals.push({
 				blueprint,
 				directory,
@@ -826,7 +767,7 @@ export async function scaffoldSetupBlueprint({
 		throw new BlueprintScaffoldError(
 			`Blueprint destination ${directory} already contains the "${marker.id}" blueprint.`,
 			{
-				hint: `Remove the directory to start over, or keep it and pick the "${marker.id}" blueprint in the setup wizard.`,
+				hint: "Remove the directory to start over; existing files are never overwritten.",
 			},
 		);
 	}

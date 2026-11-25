@@ -6,12 +6,11 @@ development.
 ## Commands
 
 - `c8ctl setup` — the guided wizard: start a local cluster (downloading
-  Camunda 8 Run on first run), install Desktop Modeler, create a starter
-  project from a blueprint, deploy and run it, and set up AI assistant
-  tooling (skills, MCP servers). Nothing is installed without a selection or
-  `--yes`.
-- `c8ctl setup --yes` — set up the defaults without prompting (Rocket Launch
-  blueprint).
+  Camunda 8 Run on first run), install Desktop Modeler, create the Rocket
+  Launch example, deploy and run it, and set up AI assistant tooling (skills,
+  MCP servers). Nothing is installed without a selection or `--yes`.
+- `c8ctl setup --yes` — set up the defaults without prompting, including the
+  Rocket Launch example.
 - `c8ctl setup --remove` — preview and remove setup-managed MCP entries,
   Camunda skills, a c8ctl-managed Desktop Modeler installation, blueprint
   files, and the local cluster: the cluster is stopped, and its runtime

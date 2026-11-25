@@ -206,7 +206,7 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 	{
 		id: "scaffold-blueprint",
 		title: "Create the blueprint project",
-		detail: "Rocket Launch or Service worker",
+		detail: "Rocket Launch example",
 		component: "blueprint",
 	},
 	{

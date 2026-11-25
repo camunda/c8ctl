@@ -356,12 +356,12 @@ describe("setupPlanPayload()", () => {
 		assert.strictEqual(prereq?.status, "planned");
 	});
 
-	test("reports the chosen blueprint, null when none was picked", () => {
+	test("reports the setup blueprint, null when none was selected", () => {
 		assert.strictEqual(setupPlanPayload(defaultSelection()).blueprint, null);
 		assert.strictEqual(
-			setupPlanPayload(defaultSelection(), { blueprint: "service-worker" })
+			setupPlanPayload(defaultSelection(), { blueprint: "rocket-launch" })
 				.blueprint,
-			"service-worker",
+			"rocket-launch",
 		);
 	});
 });
