@@ -1455,6 +1455,50 @@ describe("multiSelect()", () => {
 				`box borders are misaligned for an emoji label:\n${plain}`,
 			);
 		});
+
+		test("composed-emoji submitLabels keep the box borders aligned", async () => {
+			// ZWJ join, skin-tone modifier, flag pair, VS16 form — each
+			// renders as a single two-cell glyph.
+			for (const submitLabel of ["👩‍💻", "👍🏽", "🇬🇧", "❤️"]) {
+				const io = fakeTTY();
+				type(io, TAB, ENTER);
+				await multiSelect({
+					message: "Pick",
+					options: CHECKED_OPTIONS,
+					submitLabel,
+					io,
+				});
+				const plain = stripVTControlCharacters(io.text());
+				const inner = `  ${submitLabel} — 2 of 3 selected ➜  `;
+				const border = "─".repeat(26);
+				assert.ok(
+					plain.includes(`╭${border}╮\n  │${inner}│\n  ╰${border}╯`),
+					`box borders are misaligned for ${submitLabel}:\n${plain}`,
+				);
+			}
+		});
+
+		test("a narrow terminal truncates the box instead of wrapping it", async () => {
+			const io = fakeTTY();
+			io.output.columns = 26;
+			type(io, TAB, ENTER);
+			await multiSelect({
+				message: "Pick",
+				options: CHECKED_OPTIONS,
+				// 20 ASCII + 确认 (4 cells): far wider than the terminal —
+				// the wrap-boundary case that used to miscount rows.
+				submitLabel: `${"A".repeat(20)}确认`,
+				io,
+			});
+			const plain = stripVTControlCharacters(io.text());
+			// 26 columns − indent (2) − borders (2) − slack (2) = 20-cell
+			// inner, cut at a grapheme boundary with an ellipsis.
+			const border = "─".repeat(20);
+			assert.ok(
+				plain.includes(`╭${border}╮\n  │  AAAAAAAAAAAAAAAAA…│\n  ╰${border}╯`),
+				`box wrapped or borders misaligned at 26 columns:\n${plain}`,
+			);
+		});
 	});
 });
 

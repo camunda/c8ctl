@@ -519,15 +519,41 @@ export type MultiSelectResult<T> =
 const defaultMultiSelectKeyHint = (submitLabel: string): string =>
 	`↑/↓ move · space/enter toggle · a all · tab to ${submitLabel} · esc cancel`;
 
+/** Grapheme segmentation: composed emoji (ZWJ joins, skin-tone
+ * modifiers, flag pairs, VS16 forms) are one glyph, not a sum of
+ * code-point widths. */
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+	granularity: "grapheme",
+});
+
 /**
- * Terminal display width of a string in cells: East-Asian wide and
- * fullwidth code points occupy two cells; combining marks, format
- * controls and variation selectors occupy none. Sizes the submit
- * button's box so its borders stay aligned for non-ASCII labels.
+ * Terminal display width of a string in cells. Sizes and truncates
+ * the submit button's box so its borders stay aligned for non-ASCII
+ * labels.
  */
 function displayWidth(text: string): number {
 	let width = 0;
-	for (const char of text) {
+	for (const { segment } of graphemeSegmenter.segment(text)) {
+		width += graphemeWidth(segment);
+	}
+	return width;
+}
+
+/** Terminal cells occupied by one grapheme cluster. */
+function graphemeWidth(cluster: string): number {
+	// ZWJ-joined emoji (👩‍💻), skin-tone-modified emoji (👍🏽), flag pairs
+	// (🇬🇧) and VS16 emoji forms (❤️, keycaps) render as a single
+	// two-cell glyph.
+	if (
+		cluster.includes("\u200d") ||
+		/\p{Emoji_Modifier}/u.test(cluster) ||
+		/\p{Regional_Indicator}/u.test(cluster) ||
+		(cluster.includes("\ufe0f") && /\p{Emoji}/u.test(cluster))
+	) {
+		return 2;
+	}
+	let width = 0;
+	for (const char of cluster) {
 		const code = char.codePointAt(0) ?? 0;
 		if (
 			// combining marks, format controls (incl. ZWJ), variation selectors
@@ -540,6 +566,24 @@ function displayWidth(text: string): number {
 		width += isWideCodePoint(code) || isEmojiPresentation(char) ? 2 : 1;
 	}
 	return width;
+}
+
+/**
+ * The longest prefix of `text` that fits `maxCells` terminal cells,
+ * marked with an ellipsis when truncated. Cuts at grapheme
+ * boundaries, so a composed emoji is never split.
+ */
+function truncateToWidth(text: string, maxCells: number): string {
+	if (displayWidth(text) <= maxCells) return text;
+	let out = "";
+	let width = 1; // one cell reserved for the ellipsis
+	for (const { segment } of graphemeSegmenter.segment(text)) {
+		const segmentWidth = graphemeWidth(segment);
+		if (width + segmentWidth > maxCells) break;
+		out += segment;
+		width += segmentWidth;
+	}
+	return `${out}…`;
 }
 
 /**
@@ -759,8 +803,11 @@ export async function multiSelect<T>(
 		};
 		// The submit button sits below the footer line, drawn as a
 		// bordered box (top border, label, bottom border) so it reads as
-		// a clickable button rather than another list row. All three
-		// lines are fixed-height but can wrap.
+		// a clickable button rather than another list row. The box is
+		// truncated to the terminal width instead of wrapping: a wrapped
+		// box looks broken, and a constant one-physical-row-per-line
+		// layout keeps rewind and tail-erasure accounting exact even
+		// when wide characters would otherwise straddle the last column.
 		/** `${submitLabel} — ${n} of ${total} selected ➜` — the trailing
 		 * arrow is the wizard affordance: this button advances to the
 		 * next step. */
@@ -768,8 +815,11 @@ export async function multiSelect<T>(
 			const selected = state.effective.filter(Boolean).length;
 			return `${submitLabel} — ${selected} of ${options.length} selected ➜`;
 		};
-		/** Button label with two spaces of padding on each side. */
-		const buttonInner = (): string => `  ${buttonText()}  `;
+		/** Button label with two spaces of padding on each side,
+		 * truncated so "  " (2) + borders (2) + inner stay within the
+		 * terminal with two cells of slack. */
+		const buttonInner = (): string =>
+			truncateToWidth(`  ${buttonText()}  `, Math.max(4, cols - 6));
 		// "  " (2) + "│" (1) + inner + "│" (1); inner is measured in
 		// terminal cells, not code units, so CJK labels keep the box
 		// borders aligned.
