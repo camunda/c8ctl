@@ -267,15 +267,17 @@ export interface MockCluster {
 /**
  * Start a mock cluster on an ephemeral loopback port. `/topology` reports
  * `gatewayVersion`; `/deployments` records the multipart file names and
- * answers with an empty successful deployment, or with an RFC 9457
+ * answers with one result per part by default, or with an RFC 9457
  * INVALID_ARGUMENT problem when `rejectDeployments` is set.
  */
 export async function startMockCluster({
 	gatewayVersion = "8.10.0",
 	rejectDeployments = false,
+	reportedDeploymentCount,
 }: {
 	gatewayVersion?: string;
 	rejectDeployments?: boolean;
+	reportedDeploymentCount?: number;
 } = {}): Promise<MockCluster> {
 	const deployments: string[][] = [];
 	const deploymentBodies: string[] = [];
@@ -311,9 +313,10 @@ export async function startMockCluster({
 			if (req.method === "POST" && url.endsWith("/deployments")) {
 				const body = Buffer.concat(chunks).toString("latin1");
 				deploymentBodies.push(body);
-				deployments.push(
-					[...body.matchAll(/filename="([^"]+)"/g)].map((m) => m[1]).sort(),
-				);
+				const fileNames = [...body.matchAll(/filename="([^"]+)"/g)]
+					.map((m) => m[1])
+					.sort();
+				deployments.push(fileNames);
 				if (rejectDeployments) {
 					send(400, {
 						type: "about:blank",
@@ -324,11 +327,21 @@ export async function startMockCluster({
 					});
 					return;
 				}
+				const responseDeployments = Array.from(
+					{ length: reportedDeploymentCount ?? fileNames.length },
+					() => ({
+						processDefinition: null,
+						decisionDefinition: null,
+						decisionRequirements: null,
+						form: null,
+						resource: null,
+					}),
+				);
 				const succeed = () =>
 					send(200, {
 						deploymentKey: "2251799813685249",
 						tenantId: "<default>",
-						deployments: [],
+						deployments: responseDeployments,
 					});
 				if (holdArmed) {
 					holdArmed = false;
