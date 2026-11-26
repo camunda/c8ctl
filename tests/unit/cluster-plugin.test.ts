@@ -3336,11 +3336,16 @@ describe("Cluster Plugin – extractStartupSummary", () => {
 		assert.strictEqual(plugin.extractStartupSummary(raw), SUMMARY);
 	});
 
+	test("strips ANSI SGR codes from the returned summary", () => {
+		const raw = `System Version Information\n...\n\u001b[90m${SUMMARY}\u001b[0m\n`;
+		assert.strictEqual(plugin.extractStartupSummary(raw), SUMMARY);
+	});
+
 	test("cuts the c8run log lines that follow the summary", () => {
 		// c8run prints the summary once Camunda is healthy, then keeps
 		// logging to stderr while Connectors starts — dumping that tail
 		// looks like a second startup.
-		const raw = `${SUMMARY}\n\n-------------------------------------------\n9:57AM DBG Failed to read PID from file. This is expected for the first run.\n9:57AM INF Started process: /tmp/c8run/connectors.process pid=31924\n9:58AM INF All processes are running and healthy, exiting script...\n`;
+		const raw = `${SUMMARY}\n\n-------------------------------------------\n\u001b[90m9:57AM\u001b[0m \u001b[32mINF\u001b[0m Started process: /tmp/c8run/connectors.process pid=31924\n9:57AM INF All processes are running and healthy, exiting script...\n`;
 		const extracted = plugin.extractStartupSummary(raw);
 		assert.ok(extracted.startsWith("- Operate:"), extracted);
 		assert.ok(
