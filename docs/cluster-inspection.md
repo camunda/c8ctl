@@ -466,6 +466,9 @@ c8 search inc --state=ACTIVE --errorType=JOB_NO_RETRIES
 
 # Filter by creation time
 c8 search inc --between=2025-03-01..2025-03-05
+
+# Include the incidents of the instances it called (requires --processInstanceKey)
+c8 search inc --processInstanceKey=2251799813685249 --includeCalled
 ```
 
 ### Search jobs
@@ -509,6 +512,36 @@ c8 search ws --waitStateType=JOB
 # Filter by BPMN element type, or by element ID (supports wildcards)
 c8 search ws --elementType=SERVICE_TASK
 c8 search ws --elementId='*Approve*'
+```
+
+### Search element instances
+
+Element instances are the elements a process instance has entered — active, completed, or terminated. Use `search element-instance` (alias `ei`):
+
+```bash
+# All element instances of a process instance
+c8 search ei --processInstanceKey=2251799813685249
+
+# Filter by state (ACTIVE, COMPLETED, TERMINATED)
+c8 search ei --processInstanceKey=2251799813685249 --state=ACTIVE
+
+# Filter by BPMN element type, or by element ID (supports wildcards)
+c8 search ei --elementType=USER_TASK
+c8 search ei --elementId='*Approve*'
+```
+
+### Search message subscriptions
+
+```bash
+# All message subscriptions of a process instance
+c8 search message-subscriptions --processInstanceKey=2251799813685249
+
+# Filter by message name or correlation key (supports wildcards)
+c8 search message-subscriptions --messageName='order-*'
+c8 search message-subscriptions --correlationKey=order-123
+
+# Filter by state (CREATED, CORRELATED, DELETED, MIGRATED)
+c8 search message-subscriptions --state=CREATED
 ```
 
 ## Variables
