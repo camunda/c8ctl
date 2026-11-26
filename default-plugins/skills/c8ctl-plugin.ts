@@ -548,7 +548,12 @@ async function skillsHandler(
 		}
 
 		for (const harness of harnesses) {
-			await runSkillInstall(harness);
+			const { unmanaged } = await runSkillInstall(harness);
+			if (unmanaged.length > 0) {
+				logger.warn(
+					`Kept ${unmanaged.length} Camunda skill${unmanaged.length === 1 ? "" : "s"} for ${HARNESS_LABELS[harness] ?? harness} that another tool installed: ${unmanaged.join(", ")}. Update them with that tool, or replace them so c8ctl can update them: gh skill install ${CAMUNDA_SKILLS_REPOSITORY} --all --agent ${harness} --scope user --force`,
+				);
+			}
 		}
 
 		const labels = harnesses

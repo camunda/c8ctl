@@ -634,7 +634,9 @@ async function runSkillsInstall(ctx: PluginCtx): Promise<void> {
 		);
 		// The skills plugin owns the install; one child per harness keeps
 		// per-harness failure granularity.
-		await spawnC8ctl(ctx, ["skills", "install", "--harness", harness]);
+		await spawnC8ctl(ctx, ["skills", "install", "--harness", harness], {
+			promoteStderrLine: (line) => line.includes("that another tool installed"),
+		});
 	}
 }
 

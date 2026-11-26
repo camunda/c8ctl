@@ -73,6 +73,10 @@
  *   C8CTL_SETUP_STUB_SKILL_NAME_AFTER_FIRST_LIST=name and
  *   C8CTL_SETUP_STUB_SKILL_NAME_STATE=file — report a changed skill identity
  *                                   after the first `gh skill list`.
+ *   C8CTL_SETUP_STUB_UNMANAGED_SKILLS=1 — list camunda-c8ctl without a
+ *                                   source, as another installer leaves
+ *                                   it, and refuse installs over existing
+ *                                   skill directories, as gh does.
  *   C8CTL_SETUP_STUB_MCP_CONFLICT_PATH=file — replace the orchestration
  *                                   entry with a foreign one before the
  *                                   first `mcp uninstall` child.
@@ -314,6 +318,22 @@ function fakeGh(commandArgs: string[]): {
 	if (capture) {
 		fs.appendFileSync(capture, `${JSON.stringify(commandArgs)}\n`);
 	}
+	const unmanagedSkills = process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILLS === "1";
+	if (commandArgs[1] === "list" && unmanagedSkills) {
+		return {
+			status: 0,
+			stdout: JSON.stringify(
+				CAMUNDA_SKILL_NAMES.filter((skillName) =>
+					fs.existsSync(join(skillRoot, skillName)),
+				).map((skillName) => ({
+					skillName,
+					sourceURL: "",
+					path: join(skillRoot, skillName),
+				})),
+			),
+			stderr: "",
+		};
+	}
 	if (commandArgs[1] === "list") {
 		if (failStep === "list-skills") {
 			return {
@@ -425,6 +445,16 @@ function fakeGh(commandArgs: string[]): {
 		const requestedSkills = commandArgs.includes("--all")
 			? CAMUNDA_SKILL_NAMES
 			: [commandArgs[3]].filter((skillName) => skillName !== undefined);
+		const existing = requestedSkills.filter((skillName) =>
+			fs.existsSync(join(skillRoot, skillName)),
+		);
+		if (unmanagedSkills && existing.length > 0) {
+			return {
+				status: 1,
+				stdout: "",
+				stderr: `skills already installed: ${existing.join(", ")} (use --force to overwrite)`,
+			};
+		}
 		for (const skillName of requestedSkills) {
 			fs.mkdirSync(join(skillRoot, skillName), { recursive: true });
 		}
