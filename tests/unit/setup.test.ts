@@ -1086,6 +1086,7 @@ describe("c8ctl setup", () => {
 			);
 			assert.strictEqual(removed.status, 0, removed.stderr + removed.stdout);
 			assert.match(removed.stdout, /Setup removal finished/);
+			assert.doesNotMatch(removed.stdout, /nothing was removed/i);
 			assert.match(removed.stdout, /Removed Camunda Modeler from/);
 			assert.match(removed.stdout, /Removed Camunda skill "camunda-c8ctl"/);
 			assert.ok(!existsSync(editedBlueprint));
@@ -2073,6 +2074,7 @@ describe("c8ctl setup", () => {
 				confirmed.stderr + confirmed.stdout,
 			);
 			assert.match(confirmed.stdout, /Setup removal finished/);
+			assert.doesNotMatch(confirmed.stdout, /nothing was removed/i);
 			assert.ok(!existsSync(blueprintFile));
 		} finally {
 			stub.cleanup();
