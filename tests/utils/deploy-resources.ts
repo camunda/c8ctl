@@ -264,6 +264,10 @@ export interface MockCluster {
 	close: () => Promise<void>;
 }
 
+function decodeMultipartQuotedPairs(value: string): string {
+	return value.replace(/\\(["\\])/g, "$1");
+}
+
 /**
  * Start a mock cluster on an ephemeral loopback port. `/topology` reports
  * `gatewayVersion`; `/deployments` records the multipart file names and
@@ -334,7 +338,9 @@ export async function startMockCluster({
 					Array.from(
 						{ length: reportedDeploymentCount ?? fileNames.length },
 						(_, index) =>
-							fileNames[Math.min(index, fileNames.length - 1)] ?? "",
+							decodeMultipartQuotedPairs(
+								fileNames[Math.min(index, fileNames.length - 1)] ?? "",
+							),
 					);
 				const responseDeployments = responseNames.map((resourceName) => {
 					const metadata = {
