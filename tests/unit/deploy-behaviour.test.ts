@@ -100,12 +100,14 @@ describe("CLI behavioural: deploy", () => {
 		for (const [collision, firstName, secondName] of [
 			["duplicate basenames", "main.bpmn", "main.bpmn"],
 			["multipart-escaped names", 'main".bpmn', "main%22.bpmn"],
+			["quoted-pair escaped names", "a\\b.bpmn", "a\\\\b.bpmn"],
 		] as const) {
 			test(`--dry-run rejects ${collision} from ${label}`, {
 				skip:
 					process.platform === "win32" &&
-					collision === "multipart-escaped names"
-						? "Windows does not permit quotes in file names"
+					(collision === "multipart-escaped names" ||
+						collision === "quoted-pair escaped names")
+						? "Windows does not permit these characters in file names"
 						: false,
 			}, async () => {
 				const root = join(tempDir, directory);

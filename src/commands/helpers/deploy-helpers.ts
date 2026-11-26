@@ -509,6 +509,16 @@ function escapeMultipartFilename(name: string): string {
 	return name.replace(/[\n\r"]/g, (character) => encodeURIComponent(character));
 }
 
+/** Decode quoted pairs the cluster's Content-Disposition parser removes. */
+function decodeContentDispositionQuotedPairs(name: string): string {
+	return name.replace(/\\(["\\])/g, "$1");
+}
+
+/** Normalize a local or returned name to the identity used by the cluster. */
+function getMultipartFilenameKey(name: string): string {
+	return decodeContentDispositionQuotedPairs(escapeMultipartFilename(name));
+}
+
 /**
  * Find multipart filenames that would identify more than one local resource.
  */
@@ -516,7 +526,7 @@ function findDuplicateResourceNames(
 	resources: ResourceFile[],
 ): Map<string, string[]> {
 	const pathsByName = resources.reduce((map, resource) => {
-		const multipartFilename = escapeMultipartFilename(resource.name);
+		const multipartFilename = getMultipartFilenameKey(resource.name);
 		map.set(multipartFilename, [
 			...(map.get(multipartFilename) ?? []),
 			resource.path,
@@ -1061,11 +1071,12 @@ export async function deployResources(
 	const resourcesByName = new Map<string, ResourceFile[]>();
 
 	resources.forEach((r) => {
-		const existing = resourcesByName.get(r.name);
+		const multipartFilename = getMultipartFilenameKey(r.name);
+		const existing = resourcesByName.get(multipartFilename);
 		if (existing) {
 			existing.push(r);
 		} else {
-			resourcesByName.set(r.name, [r]);
+			resourcesByName.set(multipartFilename, [r]);
 		}
 
 		const ext = extname(r.path);
@@ -1092,7 +1103,7 @@ export async function deployResources(
 
 	/** Pop the first resource with a matching basename, or return undefined. */
 	function popResourceByName(name: string): ResourceFile | undefined {
-		const bucket = resourcesByName.get(name);
+		const bucket = resourcesByName.get(getMultipartFilenameKey(name));
 		if (!bucket || bucket.length === 0) return undefined;
 		return bucket.shift();
 	}
@@ -1184,12 +1195,11 @@ export async function deployResources(
 		(name): name is string => typeof name === "string" && name.length > 0,
 	);
 	const deployedFilenames = new Set(
-		responseResourceNames.map(escapeMultipartFilename),
+		responseResourceNames.map(getMultipartFilenameKey),
 	);
-	const missingResources = resources.filter(
-		(resource) =>
-			!deployedFilenames.has(escapeMultipartFilename(resource.name)),
-	);
+	const missingResources = resources.filter((resource) => {
+		return !deployedFilenames.has(getMultipartFilenameKey(resource.name));
+	});
 	if (missingResources.length > 0) {
 		throw new Error(
 			`Deployment response is missing metadata for submitted file(s): ${missingResources.map((resource) => resource.path).join(", ")}. Verify the cluster state before retrying.`,
