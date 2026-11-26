@@ -596,15 +596,18 @@ describe("c8ctl setup", () => {
 				/Watch it:\s+http:\/\/localhost:8080\/operate\/processes\/2251799813686751/,
 			);
 			assert.match(out, /\(login using demo \/ demo as username \/ password\)/);
-			// The profile is pinned: the session's active profile may point
-			// at a remote cluster. The tenant is deliberately not pinned —
-			// the first-run audience has no session tenant, so resolution
-			// already lands on <default>.
+			// The profile and tenant are pinned: the session or environment
+			// may otherwise select a remote cluster or tenant.
 			assert.match(
 				out,
 				/Inspect it:\s+c8ctl get process-instance 2251799813686751 --profile local/,
 			);
-			assert.doesNotMatch(out, /use tenant/);
+			assert.match(out, /Use tenant:\s+c8ctl use tenant "<default>"/);
+			assert.ok(
+				out.indexOf('Use tenant: c8ctl use tenant "<default>"') <
+					out.indexOf("Run again:"),
+				"the tenant must be pinned before the follow-up run command",
+			);
 			// The run path is quoted — the working directory may contain
 			// spaces — and the rerun carries the same start variables
 			// setup used, so the mission decision cannot incident.
@@ -640,6 +643,37 @@ describe("c8ctl setup", () => {
 				missionName: "Apollo",
 				fuelLevel: 80,
 			});
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("failed-deploy recovery hints pin the default tenant over session state", async () => {
+		const stub = stubbedExecution();
+		stub.options.env.C8CTL_DATA_DIR = join(stub.home, "data");
+		stub.options.env.C8CTL_SETUP_STUB_CLUSTER_DIES_BEFORE_DEPLOY = "1";
+		try {
+			const tenant = await c8WithOptions(
+				stub.options,
+				"use",
+				"tenant",
+				"remote-tenant",
+			);
+			assert.strictEqual(tenant.status, 0, tenant.stderr + tenant.stdout);
+
+			const result = await c8WithOptions(stub.options, "setup", "--yes");
+			const output = stripVTControlCharacters(result.stdout + result.stderr);
+			assert.strictEqual(result.status, 1, output);
+			assert.match(output, /Could not reach the local cluster/);
+			const tenantPinAt = output.indexOf(
+				'Use tenant: c8ctl use tenant "<default>"',
+			);
+			const deployHintAt = output.indexOf(
+				"Then deploy the project with: c8ctl deploy",
+			);
+			assert.ok(tenantPinAt >= 0, output);
+			assert.ok(deployHintAt > tenantPinAt, output);
+			assert.doesNotMatch(output, /&&/);
 		} finally {
 			stub.cleanup();
 		}
@@ -1939,6 +1973,42 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(removal.status, 0, output);
 			assert.match(output, /Stopped local Camunda 8 cluster/);
 			assert.match(output, /Setup removal finished/);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
+	test("stops an orphaned running cluster when another version is installed", async () => {
+		const stub = stubbedExecution();
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+			const installed = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(
+				installed.status,
+				0,
+				installed.stderr + installed.stdout,
+			);
+			plantC8RunInstall(stub.c8runCache, "8.9.0");
+
+			const preview = await c8WithOptions(stub.options, "setup", "--remove");
+			assert.strictEqual(preview.status, 0, preview.stderr + preview.stdout);
+			assert.match(
+				preview.stdout,
+				/Stop the local cluster and remove Camunda 8 Run 8\.9\.0/,
+			);
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 0, output);
+			assert.match(output, /Stopped local Camunda 8 cluster/);
+			assert.doesNotMatch(output, /was not in the removal preview/);
+			assert.ok(!existsSync(join(stub.c8runCache, "c8run-8.9.0")));
+			assert.ok(!existsSync(join(stub.c8runCache, "cluster.running")));
 		} finally {
 			stub.cleanup();
 		}

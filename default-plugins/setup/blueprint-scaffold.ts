@@ -83,11 +83,10 @@ export const SETUP_BLUEPRINTS = [
 		// Fully automated: setup already deployed and launched an
 		// instance, so the next step is looking at it. The deeplink opens
 		// the started instance in Operate directly — no filter clearing.
-		// The CLI lines pin the local profile (the session's active
-		// profile may point elsewhere) but not the tenant: the first-run
-		// audience has no session tenant, so resolution already lands on
-		// <default>. The rerun carries the same start variables setup
-		// used, or the mission decision incidents; the JSON is
+		// The rerun pins both the local profile and default tenant: session
+		// state or CAMUNDA_DEFAULT_TENANT_ID may point elsewhere. It carries
+		// the same start variables setup used, or the mission decision
+		// incidents; the JSON is
 		// single-quoted, which cmd.exe does not strip — cmd users quote
 		// the other way around. The run path is quoted: the working
 		// directory may contain spaces. All lines stay printable ASCII so
@@ -97,6 +96,7 @@ export const SETUP_BLUEPRINTS = [
 			`Watch it:   http://localhost:8080/operate/processes/${processInstanceKey}`,
 			"            (login using demo / demo as username / password)",
 			`Inspect it: c8ctl get process-instance ${processInstanceKey} --profile local`,
+			'Use tenant: c8ctl use tenant "<default>"',
 			`Run again:  c8ctl run "${join(projectDir, "rocket-launch.bpmn")}" --profile local --variables '${JSON.stringify(ROCKET_LAUNCH_START_VARIABLES)}'`,
 		],
 	},
