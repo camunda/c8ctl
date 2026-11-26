@@ -266,25 +266,32 @@ function releaseLinuxLifecycleLock(): void {
 
 /**
  * Run `body` while the Linux lifecycle lock is held. Signal handlers
- * release the lock because the download interrupt handlers re-raise the
- * signal against the process itself, so this function's `finally` never
- * runs on the interrupt path. The once-listeners are consumed by the
- * first signal, so the re-raise still kills the process by default.
+ * release the lock and remember the first signal. Synchronous `spawnSync`
+ * work defers signal delivery until the body returns, so drain one event-loop
+ * turn before removing the listeners and re-raising the signal.
  */
 async function withLinuxLifecycleLock(
 	ctx: ModelerInstallContext,
 	body: () => ModelerInstallResult | Promise<ModelerInstallResult>,
 ): Promise<ModelerInstallResult> {
 	acquireLinuxLifecycleLock(ctx.logger);
-	const onSignal = (): void => releaseLinuxLifecycleLock();
-	process.once("SIGINT", onSignal);
-	process.once("SIGTERM", onSignal);
+	let interruptedSignal: NodeJS.Signals | undefined;
+	const onSignal = (signal: NodeJS.Signals): void => {
+		interruptedSignal ??= signal;
+		releaseLinuxLifecycleLock();
+	};
+	const onSigint = (): void => onSignal("SIGINT");
+	const onSigterm = (): void => onSignal("SIGTERM");
+	process.once("SIGINT", onSigint);
+	process.once("SIGTERM", onSigterm);
 	try {
 		return await body();
 	} finally {
-		process.off("SIGINT", onSignal);
-		process.off("SIGTERM", onSignal);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		process.off("SIGINT", onSigint);
+		process.off("SIGTERM", onSigterm);
 		releaseLinuxLifecycleLock();
+		if (interruptedSignal) process.kill(process.pid, interruptedSignal);
 	}
 }
 

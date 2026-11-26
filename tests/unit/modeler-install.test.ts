@@ -2373,6 +2373,56 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	for (const signal of ["SIGINT", "SIGTERM"] as const) {
+		test(`exits on ${signal} during synchronous Linux uninstallation`, {
+			skip: isWindows,
+		}, async () => {
+			const sandbox = createLinuxSandbox();
+			const installed = addLinuxInstall(sandbox, "5.52.0");
+			for (const tool of [
+				"xdg-mime",
+				"xdg-desktop-menu",
+				"xdg-icon-resource",
+			]) {
+				sandbox.fakeTool(tool);
+			}
+			const pidFile = join(sandbox.home, "unregister.pid");
+			writeFileSync(
+				join(installed.installDir, "support", "xdg_unregister.sh"),
+				'#!/bin/bash\nprintf \'%s\\n\' "$PPID" > "$UNREGISTER_PID_FILE"\nsleep 1\n',
+				{ mode: 0o755 },
+			);
+			const resultPromise = sandbox.uninstall({
+				FAKE_UID: "0",
+				UNREGISTER_PID_FILE: pidFile,
+			});
+
+			try {
+				await pollUntilValue(
+					async () => (existsSync(pidFile) ? pidFile : undefined),
+					15_000,
+					25,
+					"the synchronous Linux unregistration step",
+				);
+				const pid = Number(readFileSync(pidFile, "utf8"));
+				assert.ok(Number.isInteger(pid) && pid > 0);
+				process.kill(pid, signal);
+
+				const result = await resultPromise;
+				assert.strictEqual(result.timedOut, false, result.stderr);
+				assert.notStrictEqual(result.status, 0, result.stderr);
+				assert.strictEqual(result.signal, signal, result.stderr);
+				assert.ok(
+					!existsSync(sandbox.lockPath),
+					"interrupted uninstall releases its lock",
+				);
+			} finally {
+				await resultPromise;
+				sandbox.cleanup();
+			}
+		});
+	}
+
 	test("refuses to update a partially removed Linux installation, but removes it", {
 		skip: !isLinux,
 	}, async () => {
