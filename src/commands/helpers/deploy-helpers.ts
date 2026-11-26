@@ -514,7 +514,7 @@ function decodeContentDispositionQuotedPairs(name: string): string {
 	return name.replace(/\\(["\\])/g, "$1");
 }
 
-/** Normalize a local or returned name to the identity used by the cluster. */
+/** Normalize a local filename to the identity used by the cluster. */
 function getMultipartFilenameKey(name: string): string {
 	return decodeContentDispositionQuotedPairs(escapeMultipartFilename(name));
 }
@@ -1101,9 +1101,9 @@ export async function deployResources(
 		}
 	});
 
-	/** Pop the first resource with a matching basename, or return undefined. */
+	/** Pop the first resource with a matching cluster-visible name, or return undefined. */
 	function popResourceByName(name: string): ResourceFile | undefined {
-		const bucket = resourcesByName.get(getMultipartFilenameKey(name));
+		const bucket = resourcesByName.get(name);
 		if (!bucket || bucket.length === 0) return undefined;
 		return bucket.shift();
 	}
@@ -1194,9 +1194,7 @@ export async function deployResources(
 	].filter(
 		(name): name is string => typeof name === "string" && name.length > 0,
 	);
-	const deployedFilenames = new Set(
-		responseResourceNames.map(getMultipartFilenameKey),
-	);
+	const deployedFilenames = new Set(responseResourceNames);
 	const missingResources = resources.filter((resource) => {
 		return !deployedFilenames.has(getMultipartFilenameKey(resource.name));
 	});

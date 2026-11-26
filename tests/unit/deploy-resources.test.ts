@@ -1391,16 +1391,16 @@ describe("deployment safety checks", () => {
 		assert.deepStrictEqual(mock.deployments, [["main.bpmn"]]);
 	});
 
-	test("accepts metadata names decoded from multipart quoted pairs", {
+	test("accepts cluster-decoded metadata names with four consecutive backslashes", {
 		skip:
 			process.platform === "win32"
 				? "Windows does not permit backslashes in file names"
 				: false,
 	}, async () => {
-		mock = await startMockCluster({ reportedResourceNames: ["a\\b.bpmn"] });
+		mock = await startMockCluster({ reportedResourceNames: ["a\\\\b.bpmn"] });
 		const root = project(
 			{ deployResources: ["**/*.bpmn"] },
-			{ "folder/a\\\\b.bpmn": BPMN("process") },
+			{ "folder/a\\\\\\\\b.bpmn": BPMN("process") },
 		);
 
 		const result = await c8WithEnv(
@@ -1411,19 +1411,19 @@ describe("deployment safety checks", () => {
 		);
 
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.deepStrictEqual(mock.deployments, [["a\\\\b.bpmn"]]);
+		assert.deepStrictEqual(mock.deployments, [["a\\\\\\\\b.bpmn"]]);
 	});
 
-	test("maps decoded multipart metadata names back to their local resources", {
+	test("maps cluster-decoded metadata names with four consecutive backslashes to local resources", {
 		skip:
 			process.platform === "win32"
 				? "Windows does not permit backslashes in file names"
 				: false,
 	}, async () => {
-		mock = await startMockCluster({ reportedResourceNames: ["a\\b.dmn"] });
+		mock = await startMockCluster({ reportedResourceNames: ["a\\\\b.dmn"] });
 		const root = project(
 			{ deployResources: ["**/*.dmn"] },
-			{ "folder/a\\\\b.dmn": "<definitions/>" },
+			{ "folder/a\\\\\\\\b.dmn": "<definitions/>" },
 		);
 
 		const result = await deployTo(mock.baseUrl, [root]);
@@ -1433,7 +1433,7 @@ describe("deployment safety checks", () => {
 			.split("\n")
 			.find((line) => line.includes("Decision Requirements"));
 		assert.ok(
-			decisionRequirementsRow?.includes("folder/a\\\\b.dmn"),
+			decisionRequirementsRow?.includes("folder/a\\\\\\\\b.dmn"),
 			`decoded metadata should map to the submitted file path: ${result.stdout}`,
 		);
 	});
