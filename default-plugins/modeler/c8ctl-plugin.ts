@@ -129,6 +129,12 @@ async function modelerHandler(
 				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'modeler uninstall'. Fix or remove the flag before removing Camunda Modeler.`,
 			);
 		}
+		const suspiciousFlagValue = ctx.suspiciousFlagValues?.[0];
+		if (canonicalAction === "uninstall" && suspiciousFlagValue !== undefined) {
+			throw new Error(
+				`"${suspiciousFlagValue}" looks like a flag but was passed as a value. Fix the invocation before removing Camunda Modeler.`,
+			);
+		}
 		const operation = {
 			install: installDesktopModeler,
 			update: updateDesktopModeler,

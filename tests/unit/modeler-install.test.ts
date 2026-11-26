@@ -717,23 +717,29 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
-	test("modeler uninstall and remove reject unknown flags before removal", {
+	test("modeler uninstall and remove reject unknown and swallowed flags before removal", {
 		skip: !isMac,
 	}, async () => {
 		for (const action of ["uninstall", "remove"]) {
-			const sandbox = createSandbox();
-			fakeReleaseTools(sandbox);
-			const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
-			writeMacApp(appPath, "5.52.0");
+			for (const flags of [["--mistyped"], ["--fields", "--mistyped"]]) {
+				const sandbox = createSandbox();
+				fakeReleaseTools(sandbox);
+				const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+				writeMacApp(appPath, "5.52.0");
 
-			try {
-				const result = await sandbox.runAction(action, {}, "--mistyped");
-				assert.strictEqual(result.status, 1, result.stdout + result.stderr);
-				assert.match(result.stdout + result.stderr, /--mistyped/);
-				assert.ok(existsSync(appPath));
-				assert.deepStrictEqual(sandbox.toolCalls(), []);
-			} finally {
-				sandbox.cleanup();
+				try {
+					const result = await sandbox.runAction(action, {}, ...flags);
+					const output = result.stdout + result.stderr;
+					assert.strictEqual(result.status, 1, output);
+					assert.match(output, /--mistyped/);
+					if (flags.length > 1) {
+						assert.match(output, /looks like a flag/);
+					}
+					assert.ok(existsSync(appPath));
+					assert.deepStrictEqual(sandbox.toolCalls(), []);
+				} finally {
+					sandbox.cleanup();
+				}
 			}
 		}
 	});
