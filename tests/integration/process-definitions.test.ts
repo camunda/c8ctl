@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
@@ -18,6 +18,14 @@ const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = join(PROJECT_ROOT, "src", "index.ts");
 const POLL_TIMEOUT_MS = ELASTICSEARCH_CONSISTENCY_WAIT_MS + 10_000;
 const POLL_INTERVAL_MS = 2_000;
+
+const camundaVersion = process.env.CAMUNDA_VERSION;
+const pdSuspendResumeSkip =
+	camundaVersion?.startsWith("8.8") === true ||
+	camundaVersion?.startsWith("8.9") === true ||
+	camundaVersion?.startsWith("8.10") === true
+		? `Process definition suspend/resume requires Camunda 8.11+ (CAMUNDA_VERSION=${camundaVersion})`
+		: false;
 
 let dataDir = "";
 
@@ -173,6 +181,186 @@ describe("Process Definition Integration Tests (requires Camunda 8 at localhost:
 		assert.ok(
 			getXmlResult.stdout.includes("simple-process"),
 			"XML should contain the process ID",
+		);
+	});
+});
+
+type SuspensionRow = {
+	processDefinitionKey: string | number;
+	version: number;
+	outcome: string;
+	batchOperationKey: string | number | null;
+};
+
+describe("suspend/resume process-definition", () => {
+	const touchedProcessIds: string[] = [];
+
+	before(async () => {
+		dataDir = mkdtempSync(join(tmpdir(), "c8ctl-pd-suspend-test-"));
+		const outputResult = await cli("output", "json");
+		assert.strictEqual(outputResult.status, 0, outputResult.stderr);
+	});
+
+	after(async () => {
+		// Resume everything we suspended so later tests see active definitions.
+		for (const processId of touchedProcessIds) {
+			await cli("resume", "pd", `--processDefinitionId=${processId}`);
+		}
+		rmSync(dataDir, { recursive: true, force: true });
+	});
+
+	/** Deploy a user-task process under a unique ID; each call with a new `revision` is a new version. */
+	async function deployVersion({
+		processId,
+		revision,
+	}: {
+		processId: string;
+		revision: number;
+	}) {
+		const template = readFileSync(
+			join(PROJECT_ROOT, "tests/fixtures/simple-user-task.bpmn"),
+			"utf8",
+		);
+		const xml = template
+			.replaceAll("simple-user-task", processId)
+			.replace(
+				"<bpmn:process ",
+				`<!-- revision ${revision} -->\n  <bpmn:process `,
+			);
+		const file = join(dataDir, `${processId}-${revision}.bpmn`);
+		writeFileSync(file, xml);
+		const result = await cli("deploy", file);
+		assert.strictEqual(result.status, 0, `Deploy failed: ${result.stderr}`);
+		if (!touchedProcessIds.includes(processId))
+			touchedProcessIds.push(processId);
+	}
+
+	async function searchVersions(processId: string) {
+		let items: ProcessDefinition[] = [];
+		await pollUntil(
+			async () => {
+				const result = await cli("search", "pd", `--id=${processId}`);
+				if (result.status !== 0) return false;
+				try {
+					items = parseJsonOutput<ProcessDefinition[]>(result.stdout);
+					return items.length > 0;
+				} catch {
+					return false;
+				}
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		return items;
+	}
+
+	async function waitForVersionCount({
+		processId,
+		count,
+	}: {
+		processId: string;
+		count: number;
+	}) {
+		let items: ProcessDefinition[] = [];
+		const reached = await pollUntil(
+			async () => {
+				items = await searchVersions(processId);
+				return items.length >= count;
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(reached, `Expected ${count} versions of ${processId}`);
+		return items;
+	}
+
+	async function runRows(...args: string[]) {
+		const result = await cli(...args);
+		assert.strictEqual(
+			result.status,
+			0,
+			`${args.join(" ")} should exit 0. stderr: ${result.stderr}`,
+		);
+		return parseJsonOutput<SuspensionRow[]>(result.stdout);
+	}
+
+	test("suspend by key, repeat the suspend, then resume by key", {
+		skip: pdSuspendResumeSkip,
+	}, async () => {
+		const processId = `pd-suspend-key-${Date.now()}`;
+		await deployVersion({ processId, revision: 1 });
+		const [definition] = await waitForVersionCount({ processId, count: 1 });
+		const key = String(definition.Key);
+
+		const suspended = await runRows("suspend", "pd", key);
+		assert.strictEqual(suspended.length, 1);
+		assert.strictEqual(String(suspended[0].processDefinitionKey), key);
+		assert.strictEqual(suspended[0].outcome, "SUSPENDED");
+
+		const repeated = await runRows("suspend", "pd", key);
+		assert.strictEqual(repeated.length, 1);
+		assert.strictEqual(repeated[0].outcome, "ALREADY_SUSPENDED");
+
+		const resumed = await runRows("resume", "pd", key);
+		assert.strictEqual(resumed.length, 1);
+		assert.strictEqual(resumed[0].outcome, "RESUMED");
+	});
+
+	test("suspend by ID affects all versions without --version and one version with --version", {
+		skip: pdSuspendResumeSkip,
+	}, async () => {
+		const processId = `pd-suspend-id-${Date.now()}`;
+		await deployVersion({ processId, revision: 1 });
+		await deployVersion({ processId, revision: 2 });
+		await waitForVersionCount({ processId, count: 2 });
+
+		const one = await runRows(
+			"suspend",
+			"pd",
+			`--processDefinitionId=${processId}`,
+			"--version=1",
+		);
+		assert.strictEqual(one.length, 1, "--version should affect a single row");
+		assert.strictEqual(one[0].version, 1);
+		assert.strictEqual(one[0].outcome, "SUSPENDED");
+
+		const all = await runRows(
+			"suspend",
+			"pd",
+			`--processDefinitionId=${processId}`,
+		);
+		assert.strictEqual(
+			all.length,
+			2,
+			"no --version should affect every version",
+		);
+		const byVersion = new Map(all.map((row) => [row.version, row.outcome]));
+		assert.strictEqual(byVersion.get(1), "ALREADY_SUSPENDED");
+		assert.strictEqual(byVersion.get(2), "SUSPENDED");
+	});
+
+	test("suspend with includeProcessInstances returns a batch operation key", {
+		skip: pdSuspendResumeSkip,
+	}, async () => {
+		const processId = `pd-suspend-batch-${Date.now()}`;
+		await deployVersion({ processId, revision: 1 });
+		const [definition] = await waitForVersionCount({ processId, count: 1 });
+		const key = String(definition.Key);
+
+		const created = await cli("create", "pi", `--id=${processId}`);
+		assert.strictEqual(created.status, 0, created.stderr);
+
+		const rows = await runRows(
+			"suspend",
+			"pd",
+			key,
+			"--includeProcessInstances",
+		);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].batchOperationKey !== null &&
+				String(rows[0].batchOperationKey) !== "",
+			`Expected a batch operation key, got ${rows[0].batchOperationKey}`,
 		);
 	});
 });
