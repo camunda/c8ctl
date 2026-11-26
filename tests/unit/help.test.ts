@@ -373,6 +373,9 @@ describe("Help Module", () => {
 			output.includes("wait-state (ws)"),
 			"search help should include the ws alias for wait-state",
 		);
+		assert.ok(output.includes("element-instance (ei)"));
+		assert.ok(output.includes("message-subscription"));
+		assert.ok(output.includes("--includeCalled"));
 	});
 
 	test("showCommandHelp shows deploy help", () => {

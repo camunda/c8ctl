@@ -67,6 +67,20 @@ type JobRow = {
 	"Process Instance": string | number;
 	"Tenant ID": string;
 };
+type ElementInstanceRow = {
+	Key: string | number;
+	"Element ID": string;
+	Type: string;
+	State: string;
+	"Process Instance": string | number;
+};
+type MessageSubscriptionRow = {
+	Key: string | number;
+	Message: string;
+	"Correlation Key": string;
+	State: string;
+	"Process Instance": string | number;
+};
 type VariableRow = {
 	Name: string;
 	Value: string;
@@ -1277,5 +1291,138 @@ describe("Search Command Integration Tests (requires Camunda 8 at localhost:8080
 			typeof result.stdout === "string",
 			"CLI should produce string output",
 		);
+	});
+	test("search element instances of a process instance", async () => {
+		await cli("deploy", "tests/fixtures/simple-message-correlation.bpmn");
+		const createResult = await cli(
+			"create",
+			"pi",
+			"--id=simple-message-correlation",
+			`--variables=${JSON.stringify({ orderId: "element-instance-test" })}`,
+		);
+		const piKey = parseCreatedKey(createResult);
+		assert.ok(
+			piKey,
+			`Should have process instance key: ${createResult.stderr}`,
+		);
+
+		const found = await pollUntil(
+			async () => {
+				const result = await cli(
+					"search",
+					"ei",
+					`--processInstanceKey=${piKey}`,
+					"--state=ACTIVE",
+				);
+				const items = parseItems<ElementInstanceRow>(result.stdout);
+				return items.some((ei) => ei["Element ID"] === "Event_1kvqniv");
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+
+		assert.ok(found, "Search should find the waiting message catch event");
+	});
+
+	test("search message subscriptions of a process instance", async () => {
+		await cli("deploy", "tests/fixtures/simple-message-correlation.bpmn");
+		const createResult = await cli(
+			"create",
+			"pi",
+			"--id=simple-message-correlation",
+			`--variables=${JSON.stringify({ orderId: "subscription-test" })}`,
+		);
+		const piKey = parseCreatedKey(createResult);
+		assert.ok(
+			piKey,
+			`Should have process instance key: ${createResult.stderr}`,
+		);
+
+		const subscription = await pollUntilValue(
+			async () => {
+				const result = await cli(
+					"search",
+					"message-subscriptions",
+					`--processInstanceKey=${piKey}`,
+				);
+				return parseItems<MessageSubscriptionRow>(result.stdout)[0];
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+			"message subscription",
+		);
+
+		assert.strictEqual(subscription.Message, "msg_1");
+		assert.strictEqual(subscription["Correlation Key"], "subscription-test");
+	});
+
+	test("search incidents including called instances", async () => {
+		await cli("deploy", "tests/fixtures/simple-will-create-incident.bpmn");
+		await cli("deploy", "tests/fixtures/call-activity-incident.bpmn");
+		const createResult = await cli(
+			"create",
+			"pi",
+			"--id=call-activity-incident",
+		);
+		const parentKey = parseCreatedKey(createResult);
+		assert.ok(
+			parentKey,
+			`Should have process instance key: ${createResult.stderr}`,
+		);
+
+		// Fail the called instance's job to raise the incident there.
+		const childKey = await pollUntilValue(
+			async () => {
+				const result = await cli(
+					"search",
+					"pi",
+					`--parentProcessInstanceKey=${parentKey}`,
+				);
+				const child = parseItems<ProcessInstanceRow>(result.stdout)[0];
+				return child ? String(child.Key) : undefined;
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+			"called process instance",
+		);
+		const jobKey = await pollUntilValue(
+			async () => {
+				const result = await cli(
+					"search",
+					"jobs",
+					"--state=CREATED",
+					`--processInstanceKey=${childKey}`,
+				);
+				const job = parseItems<JobRow>(result.stdout)[0];
+				return job ? String(job.Key) : undefined;
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+			"job of the called instance",
+		);
+		await cli(
+			"fail",
+			"job",
+			jobKey,
+			"--retries=0",
+			"--errorMessage=Intentional failure in a called instance",
+		);
+
+		const incident = await pollUntilValue(
+			async () => {
+				const result = await cli(
+					"search",
+					"inc",
+					`--processInstanceKey=${parentKey}`,
+					"--includeCalled",
+				);
+				return parseItems<IncidentRow>(result.stdout)[0];
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+			"incident of the called instance",
+		);
+
+		assert.strictEqual(String(incident["Process Instance"]), childKey);
 	});
 });

@@ -30,6 +30,7 @@ These flags are accepted by every command.
 | Alias | Resource |
 |-------|----------|
 | `auth` | `authorization` |
+| `ei` | `element-instance` |
 | `inc` | `incident` |
 | `mr` | `mapping-rule` |
 | `msg` | `message` |
@@ -225,7 +226,7 @@ c8ctl list users                                            # List users
 
 Search resources with filters (wildcards, date ranges, case-insensitive)
 
-**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule), ws (wait-state)
+**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule), ws (wait-state), ei (element-instance), message-subscriptions (message-subscription)
 
 **Resource-specific flags:**
 
@@ -290,6 +291,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 | `--errorMessage` | string |  | Filter by error message |
 | `--ierrorMessage` | string |  | Case-insensitive filter by error message |
 | `--iid` | string |  | Case-insensitive filter by BPMN process ID |
+| `--includeCalled` | boolean |  | Also include incidents of the process and decision instances that --processInstanceKey called (combined with other filters: Camunda 8.9+) |
 
 </details>
 
@@ -400,6 +402,31 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 
 </details>
 
+<details>
+<summary><code>element-instance</code> (<code>ei</code>)</summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--processInstanceKey` / `-k` | string |  | Filter by process instance key |
+| `--processDefinitionKey` | string |  | Filter by process definition key |
+| `--elementId` | string |  | Filter by element ID (supports wildcards on Camunda 8.10+, e.g. `*Task*`) |
+| `--elementType` | string |  | Filter by BPMN element type (e.g. SERVICE_TASK, USER_TASK, CALL_ACTIVITY) |
+| `--state` | string |  | Filter by state (ACTIVE, COMPLETED, TERMINATED) |
+
+</details>
+
+<details>
+<summary><code>message-subscription</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--processInstanceKey` / `-k` | string |  | Filter by process instance key |
+| `--messageName` | string |  | Filter by message name (supports wildcards) |
+| `--correlationKey` | string |  | Filter by correlation key (supports wildcards) |
+| `--state` | string |  | Filter by state (CREATED, CORRELATED, DELETED, MIGRATED) |
+
+</details>
+
 **Examples:**
 
 ```bash
@@ -417,6 +444,9 @@ c8ctl search pd --iname='*order*'                           # Case-insensitive s
 c8ctl search ut --iassignee=John                            # Case-insensitive search by assignee
 c8ctl search ws --waitStateType=JOB                         # Search wait states of type JOB
 c8ctl search ws --elementType=SERVICE_TASK                  # Search wait states on service tasks
+c8ctl search ei --processInstanceKey=2251799813685249       # Search the element instances of a process instance
+c8ctl search message-subscriptions --processInstanceKey=2251799813685249  # Search the message subscriptions of a process instance
+c8ctl search inc --processInstanceKey=2251799813685249 --includeCalled  # Search incidents of a process instance and the instances it called
 ```
 
 ---

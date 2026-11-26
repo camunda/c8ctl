@@ -10,10 +10,12 @@ import {
 	AuthorizationKey,
 	BusinessId,
 	ElementInstanceKey,
+	ElementInstanceStateEnum,
 	GroupId,
 	IncidentKey,
 	JobKey,
 	MappingRuleId,
+	MessageSubscriptionStateEnum,
 	ProcessDefinitionId,
 	ProcessDefinitionKey,
 	ProcessInstanceKey,
@@ -204,6 +206,9 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	tenants: "tenant",
 	ws: "wait-state",
 	"wait-states": "wait-state",
+	ei: "element-instance",
+	"element-instances": "element-instance",
+	"message-subscriptions": "message-subscription",
 };
 
 // ─── Environment Variables ───────────────────────────────────────────────────
@@ -528,6 +533,16 @@ const INC_SEARCH_FLAGS = {
 	},
 } as const satisfies Record<string, FlagDef>;
 
+/** `list incident` has no called-instance search. */
+const INC_SEARCH_ONLY_FLAGS = {
+	...INC_SEARCH_FLAGS,
+	includeCalled: {
+		type: "boolean",
+		description:
+			"Also include incidents of the process and decision instances that --processInstanceKey called (combined with other filters: Camunda 8.9+)",
+	},
+} as const satisfies Record<string, FlagDef>;
+
 const JOB_SEARCH_FLAGS = {
 	state: { type: "string", description: "Filter by state" },
 	type: { type: "string", description: "Filter by job type" },
@@ -684,6 +699,58 @@ const WAIT_STATE_SEARCH_FLAGS = {
 		description:
 			"Filter by wait state type (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL)",
 		enum: WaitStateTypeEnum,
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const ELEMENT_INSTANCE_SEARCH_FLAGS = {
+	processInstanceKey: {
+		type: "string",
+		description: "Filter by process instance key",
+		short: "k",
+		validate: ProcessInstanceKey.assumeExists,
+	},
+	processDefinitionKey: {
+		type: "string",
+		description: "Filter by process definition key",
+		validate: ProcessDefinitionKey.assumeExists,
+	},
+	elementId: {
+		type: "string",
+		description:
+			"Filter by element ID (supports wildcards on Camunda 8.10+, e.g. `*Task*`)",
+	},
+	elementType: {
+		type: "string",
+		description:
+			"Filter by BPMN element type (e.g. SERVICE_TASK, USER_TASK, CALL_ACTIVITY)",
+		enum: WAIT_STATE_ELEMENT_TYPE_ENUM,
+	},
+	state: {
+		type: "string",
+		description: "Filter by state (ACTIVE, COMPLETED, TERMINATED)",
+		enum: ElementInstanceStateEnum,
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const MESSAGE_SUBSCRIPTION_SEARCH_FLAGS = {
+	processInstanceKey: {
+		type: "string",
+		description: "Filter by process instance key",
+		short: "k",
+		validate: ProcessInstanceKey.assumeExists,
+	},
+	messageName: {
+		type: "string",
+		description: "Filter by message name (supports wildcards)",
+	},
+	correlationKey: {
+		type: "string",
+		description: "Filter by correlation key (supports wildcards)",
+	},
+	state: {
+		type: "string",
+		description: "Filter by state (CREATED, CORRELATED, DELETED, MIGRATED)",
+		enum: MessageSubscriptionStateEnum,
 	},
 } as const satisfies Record<string, FlagDef>;
 
@@ -985,6 +1052,21 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl search ws --elementType=SERVICE_TASK",
 				description: "Search wait states on service tasks",
 			},
+			{
+				command: "c8ctl search ei --processInstanceKey=2251799813685249",
+				description: "Search the element instances of a process instance",
+			},
+			{
+				command:
+					"c8ctl search message-subscriptions --processInstanceKey=2251799813685249",
+				description: "Search the message subscriptions of a process instance",
+			},
+			{
+				command:
+					"c8ctl search inc --processInstanceKey=2251799813685249 --includeCalled",
+				description:
+					"Search incidents of a process instance and the instances it called",
+			},
 		],
 		resources: [
 			"pi",
@@ -1000,6 +1082,8 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rules",
 			"ws",
+			"ei",
+			"message-subscriptions",
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
@@ -1014,7 +1098,7 @@ export const COMMAND_REGISTRY = {
 			"process-definition": PD_SEARCH_FLAGS,
 			"process-instance": PI_SEARCH_FLAGS,
 			"user-task": UT_SEARCH_FLAGS,
-			incident: INC_SEARCH_FLAGS,
+			incident: INC_SEARCH_ONLY_FLAGS,
 			jobs: JOB_SEARCH_FLAGS,
 			variable: VAR_SEARCH_FLAGS,
 			user: USER_SEARCH_FLAGS,
@@ -1024,6 +1108,8 @@ export const COMMAND_REGISTRY = {
 			authorization: AUTH_SEARCH_FLAGS,
 			"mapping-rule": MR_SEARCH_FLAGS,
 			"wait-state": WAIT_STATE_SEARCH_FLAGS,
+			"element-instance": ELEMENT_INSTANCE_SEARCH_FLAGS,
+			"message-subscription": MESSAGE_SUBSCRIPTION_SEARCH_FLAGS,
 		},
 	},
 
