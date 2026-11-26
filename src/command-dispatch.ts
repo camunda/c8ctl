@@ -84,6 +84,8 @@ import {
 import {
 	getProcessDefinitionCommand,
 	listProcessDefinitionsCommand,
+	resumeProcessDefinitionCommand,
+	suspendProcessDefinitionCommand,
 } from "./commands/process-definitions.ts";
 import {
 	awaitProcessInstanceCommand,
@@ -162,6 +164,8 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["cancel:process-instance", cancelProcessInstanceCommand],
 	["suspend:process-instance", suspendProcessInstanceCommand],
 	["resume:process-instance", resumeProcessInstanceCommand],
+	["suspend:process-definition", suspendProcessDefinitionCommand],
+	["resume:process-definition", resumeProcessDefinitionCommand],
 	["migrate:process-instance", migrateProcessInstanceCommand],
 	["modify:process-instance", modifyProcessInstanceCommand],
 	["await:process-instance", awaitProcessInstanceCommand],
