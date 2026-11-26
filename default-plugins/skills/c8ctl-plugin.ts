@@ -547,12 +547,14 @@ async function skillsHandler(
 			return;
 		}
 
+		let hasSkippedSkills = false;
 		for (const harness of harnesses) {
 			const skipped = await runSkillInstall(harness);
 			if (skipped.length > 0) {
+				hasSkippedSkills = true;
 				const label = HARNESS_LABELS[harness] ?? harness;
 				logger.warn(
-					`Skipped Camunda skill${skipped.length === 1 ? "" : "s"} for ${label} (${harness}): ${skipped.map((name) => `"${name}"`).join(", ")}. These names are already present without \`camunda/skills\` source attribution. Existing user files were left untouched. To install Camunda's versions, move or rename the conflicting directories (find them with \`gh skill list --scope user --agent ${harness}\`), then rerun \`c8ctl skills install --harness ${harness}\`.`,
+					`Skipped Camunda skill${skipped.length === 1 ? "" : "s"} for ${label} (${harness}): ${skipped.map((name) => `"${name}"`).join(", ")}. These target directories already exist without \`camunda/skills\` source attribution; existing user files were left untouched. To install Camunda's versions, inspect the ${label} user skills directory and move or rename the conflicting directories, then rerun \`c8ctl skills install --harness ${harness}\`. Directories without a readable \`SKILL.md\` may not appear in \`gh skill list\`.`,
 				);
 			}
 		}
@@ -560,7 +562,10 @@ async function skillsHandler(
 		const labels = harnesses
 			.map((harness) => HARNESS_LABELS[harness] ?? harness)
 			.join(", ");
-		logger.success(`Installed or updated Camunda skills for ${labels}.`);
+		const completionMessage = hasSkippedSkills
+			? "Camunda skills installation check completed"
+			: "Installed or updated Camunda skills";
+		logger.success(`${completionMessage} for ${labels}.`);
 	} catch (error) {
 		renderCommandFailure(logger, "Failed to skills install", error, {
 			verbose: ctx.verbose,

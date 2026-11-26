@@ -412,7 +412,11 @@ function fakeGh(commandArgs: string[]): {
 				}),
 				...(process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL &&
 				fs.existsSync(
-					join(skillRoot, process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL),
+					join(
+						skillRoot,
+						process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL,
+						"SKILL.md",
+					),
 				)
 					? [
 							{

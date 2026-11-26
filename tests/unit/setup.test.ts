@@ -2325,6 +2325,7 @@ describe("c8ctl setup", () => {
 				ghCalls.map((args) => args.slice(0, 4)),
 				[
 					["skill", "list", "--agent", "claude-code"],
+					["skill", "install", "camunda/skills"],
 					["skill", "install", "camunda/skills", "--all"],
 					["skill", "list", "--agent", "claude-code"],
 					["skill", "install", "camunda/skills"],
@@ -2422,7 +2423,7 @@ describe("c8ctl setup", () => {
 		}
 	});
 
-	test("an unmanaged skills collision warns but does not block setup deployment", async () => {
+	test("an unlisted unmanaged skills directory does not block setup deployment", async () => {
 		const captureDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-"));
 		const capture = join(captureDir, "capture.json");
 		const stub = stubbedExecution({ capture });

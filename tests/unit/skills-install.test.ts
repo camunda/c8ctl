@@ -25,6 +25,10 @@ import { c8, c8WithOptions } from "../utils/cli.ts";
 const SETUP_STUB = pathToFileURL(
 	resolve(import.meta.dirname, "../utils/setup-stub.ts"),
 ).href;
+const EMPTY_SKILL_INSTALL_OPTIONS = {
+	env: {},
+	home: join(tmpdir(), `c8ctl-skills-test-home-${process.pid}`),
+};
 
 function createSkillFixture() {
 	const root = mkdtempSync(join(tmpdir(), "c8ctl-skills-command-"));
@@ -114,12 +118,23 @@ test("builds a user-scoped install that refreshes the same Camunda skills", () =
 	]);
 });
 
-test("installs Camunda skills only when none are installed", async () => {
+test("installs all Camunda skills when none are installed or colliding", async () => {
 	const calls: Array<{ command: string; args: string[] }> = [];
-	await runSkillInstall("claude-code", async (command, args) => {
-		calls.push({ command, args });
-		return { status: 0, stdout: "[]", stderr: "" };
-	});
+	await runSkillInstall(
+		"claude-code",
+		async (command, args) => {
+			calls.push({ command, args });
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout: "camunda-c8ctl\tCamunda skill",
+					stderr: "",
+				};
+			}
+			return { status: 0, stdout: "[]", stderr: "" };
+		},
+		EMPTY_SKILL_INSTALL_OPTIONS,
+	);
 	assert.deepEqual(calls, [
 		{
 			command: "gh",
@@ -134,6 +149,7 @@ test("installs Camunda skills only when none are installed", async () => {
 				"skillName,sourceURL,path",
 			],
 		},
+		{ command: "gh", args: ["skill", "install", "camunda/skills"] },
 		{ command: "gh", args: buildSkillInstallArgs("claude-code") },
 	]);
 });
@@ -158,24 +174,28 @@ test("updates only installed Camunda skills through their existing directories",
 			path: join(skillRoot, "unrelated"),
 		},
 	];
-	await runSkillInstall("claude-code", async (command, args) => {
-		calls.push({ command, args });
-		if (args[1] === "install" && args.length === 3) {
+	await runSkillInstall(
+		"claude-code",
+		async (command, args) => {
+			calls.push({ command, args });
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout: [
+						"camunda-ai-agents\tCamunda skill",
+						"camunda-bpmn\tCamunda skill",
+					].join("\n"),
+					stderr: "",
+				};
+			}
 			return {
 				status: 0,
-				stdout: [
-					"camunda-ai-agents\tCamunda skill",
-					"camunda-bpmn\tCamunda skill",
-				].join("\n"),
+				stdout: args[1] === "list" ? JSON.stringify(skills) : "",
 				stderr: "",
 			};
-		}
-		return {
-			status: 0,
-			stdout: args[1] === "list" ? JSON.stringify(skills) : "",
-			stderr: "",
-		};
-	});
+		},
+		EMPTY_SKILL_INSTALL_OPTIONS,
+	);
 	assert.deepEqual(calls, [
 		{
 			command: "gh",
@@ -230,31 +250,35 @@ test("installs missing Camunda skills despite multiline catalog descriptions", a
 	];
 	const calls: Array<{ command: string; args: string[] }> = [];
 
-	await runSkillInstall("claude-code", async (command, args) => {
-		calls.push({ command, args });
-		if (args[1] === "list") {
-			return {
-				status: 0,
-				stdout: JSON.stringify(installedSkills),
-				stderr: "",
-			};
-		}
-		if (args[1] === "install" && args.length === 3) {
-			return {
-				status: 0,
-				stdout: [
-					"camunda-ai-agents\tCamunda 8 AI Agent sub-processes",
-					"Also covers v1/v2 element-template selection and upgrading v1 elements to v2.",
-					"camunda-bpmn\tReliable multi-step workflows",
-					"Designs, edits, and lints executable BPMN processes for Camunda 8.",
-					"camunda-c8ctl\tRun or configure c8ctl",
-					"Installs and configures c8ctl, the Camunda 8 CLI.",
-				].join("\n"),
-				stderr: "",
-			};
-		}
-		return { status: 0, stdout: "", stderr: "" };
-	});
+	await runSkillInstall(
+		"claude-code",
+		async (command, args) => {
+			calls.push({ command, args });
+			if (args[1] === "list") {
+				return {
+					status: 0,
+					stdout: JSON.stringify(installedSkills),
+					stderr: "",
+				};
+			}
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout: [
+						"camunda-ai-agents\tCamunda 8 AI Agent sub-processes",
+						"Also covers v1/v2 element-template selection and upgrading v1 elements to v2.",
+						"camunda-bpmn\tReliable multi-step workflows",
+						"Designs, edits, and lints executable BPMN processes for Camunda 8.",
+						"camunda-c8ctl\tRun or configure c8ctl",
+						"Installs and configures c8ctl, the Camunda 8 CLI.",
+					].join("\n"),
+					stderr: "",
+				};
+			}
+			return { status: 0, stdout: "", stderr: "" };
+		},
+		EMPTY_SKILL_INSTALL_OPTIONS,
+	);
 
 	assert.deepEqual(calls, [
 		{
@@ -326,7 +350,7 @@ test("skips unmanaged Camunda skill name collisions and installs remaining skill
 					status: 0,
 					stdout: JSON.stringify([
 						{
-							skillName: unmanagedSkillName,
+							skillName: `other/${unmanagedSkillName}`,
 							path: join(
 								tmpdir(),
 								"home",
@@ -362,6 +386,7 @@ test("skips unmanaged Camunda skill name collisions and installs remaining skill
 			}
 			return { status: 0, stdout: "", stderr: "" };
 		},
+		EMPTY_SKILL_INSTALL_OPTIONS,
 	);
 
 	assert.deepEqual(skipped, ["camunda-ai-agents"]);
@@ -382,12 +407,15 @@ test("fails when available Camunda skills cannot be listed", async () => {
 	];
 
 	await assert.rejects(
-		runSkillInstall("claude-code", (_command, args) =>
-			Promise.resolve({
-				status: 0,
-				stdout: args[1] === "list" ? JSON.stringify(installedSkills) : "",
-				stderr: "",
-			}),
+		runSkillInstall(
+			"claude-code",
+			(_command, args) =>
+				Promise.resolve({
+					status: 0,
+					stdout: args[1] === "list" ? JSON.stringify(installedSkills) : "",
+					stderr: "",
+				}),
+			EMPTY_SKILL_INSTALL_OPTIONS,
 		),
 		/no available Camunda skills/i,
 	);
@@ -400,8 +428,10 @@ for (const [missing, stderr] of [
 ]) {
 	test(`reports an outdated GitHub CLI when gh lacks ${missing}`, async () => {
 		await assert.rejects(
-			runSkillInstall("claude-code", () =>
-				Promise.resolve({ status: 1, stdout: "", stderr }),
+			runSkillInstall(
+				"claude-code",
+				() => Promise.resolve({ status: 1, stdout: "", stderr }),
+				EMPTY_SKILL_INSTALL_OPTIONS,
 			),
 			/requires GitHub CLI 2\.95 or later/,
 		);
@@ -412,23 +442,34 @@ test("surfaces GitHub CLI skill install failures", async () => {
 	let install = false;
 
 	await assert.rejects(
-		runSkillInstall("claude-code", (_command, args) => {
-			if (args[1] === "list") {
-				return Promise.resolve({ status: 0, stdout: "[]", stderr: "" });
-			}
-			install = true;
-			return Promise.resolve({
-				status: 1,
-				stdout: "",
-				stderr: "network denied",
-			});
-		}),
+		runSkillInstall(
+			"claude-code",
+			(_command, args) => {
+				if (args[1] === "list") {
+					return Promise.resolve({ status: 0, stdout: "[]", stderr: "" });
+				}
+				if (args[1] === "install" && args.length === 3) {
+					return Promise.resolve({
+						status: 0,
+						stdout: "camunda-c8ctl\tCamunda skill",
+						stderr: "",
+					});
+				}
+				install = true;
+				return Promise.resolve({
+					status: 1,
+					stdout: "",
+					stderr: "network denied",
+				});
+			},
+			EMPTY_SKILL_INSTALL_OPTIONS,
+		),
 		/network denied/,
 	);
 	assert.equal(install, true);
 });
 
-test("skills install reports unmanaged collisions and leaves their files untouched", async () => {
+test("skills install skips directories omitted from the list and preserves user files", async () => {
 	const fixture = createSkillFixture();
 	const unmanagedSkillName = "camunda-ai-agents";
 	const unmanagedSkillDirectory = join(fixture.skillRoot, unmanagedSkillName);
@@ -461,6 +502,63 @@ test("skills install reports unmanaged collisions and leaves their files untouch
 			existsSync(join(fixture.skillRoot, "camunda-bpmn")),
 			"non-colliding Camunda skills should still be installed",
 		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills install retains its success message when no skills are skipped", async () => {
+	const fixture = createSkillFixture();
+
+	try {
+		const result = await c8WithOptions(
+			fixture.options,
+			"skills",
+			"install",
+			"--harness",
+			"claude-code",
+		);
+		const output = stripVTControlCharacters(result.stdout + result.stderr);
+
+		assert.equal(result.status, 0, output);
+		assert.match(
+			output,
+			/Installed or updated Camunda skills for Claude Code/i,
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("skills install reports a neutral result when every skill name collides", async () => {
+	const fixture = createSkillFixture();
+	rmSync(fixture.skillDirectory, { recursive: true, force: true });
+	mkdirSync(fixture.skillDirectory, { recursive: true });
+	const userFile = join(fixture.skillDirectory, "local.md");
+	writeFileSync(userFile, "user-owned content\n");
+	writeFileSync(join(fixture.skillRoot, ".c8ctl-installed"), "");
+
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_UNMANAGED_SKILL: "camunda-c8ctl",
+				},
+			},
+			"skills",
+			"install",
+			"--harness",
+			"claude-code",
+		);
+		const output = stripVTControlCharacters(result.stdout + result.stderr);
+
+		assert.equal(result.status, 0, output);
+		assert.match(output, /Skipped Camunda skill.*camunda-c8ctl/i);
+		assert.match(output, /installation check completed/i);
+		assert.doesNotMatch(output, /Installed or updated Camunda skills/i);
+		assert.equal(readFileSync(userFile, "utf8"), "user-owned content\n");
 	} finally {
 		fixture.cleanup();
 	}

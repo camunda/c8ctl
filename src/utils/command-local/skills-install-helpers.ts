@@ -12,6 +12,7 @@ import {
 	basename,
 	dirname,
 	isAbsolute,
+	join,
 	posix,
 	relative,
 	resolve,
@@ -171,7 +172,7 @@ interface InstalledCamundaSkill {
 
 interface InstalledSkillInventory {
 	readonly camundaSkills: InstalledCamundaSkill[];
-	readonly unmanagedNames: string[];
+	readonly unmanagedDirectoryNames: string[];
 }
 
 export interface CamundaSkillInstallation extends InstalledCamundaSkill {
@@ -182,6 +183,15 @@ function isCamundaSkillsSource(sourceURL: unknown): boolean {
 	return (
 		typeof sourceURL === "string" &&
 		sourceURL.replace(/\/+$/, "").toLowerCase() === CAMUNDA_SKILLS_URL
+	);
+}
+
+function skillTargetName(value: string): string {
+	return (
+		value
+			.split(/[\\/]/)
+			.filter((part) => part.length > 0)
+			.at(-1) ?? ""
 	);
 }
 
@@ -197,7 +207,7 @@ function installedSkillInventory(stdout: string): InstalledSkillInventory {
 	}
 
 	const camundaSkills: InstalledCamundaSkill[] = [];
-	const unmanagedNames: string[] = [];
+	const unmanagedDirectoryNames: string[] = [];
 	for (const entry of parsed) {
 		if (!isRecord(entry)) {
 			throw new Error("GitHub CLI returned an invalid installed-skills list.");
@@ -208,7 +218,15 @@ function installedSkillInventory(stdout: string): InstalledSkillInventory {
 			);
 		}
 		if (!isCamundaSkillsSource(entry.sourceURL)) {
-			unmanagedNames.push(entry.skillName);
+			const pathName =
+				typeof entry.path === "string" ? skillTargetName(entry.path) : "";
+			const directoryName = pathName || skillTargetName(entry.skillName);
+			if (!directoryName) {
+				throw new Error(
+					"GitHub CLI returned incomplete installed-skills metadata.",
+				);
+			}
+			unmanagedDirectoryNames.push(directoryName);
 			continue;
 		}
 		if (typeof entry.path !== "string" || entry.path.length === 0) {
@@ -220,7 +238,7 @@ function installedSkillInventory(stdout: string): InstalledSkillInventory {
 			path: entry.path,
 		});
 	}
-	return { camundaSkills, unmanagedNames };
+	return { camundaSkills, unmanagedDirectoryNames };
 }
 
 function availableCamundaSkills(stdout: string): string[] {
@@ -418,29 +436,35 @@ function harnessSkillDirectories({
 	return directories.map((directory) => resolve(directory));
 }
 
-interface SkillRemovalOptions {
+interface SkillPathOptions {
 	env?: Env;
 	home?: string;
 	platform?: string;
 }
 
-export function hasCamundaUserSkillsDirectory(
-	harness: string,
-	{
-		env = process.env,
-		home,
-		platform = process.platform,
-	}: SkillRemovalOptions = {},
-): boolean {
-	const userHome =
+function skillUserHome({
+	env = process.env,
+	home,
+	platform = process.platform,
+}: SkillPathOptions): string {
+	return (
 		home ??
 		(platform === "win32"
 			? env.USERPROFILE || env.HOME || homedir()
-			: env.HOME || homedir());
+			: env.HOME || homedir())
+	);
+}
+
+export function hasCamundaUserSkillsDirectory(
+	harness: string,
+	options: SkillPathOptions = {},
+): boolean {
+	const env = options.env ?? process.env;
+	const platform = options.platform ?? process.platform;
 	return harnessSkillDirectories({
 		harness,
 		env,
-		home: userHome,
+		home: skillUserHome(options),
 		platform,
 	}).some(
 		(directory) =>
@@ -450,13 +474,11 @@ export function hasCamundaUserSkillsDirectory(
 
 function skillRemovalLocation(
 	skill: CamundaSkillInstallation,
-	{ env = process.env, home, platform = process.platform }: SkillRemovalOptions,
+	options: SkillPathOptions,
 ): { directory: string; root: string } {
-	const userHome =
-		home ??
-		(platform === "win32"
-			? env.USERPROFILE || env.HOME || homedir()
-			: env.HOME || homedir());
+	const env = options.env ?? process.env;
+	const platform = options.platform ?? process.platform;
+	const userHome = skillUserHome(options);
 	if (!isAbsolute(skill.path)) {
 		throw new Error(
 			`Cannot safely remove Camunda skill "${skill.name}": GitHub CLI returned a non-absolute path.`,
@@ -531,7 +553,7 @@ function skillRemovalLocation(
 
 export function camundaSkillRemovalPath(
 	skill: CamundaSkillInstallation,
-	options: SkillRemovalOptions = {},
+	options: SkillPathOptions = {},
 ): string {
 	return skillRemovalLocation(skill, options).directory;
 }
@@ -542,7 +564,7 @@ export function camundaSkillRemovalPath(
  */
 export function removeCamundaSkill(
 	skill: CamundaSkillInstallation,
-	options: SkillRemovalOptions = {},
+	options: SkillPathOptions = {},
 ): void {
 	const { directory, root } = skillRemovalLocation(skill, options);
 	const directoryInfo = lstatSync(directory, { throwIfNoEntry: false });
@@ -592,38 +614,64 @@ export function removeCamundaSkill(
 export async function runSkillInstall(
 	harness: string,
 	runner: SkillInstallRunner = runCommand,
+	options: SkillPathOptions = {},
 ): Promise<string[]> {
+	const env = options.env ?? process.env;
+	const platform = options.platform ?? process.platform;
+	const skillRoot = harnessSkillDirectories({
+		harness,
+		env,
+		home: skillUserHome(options),
+		platform,
+	})[0];
 	const listed = await runner("gh", buildSkillListArgs(harness));
 	requireSuccessfulSkillCommand(listed, "check for installed");
-	const { camundaSkills: installed, unmanagedNames } = installedSkillInventory(
-		listed.stdout,
+	const { camundaSkills: installed, unmanagedDirectoryNames } =
+		installedSkillInventory(listed.stdout);
+
+	const availableResult = await runner("gh", buildSkillDiscoveryArgs());
+	requireSuccessfulSkillCommand(availableResult, "list available");
+	const available = availableCamundaSkills(availableResult.stdout);
+	const installedNames = new Set(
+		installed.flatMap(({ name, path }) => [
+			name.toLowerCase(),
+			skillTargetName(path).toLowerCase(),
+		]),
 	);
-	if (installed.length === 0 && unmanagedNames.length === 0) {
+	const unmanagedNameSet = new Set(
+		unmanagedDirectoryNames.map((name) => name.toLowerCase()),
+	);
+	const isInstalled = (skill: string): boolean => {
+		const normalizedName = skill.toLowerCase();
+		const directoryName = skillTargetName(skill).toLowerCase();
+		return (
+			installedNames.has(normalizedName) || installedNames.has(directoryName)
+		);
+	};
+	const skipped = available.filter((skill) => {
+		if (isInstalled(skill)) return false;
+		const directoryName = skillTargetName(skill);
+		const normalizedName = skill.toLowerCase();
+		const unmanaged =
+			unmanagedNameSet.has(normalizedName) ||
+			unmanagedNameSet.has(directoryName.toLowerCase());
+		const targetExists =
+			skillRoot !== undefined &&
+			lstatSync(join(skillRoot, directoryName), {
+				throwIfNoEntry: false,
+			}) !== undefined;
+		return unmanaged || targetExists;
+	});
+	if (installed.length === 0 && skipped.length === 0) {
 		requireSuccessfulSkillCommand(
 			await runner("gh", buildSkillInstallArgs(harness)),
 			"install",
 		);
 		return [];
 	}
-
-	const availableResult = await runner("gh", buildSkillDiscoveryArgs());
-	requireSuccessfulSkillCommand(availableResult, "list available");
-	const available = availableCamundaSkills(availableResult.stdout);
-	const installedNames = new Set(
-		installed.map(({ name }) => name.toLowerCase()),
-	);
-	const unmanagedNameSet = new Set(
-		unmanagedNames.map((name) => name.toLowerCase()),
-	);
-	const skipped = available.filter(
-		(skill) =>
-			!installedNames.has(skill.toLowerCase()) &&
-			unmanagedNameSet.has(skill.toLowerCase()),
-	);
+	const skippedNames = new Set(skipped.map((skill) => skill.toLowerCase()));
 	const missing = available.filter(
-		(skill) =>
-			!installedNames.has(skill.toLowerCase()) &&
-			!unmanagedNameSet.has(skill.toLowerCase()),
+		(skill) => !isInstalled(skill) && !skippedNames.has(skill.toLowerCase()),
 	);
 
 	const byDirectory = new Map<string, string[]>();
