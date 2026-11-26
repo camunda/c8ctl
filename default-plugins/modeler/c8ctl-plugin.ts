@@ -124,6 +124,11 @@ async function modelerHandler(
 	}
 
 	try {
+		if (canonicalAction === "uninstall" && ctx.unrecognizedFlags?.length) {
+			throw new Error(
+				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'modeler uninstall'. Fix or remove the flag before removing Camunda Modeler.`,
+			);
+		}
 		const operation = {
 			install: installDesktopModeler,
 			update: updateDesktopModeler,

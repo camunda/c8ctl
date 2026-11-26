@@ -699,6 +699,29 @@ test("empty or valueless --alias is rejected before any config write", async (t)
 	}
 });
 
+test("mcp uninstall rejects unknown flags before changing harness config", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	const installed = await s.run(
+		"mcp",
+		"install",
+		"cursor",
+		"--docs",
+		"--orchestration",
+	);
+	assert.equal(installed.status, 0, installed.stderr);
+	const before = readFileSync(s.paths.cursor, "utf8");
+	const servers = serversAt(s.paths.cursor, "cursor");
+	assert.ok(servers.camunda);
+	assert.ok(servers["camunda-docs"]);
+
+	const result = await s.run("mcp", "uninstall", "cursor", "--doc");
+	assert.equal(result.status, 1, result.stdout + result.stderr);
+	assert.match(result.stdout + result.stderr, /--doc/);
+	assert.equal(readFileSync(s.paths.cursor, "utf8"), before);
+});
+
 test("mcp list surfaces c8ctl-managed entries across harnesses and skips foreign ones", async (t) => {
 	const s = sandbox(t);
 	await addProfile(s);

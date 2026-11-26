@@ -717,6 +717,27 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("modeler uninstall and remove reject unknown flags before removal", {
+		skip: !isMac,
+	}, async () => {
+		for (const action of ["uninstall", "remove"]) {
+			const sandbox = createSandbox();
+			fakeReleaseTools(sandbox);
+			const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);
+			writeMacApp(appPath, "5.52.0");
+
+			try {
+				const result = await sandbox.runAction(action, {}, "--mistyped");
+				assert.strictEqual(result.status, 1, result.stdout + result.stderr);
+				assert.match(result.stdout + result.stderr, /--mistyped/);
+				assert.ok(existsSync(appPath));
+				assert.deepStrictEqual(sandbox.toolCalls(), []);
+			} finally {
+				sandbox.cleanup();
+			}
+		}
+	});
+
 	test("modeler remove remains a compatibility alias for uninstall", {
 		skip: !isMac,
 	}, async () => {
