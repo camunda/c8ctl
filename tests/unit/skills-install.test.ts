@@ -339,6 +339,7 @@ test("installs missing Camunda skills despite multiline catalog descriptions", a
 });
 
 test("skips unmanaged Camunda skill name collisions and installs remaining skills", async () => {
+	const skillRoot = join(EMPTY_SKILL_INSTALL_OPTIONS.home, ".claude", "skills");
 	const unmanagedSkillName = "Camunda-AI-Agents";
 	const availableSkills = ["camunda-ai-agents", "camunda-bpmn"];
 	const attemptedInstalls: string[][] = [];
@@ -351,13 +352,7 @@ test("skips unmanaged Camunda skill name collisions and installs remaining skill
 					stdout: JSON.stringify([
 						{
 							skillName: `other/${unmanagedSkillName}`,
-							path: join(
-								tmpdir(),
-								"home",
-								".claude",
-								"skills",
-								unmanagedSkillName,
-							),
+							path: join(skillRoot, "camunda-ai-agents"),
 						},
 					]),
 					stderr: "",
@@ -394,6 +389,53 @@ test("skips unmanaged Camunda skill name collisions and installs remaining skill
 		attemptedInstalls.map((args) => args[3]),
 		["camunda-bpmn"],
 	);
+});
+
+test("does not skip a flat install for a nested unmanaged skill with the same basename", async () => {
+	const root = mkdtempSync(join(tmpdir(), "c8ctl-skills-nested-"));
+	const home = join(root, "home");
+	const skillRoot = join(home, ".claude", "skills");
+	const unmanagedDirectory = join(skillRoot, "other", "camunda-bpmn");
+	const userFile = join(unmanagedDirectory, "SKILL.md");
+	mkdirSync(unmanagedDirectory, { recursive: true });
+	writeFileSync(userFile, "# User-owned nested skill\n");
+	const calls: string[][] = [];
+
+	try {
+		const skipped = await runSkillInstall(
+			"claude-code",
+			async (_command, args) => {
+				calls.push(args);
+				if (args[1] === "list") {
+					return {
+						status: 0,
+						stdout: JSON.stringify([
+							{
+								skillName: "other/camunda-bpmn",
+								path: unmanagedDirectory,
+							},
+						]),
+						stderr: "",
+					};
+				}
+				if (args[1] === "install" && args.length === 3) {
+					return {
+						status: 0,
+						stdout: "camunda-bpmn\tCamunda skill",
+						stderr: "",
+					};
+				}
+				return { status: 0, stdout: "", stderr: "" };
+			},
+			{ env: {}, home },
+		);
+
+		assert.deepEqual(skipped, []);
+		assert.deepEqual(calls.at(-1), buildSkillInstallArgs("claude-code"));
+		assert.equal(readFileSync(userFile, "utf8"), "# User-owned nested skill\n");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("fails when available Camunda skills cannot be listed", async () => {

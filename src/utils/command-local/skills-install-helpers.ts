@@ -172,7 +172,7 @@ interface InstalledCamundaSkill {
 
 interface InstalledSkillInventory {
 	readonly camundaSkills: InstalledCamundaSkill[];
-	readonly unmanagedDirectoryNames: string[];
+	readonly unmanagedPaths: string[];
 }
 
 export interface CamundaSkillInstallation extends InstalledCamundaSkill {
@@ -207,7 +207,7 @@ function installedSkillInventory(stdout: string): InstalledSkillInventory {
 	}
 
 	const camundaSkills: InstalledCamundaSkill[] = [];
-	const unmanagedDirectoryNames: string[] = [];
+	const unmanagedPaths: string[] = [];
 	for (const entry of parsed) {
 		if (!isRecord(entry)) {
 			throw new Error("GitHub CLI returned an invalid installed-skills list.");
@@ -218,15 +218,9 @@ function installedSkillInventory(stdout: string): InstalledSkillInventory {
 			);
 		}
 		if (!isCamundaSkillsSource(entry.sourceURL)) {
-			const pathName =
-				typeof entry.path === "string" ? skillTargetName(entry.path) : "";
-			const directoryName = pathName || skillTargetName(entry.skillName);
-			if (!directoryName) {
-				throw new Error(
-					"GitHub CLI returned incomplete installed-skills metadata.",
-				);
+			if (typeof entry.path === "string" && entry.path.length > 0) {
+				unmanagedPaths.push(resolve(entry.path));
 			}
-			unmanagedDirectoryNames.push(directoryName);
 			continue;
 		}
 		if (typeof entry.path !== "string" || entry.path.length === 0) {
@@ -238,7 +232,7 @@ function installedSkillInventory(stdout: string): InstalledSkillInventory {
 			path: entry.path,
 		});
 	}
-	return { camundaSkills, unmanagedDirectoryNames };
+	return { camundaSkills, unmanagedPaths };
 }
 
 function availableCamundaSkills(stdout: string): string[] {
@@ -626,8 +620,9 @@ export async function runSkillInstall(
 	})[0];
 	const listed = await runner("gh", buildSkillListArgs(harness));
 	requireSuccessfulSkillCommand(listed, "check for installed");
-	const { camundaSkills: installed, unmanagedDirectoryNames } =
-		installedSkillInventory(listed.stdout);
+	const { camundaSkills: installed, unmanagedPaths } = installedSkillInventory(
+		listed.stdout,
+	);
 
 	const availableResult = await runner("gh", buildSkillDiscoveryArgs());
 	requireSuccessfulSkillCommand(availableResult, "list available");
@@ -638,9 +633,7 @@ export async function runSkillInstall(
 			skillTargetName(path).toLowerCase(),
 		]),
 	);
-	const unmanagedNameSet = new Set(
-		unmanagedDirectoryNames.map((name) => name.toLowerCase()),
-	);
+	const unmanagedPathSet = new Set(unmanagedPaths);
 	const isInstalled = (skill: string): boolean => {
 		const normalizedName = skill.toLowerCase();
 		const directoryName = skillTargetName(skill).toLowerCase();
@@ -651,15 +644,15 @@ export async function runSkillInstall(
 	const skipped = available.filter((skill) => {
 		if (isInstalled(skill)) return false;
 		const directoryName = skillTargetName(skill);
-		const normalizedName = skill.toLowerCase();
+		const targetPath =
+			skillRoot === undefined
+				? undefined
+				: resolve(join(skillRoot, directoryName));
 		const unmanaged =
-			unmanagedNameSet.has(normalizedName) ||
-			unmanagedNameSet.has(directoryName.toLowerCase());
+			targetPath !== undefined && unmanagedPathSet.has(targetPath);
 		const targetExists =
-			skillRoot !== undefined &&
-			lstatSync(join(skillRoot, directoryName), {
-				throwIfNoEntry: false,
-			}) !== undefined;
+			targetPath !== undefined &&
+			lstatSync(targetPath, { throwIfNoEntry: false }) !== undefined;
 		return unmanaged || targetExists;
 	});
 	if (installed.length === 0 && skipped.length === 0) {
