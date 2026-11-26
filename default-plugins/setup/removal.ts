@@ -202,16 +202,9 @@ export async function inspectSetupRemovalInventory({
 	let clusterInspectionFailure: SetupClusterInspectionFailure | undefined;
 	try {
 		const versions = camunda8RunInstallDirs();
-		let probe: SetupClusterRunningState | undefined;
-		if (detectClusterRunning) {
-			try {
-				probe = await detectClusterRunning();
-			} catch (error) {
-				clusterInspectionFailure = {
-					message: error instanceof Error ? error.message : String(error),
-				};
-			}
-		}
+		const probe = detectClusterRunning
+			? await detectClusterRunning()
+			: undefined;
 		if (versions.length > 0 || probe?.running) {
 			cluster = {
 				versions,

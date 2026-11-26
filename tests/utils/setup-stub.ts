@@ -44,6 +44,7 @@
  *                                   (e.g. "start-cluster", "stop-cluster",
  *                                   "purge-cluster", "delete-cluster",
  *                                   "probe-cluster-status",
+ *                                   "probe-cluster-status-after-first-probe",
  *                                   "install-skills", "list-skills",
  *                                   "remove-modeler", "probe-modeler",
  *                                   "list-blueprint-directories").
@@ -220,6 +221,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 let clusterRunning = clusterUpAtBoot;
 let clusterHealthChecks = 0;
+let clusterStatusProbes = 0;
 let mcpConflictInjected = false;
 
 function clusterMarkerPath(): string | null {
@@ -507,7 +509,12 @@ Object.defineProperty(childProcess, "spawn", {
 				return deleted;
 			};
 			if (argv.includes("status")) {
-				if (failStep === "probe-cluster-status") {
+				clusterStatusProbes += 1;
+				if (
+					failStep === "probe-cluster-status" ||
+					(failStep === "probe-cluster-status-after-first-probe" &&
+						clusterStatusProbes > 1)
+				) {
 					return fakeChild(1, {
 						stderr: "stubbed cluster status failure diagnostics\n",
 					});
