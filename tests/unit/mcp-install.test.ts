@@ -363,6 +363,81 @@ test("updating a drifted entry preserves JSONC comments", async (t) => {
 	);
 });
 
+test("mcp uninstall recognizes orchestration entries with nonstandard Node executable basenames", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s, "work");
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+
+	const installed = await s.run(
+		"mcp",
+		"install",
+		"cursor",
+		"--profile",
+		"work",
+	);
+	assert.equal(installed.status, 0, installed.stderr);
+
+	const config = configAt(s.paths.cursor);
+	assert.ok(isRecord(config.mcpServers));
+	const camunda = config.mcpServers.camunda;
+	assert.ok(isRecord(camunda));
+	camunda.command = "/usr/bin/node-22";
+	s.write("cursor", JSON.stringify(config));
+
+	const removed = await s.run("mcp", "uninstall", "cursor");
+	assert.equal(removed.status, 0, removed.stderr);
+	assert.deepEqual(serversAt(s.paths.cursor, "cursor"), {});
+});
+
+test("VS Code uninstall preserves comments around removed managed entries", async (t) => {
+	for (const target of [
+		{ entryName: "camunda-docs", flags: ["--docs"] },
+		{ entryName: "camunda", flags: [] },
+	]) {
+		const s = sandbox(t);
+		const entry =
+			target.entryName === "camunda-docs"
+				? { type: "http", url: DOCS_URL }
+				: {
+						type: "stdio",
+						command: process.execPath,
+						args: [
+							"/opt/c8ctl/dist/index.js",
+							"mcp-proxy",
+							"--profile",
+							"work",
+						],
+						env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
+					};
+		const precedingEntry =
+			'"github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" }';
+		s.write(
+			"vscode",
+			`{
+  "servers": {
+    ${precedingEntry}, // work account, do not remove
+    /* preserve this note */
+    "${target.entryName}": ${JSON.stringify(entry)},
+  }
+}
+`,
+		);
+
+		const removed = await s.run("mcp", "uninstall", "vscode", ...target.flags);
+		assert.equal(removed.status, 0, removed.stderr);
+
+		const content = readFileSync(s.paths.vscode, "utf8");
+		assert.ok(
+			content.includes(`${precedingEntry} // work account, do not remove`),
+		);
+		assert.ok(content.includes("/* preserve this note */"));
+		assert.ok(!content.includes(`"${target.entryName}"`));
+		const listed = await s.run("mcp", "list", "vscode");
+		assert.equal(listed.status, 0, listed.stderr);
+		assert.deepEqual(parseJson(listed), []);
+	}
+});
+
 test("docs dry-run needs no connection and does not expose unrelated config secrets", async (t) => {
 	const s = sandbox(t);
 	s.write(
