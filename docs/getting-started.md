@@ -628,8 +628,8 @@ This applies whether JSON mode comes from `--json`, `C8CTL_OUTPUT_MODE`, or the 
 | `CAMUNDA_TOKEN_AUDIENCE`    | OAuth token audience |
 | `CAMUNDA_OAUTH_URL`         | OAuth token endpoint |
 | `CAMUNDA_OAUTH_SCOPE`       | OAuth scope (space-separated) |
-| `CAMUNDA_USERNAME`          | Basic auth username  |
-| `CAMUNDA_PASSWORD`          | Basic auth password (alias: `CAMUNDA_BASIC_AUTH_PASSWORD`) |
+| `CAMUNDA_USERNAME`          | Basic authentication username  |
+| `CAMUNDA_PASSWORD`          | Basic authentication password (alias: `CAMUNDA_BASIC_AUTH_PASSWORD`) |
 | `CAMUNDA_DEFAULT_TENANT_ID` | Default tenant ID    |
 
 Environment variable conventions follow the [`@camunda8/orchestration-cluster-api`](https://www.npmjs.com/package/@camunda8/orchestration-cluster-api) module.
