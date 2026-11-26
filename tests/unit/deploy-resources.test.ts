@@ -33,6 +33,7 @@ import {
 	parseCamundaJson,
 	parseDeployResources,
 } from "../../src/utils/index.ts";
+import { c8WithEnv } from "../utils/cli.ts";
 import {
 	CLI_ERROR_SIGNATURE,
 	createProject,
@@ -1347,6 +1348,34 @@ describe("deployment safety checks", () => {
 		assert.deepStrictEqual(mock.deployments, [
 			["process-a.bpmn", "process-b.bpmn"],
 		]);
+	});
+
+	test("fails when metadata omits a submitted file despite a matching response count", async () => {
+		mock = await startMockCluster({
+			reportedResourceNames: ["model.dmn", "model.dmn"],
+		});
+		const root = project(
+			{ deployResources: ["**/*.bpmn", "**/*.dmn"] },
+			{
+				"model.dmn": "<definitions/>",
+				"process.bpmn": BPMN("process"),
+			},
+		);
+
+		const result = await c8WithEnv(
+			{ CAMUNDA_BASE_URL: mock.baseUrl },
+			"deploy",
+			root,
+			"--yes",
+		);
+
+		assert.strictEqual(result.status, 1, result.stderr);
+		assert.match(result.stderr, /missing metadata.*process\.bpmn/i);
+		assert.doesNotMatch(
+			`${result.stdout}\n${result.stderr}`,
+			/Deployment successful/,
+		);
+		assert.deepStrictEqual(mock.deployments, [["model.dmn", "process.bpmn"]]);
 	});
 
 	test("accepts multiple deployment metadata items for one submitted file", async () => {

@@ -504,6 +504,11 @@ function findDuplicateDefinitionIds(
 	return new Map([...idMap].filter(([, paths]) => paths.length > 1));
 }
 
+/** Match filename escaping used in Content-Disposition parameters by Node's FormData. */
+function escapeMultipartFilename(name: string): string {
+	return name.replace(/[\n\r"]/g, (character) => encodeURIComponent(character));
+}
+
 /**
  * Find multipart filenames that would identify more than one local resource.
  */
@@ -511,7 +516,11 @@ function findDuplicateResourceNames(
 	resources: ResourceFile[],
 ): Map<string, string[]> {
 	const pathsByName = resources.reduce((map, resource) => {
-		map.set(resource.name, [...(map.get(resource.name) ?? []), resource.path]);
+		const multipartFilename = escapeMultipartFilename(resource.name);
+		map.set(multipartFilename, [
+			...(map.get(multipartFilename) ?? []),
+			resource.path,
+		]);
 		return map;
 	}, new Map<string, string[]>());
 
@@ -1161,6 +1170,29 @@ export async function deployResources(
 	if (result.deployments.length < resources.length) {
 		throw new Error(
 			`Deployment response count mismatch: the cluster reported ${result.deployments.length} deployed resource(s) for ${resources.length} submitted file(s). Verify the cluster state before retrying.`,
+		);
+	}
+
+	const responseResourceNames = [
+		...result.processes.map((process) => process.resourceName),
+		...result.decisionRequirements.map(
+			(decisionRequirements) => decisionRequirements.resourceName,
+		),
+		...result.forms.map((form) => form.resourceName),
+		...result.resources.map((resource) => resource.resourceName),
+	].filter(
+		(name): name is string => typeof name === "string" && name.length > 0,
+	);
+	const deployedFilenames = new Set(
+		responseResourceNames.map(escapeMultipartFilename),
+	);
+	const missingResources = resources.filter(
+		(resource) =>
+			!deployedFilenames.has(escapeMultipartFilename(resource.name)),
+	);
+	if (missingResources.length > 0) {
+		throw new Error(
+			`Deployment response is missing metadata for submitted file(s): ${missingResources.map((resource) => resource.path).join(", ")}. Verify the cluster state before retrying.`,
 		);
 	}
 

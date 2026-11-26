@@ -97,38 +97,60 @@ describe("CLI behavioural: deploy", () => {
 		["default scan", "default-scan", false],
 		["deployResources selection", "deploy-resources", true],
 	] as const) {
-		test(`--dry-run rejects duplicate multipart filenames from ${label}`, async () => {
-			const root = join(tempDir, directory);
-			const firstDir = join(root, "folder-a");
-			const secondDir = join(root, "folder-b");
-			mkdirSync(firstDir, { recursive: true });
-			mkdirSync(secondDir, { recursive: true });
-			writeFileSync(
-				join(firstDir, "main.bpmn"),
-				MINIMAL_BPMN.replaceAll("test-process", "first-process"),
-			);
-			writeFileSync(
-				join(secondDir, "main.bpmn"),
-				MINIMAL_BPMN.replaceAll("test-process", "second-process"),
-			);
-			if (hasDeployResources) {
+		for (const [collision, firstName, secondName] of [
+			["duplicate basenames", "main.bpmn", "main.bpmn"],
+			["multipart-escaped names", 'main".bpmn', "main%22.bpmn"],
+		] as const) {
+			test(`--dry-run rejects ${collision} from ${label}`, {
+				skip:
+					process.platform === "win32" &&
+					collision === "multipart-escaped names"
+						? "Windows does not permit quotes in file names"
+						: false,
+			}, async () => {
+				const root = join(tempDir, directory);
+				const firstDir = join(root, "folder-a");
+				const secondDir = join(root, "folder-b");
+				mkdirSync(firstDir, { recursive: true });
+				mkdirSync(secondDir, { recursive: true });
 				writeFileSync(
-					join(root, "camunda.json"),
-					JSON.stringify({ deployResources: ["**/*.bpmn"] }),
+					join(firstDir, firstName),
+					MINIMAL_BPMN.replaceAll("test-process", "first-process"),
 				);
-			}
+				writeFileSync(
+					join(secondDir, secondName),
+					MINIMAL_BPMN.replaceAll("test-process", "second-process"),
+				);
+				if (hasDeployResources) {
+					writeFileSync(
+						join(root, "camunda.json"),
+						JSON.stringify({ deployResources: ["**/*.bpmn"] }),
+					);
+				}
 
-			const result = await c8("deploy", root, "--dry-run");
+				const result = await c8("deploy", root, "--dry-run");
 
-			assert.strictEqual(result.status, 1, `stdout: ${result.stdout}`);
-			assert.match(result.stderr, /same multipart filename/i);
-			assert.ok(
-				result.stderr.includes("folder-a") &&
-					result.stderr.includes("folder-b"),
-				`stderr should name both clashing files: ${result.stderr}`,
-			);
-			assert.doesNotMatch(result.stdout, /"dryRun"/);
-		});
+				assert.strictEqual(result.status, 1, `stdout: ${result.stdout}`);
+				assert.match(result.stderr, /same multipart filename/i);
+				assert.ok(
+					result.stderr.includes("folder-a") &&
+						result.stderr.includes("folder-b"),
+					`stderr should name both clashing files: ${result.stderr}`,
+				);
+				const stderrMessages = result.stderr
+					.split("\n")
+					.filter(Boolean)
+					.map((line) => asRecord(JSON.parse(line), "stderr log line"))
+					.map((log) => (typeof log.message === "string" ? log.message : ""))
+					.join("\n");
+				assert.ok(
+					stderrMessages.includes(firstName) &&
+						stderrMessages.includes(secondName),
+					`stderr should include both multipart names: ${stderrMessages}`,
+				);
+				assert.doesNotMatch(result.stdout, /"dryRun"/);
+			});
+		}
 	}
 
 	test("--dry-run rejects directory with no deployable files", async () => {

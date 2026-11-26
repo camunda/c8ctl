@@ -274,10 +274,12 @@ export async function startMockCluster({
 	gatewayVersion = "8.10.0",
 	rejectDeployments = false,
 	reportedDeploymentCount,
+	reportedResourceNames,
 }: {
 	gatewayVersion?: string;
 	rejectDeployments?: boolean;
 	reportedDeploymentCount?: number;
+	reportedResourceNames?: string[];
 } = {}): Promise<MockCluster> {
 	const deployments: string[][] = [];
 	const deploymentBodies: string[] = [];
@@ -327,16 +329,73 @@ export async function startMockCluster({
 					});
 					return;
 				}
-				const responseDeployments = Array.from(
-					{ length: reportedDeploymentCount ?? fileNames.length },
-					() => ({
+				const responseNames =
+					reportedResourceNames ??
+					Array.from(
+						{ length: reportedDeploymentCount ?? fileNames.length },
+						(_, index) =>
+							fileNames[Math.min(index, fileNames.length - 1)] ?? "",
+					);
+				const responseDeployments = responseNames.map((resourceName) => {
+					const metadata = {
 						processDefinition: null,
 						decisionDefinition: null,
 						decisionRequirements: null,
 						form: null,
 						resource: null,
-					}),
-				);
+					};
+					const extension = resourceName
+						.slice(resourceName.lastIndexOf("."))
+						.toLowerCase();
+					const key = "2251799813685249";
+					switch (extension) {
+						case ".bpmn":
+							return {
+								...metadata,
+								processDefinition: {
+									processDefinitionId: resourceName,
+									processDefinitionVersion: 1,
+									resourceName,
+									tenantId: "<default>",
+									processDefinitionKey: key,
+								},
+							};
+						case ".dmn":
+							return {
+								...metadata,
+								decisionRequirements: {
+									decisionRequirementsId: resourceName,
+									decisionRequirementsName: resourceName,
+									version: 1,
+									resourceName,
+									tenantId: "<default>",
+									decisionRequirementsKey: key,
+								},
+							};
+						case ".form":
+							return {
+								...metadata,
+								form: {
+									formId: resourceName,
+									version: 1,
+									resourceName,
+									tenantId: "<default>",
+									formKey: key,
+								},
+							};
+						default:
+							return {
+								...metadata,
+								resource: {
+									resourceId: resourceName,
+									resourceName,
+									version: 1,
+									tenantId: "<default>",
+									resourceKey: key,
+								},
+							};
+					}
+				});
 				const succeed = () =>
 					send(200, {
 						deploymentKey: "2251799813685249",

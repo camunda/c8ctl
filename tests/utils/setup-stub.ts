@@ -175,6 +175,20 @@ const DEPLOYMENT_RESULT = {
 			form: null,
 			resource: null,
 		},
+		{
+			processDefinition: null,
+			decisionDefinition: null,
+			decisionRequirements: {
+				decisionRequirementsId: "plot-destination",
+				decisionRequirementsName: "Plot destination",
+				version: 1,
+				resourceName: "plot-destination.dmn",
+				tenantId: "<default>",
+				decisionRequirementsKey: "2251799813686752",
+			},
+			form: null,
+			resource: null,
+		},
 	],
 };
 
@@ -808,7 +822,8 @@ globalThis.fetch = async (
 			(resourceName) =>
 				DEPLOYMENT_RESULT.deployments.find(
 					(deployment) =>
-						deployment.processDefinition?.resourceName === resourceName,
+						deployment.processDefinition?.resourceName === resourceName ||
+						deployment.decisionRequirements?.resourceName === resourceName,
 				) ?? {
 					processDefinition: null,
 					decisionDefinition: null,
