@@ -1414,6 +1414,24 @@ describe("deployment safety checks", () => {
 		assert.deepStrictEqual(mock.deployments, [["a\\\\\\\\b.bpmn"]]);
 	});
 
+	test("preserves UTF-8 filenames in mock deployment responses", async () => {
+		mock = await startMockCluster();
+		const root = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{ "folder/café.bpmn": BPMN("process") },
+		);
+
+		const result = await c8WithEnv(
+			{ CAMUNDA_BASE_URL: mock.baseUrl },
+			"deploy",
+			root,
+			"--yes",
+		);
+
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(mock.deployments, [["café.bpmn"]]);
+	});
+
 	test("accepts cluster-decoded metadata names with four consecutive backslashes", {
 		skip:
 			process.platform === "win32"

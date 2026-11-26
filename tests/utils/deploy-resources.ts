@@ -320,7 +320,7 @@ export async function startMockCluster({
 				const body = Buffer.concat(chunks).toString("latin1");
 				deploymentBodies.push(body);
 				const fileNames = [...body.matchAll(/filename="([^"]+)"/g)]
-					.map((m) => m[1])
+					.map((m) => Buffer.from(m[1], "latin1").toString("utf8"))
 					.sort();
 				deployments.push(fileNames);
 				if (rejectDeployments) {
