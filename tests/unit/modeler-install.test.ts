@@ -276,7 +276,18 @@ fs.linkSync = (target, path) => {
 	return linkSync(remapFilesystemPath(target), mappedPath);
 };
 const { spawnSync } = childProcess;
+let archiveReadCompleted = false;
+let signalSent = false;
 childProcess.spawnSync = (command, args, options) => {
+	if (
+		command === "tar" &&
+		process.env.SIGNAL_AFTER_ARCHIVE_IO &&
+		archiveReadCompleted &&
+		!signalSent
+	) {
+		signalSent = true;
+		process.kill(process.pid, process.env.SIGNAL_AFTER_ARCHIVE_IO);
+	}
 	const desktopRegistration =
 		command === "/bin/bash" && String(args[0]).startsWith("/usr/bin/");
 	if (
@@ -312,9 +323,21 @@ ${STALLED_RELEASE_INDEX}
 		}
 		return new Response('<a href="' + releaseVersion + '/">' + releaseVersion + '/</a>');
 	}
-	return url === releaseUrl + releaseVersion + "/camunda-modeler-" + releaseVersion + "-linux-x64.tar.gz"
-		? new Response(fs.readFileSync(process.env.ARCHIVE))
-		: new Response("not found", { status: 404 });
+	if (
+		url !==
+		releaseUrl +
+			releaseVersion +
+			"/camunda-modeler-" +
+			releaseVersion +
+			"-linux-x64.tar.gz"
+	) {
+		return new Response("not found", { status: 404 });
+	}
+	const archive = process.env.SIGNAL_AFTER_ARCHIVE_IO
+		? await fs.promises.readFile(process.env.ARCHIVE)
+		: fs.readFileSync(process.env.ARCHIVE);
+	archiveReadCompleted = process.env.SIGNAL_AFTER_ARCHIVE_IO !== undefined;
+	return new Response(archive);
 };
 `;
 
@@ -2387,26 +2410,37 @@ describe("CLI behavioural: modeler install", () => {
 				sandbox.fakeTool(tool);
 			}
 			const pidFile = join(sandbox.home, "unregister.pid");
+			const releaseFile = join(sandbox.home, "unregister.release");
 			writeFileSync(
 				join(installed.installDir, "support", "xdg_unregister.sh"),
-				'#!/bin/bash\nprintf \'%s\\n\' "$PPID" > "$UNREGISTER_PID_FILE"\nsleep 1\n',
+				`#!/bin/bash
+printf '%s\\n' "$PPID" > "$UNREGISTER_PID_FILE.tmp"
+mv "$UNREGISTER_PID_FILE.tmp" "$UNREGISTER_PID_FILE"
+while [ ! -e "$UNREGISTER_RELEASE_FILE" ]; do sleep 0.01; done
+`,
 				{ mode: 0o755 },
 			);
 			const resultPromise = sandbox.uninstall({
 				FAKE_UID: "0",
 				UNREGISTER_PID_FILE: pidFile,
+				UNREGISTER_RELEASE_FILE: releaseFile,
 			});
 
 			try {
-				await pollUntilValue(
-					async () => (existsSync(pidFile) ? pidFile : undefined),
-					15_000,
-					25,
-					"the synchronous Linux unregistration step",
-				);
-				const pid = Number(readFileSync(pidFile, "utf8"));
-				assert.ok(Number.isInteger(pid) && pid > 0);
-				process.kill(pid, signal);
+				try {
+					// The deadline is only a deadlock safety net; the release handshake controls signal timing.
+					await pollUntilValue(
+						async () => (existsSync(pidFile) ? pidFile : undefined),
+						15_000,
+						25,
+						"the synchronous Linux unregistration step",
+					);
+					const pid = Number(readFileSync(pidFile, "utf8"));
+					assert.ok(Number.isInteger(pid) && pid > 0);
+					process.kill(pid, signal);
+				} finally {
+					writeFileSync(releaseFile, "");
+				}
 
 				const result = await resultPromise;
 				assert.strictEqual(result.timedOut, false, result.stderr);
@@ -2417,7 +2451,35 @@ describe("CLI behavioural: modeler install", () => {
 					"interrupted uninstall releases its lock",
 				);
 			} finally {
-				await resultPromise;
+				try {
+					await resultPromise;
+				} finally {
+					sandbox.cleanup();
+				}
+			}
+		});
+	}
+
+	for (const signal of ["SIGINT", "SIGTERM"] as const) {
+		test(`re-raises ${signal} after Linux update resumes from archive I/O`, {
+			skip: isWindows,
+		}, async () => {
+			const sandbox = createLinuxSandbox();
+			addLinuxInstall(sandbox, "5.51.0");
+
+			try {
+				const result = await sandbox.update({
+					FAKE_UID: "0",
+					SIGNAL_AFTER_ARCHIVE_IO: signal,
+				});
+				assert.strictEqual(result.timedOut, false, result.stderr);
+				assert.notStrictEqual(result.status, 0, result.stderr);
+				assert.strictEqual(result.signal, signal, result.stderr);
+				assert.ok(
+					!existsSync(sandbox.lockPath),
+					"interrupted update releases its lock",
+				);
+			} finally {
 				sandbox.cleanup();
 			}
 		});

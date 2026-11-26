@@ -267,8 +267,8 @@ function releaseLinuxLifecycleLock(): void {
 /**
  * Run `body` while the Linux lifecycle lock is held. Signal handlers
  * release the lock and remember the first signal. Synchronous `spawnSync`
- * work defers signal delivery until the body returns, so drain one event-loop
- * turn before removing the listeners and re-raising the signal.
+ * work defers signal delivery until the body returns, so keep the listeners
+ * through a poll phase before removing them and re-raising the signal.
  */
 async function withLinuxLifecycleLock(
 	ctx: ModelerInstallContext,
@@ -287,7 +287,9 @@ async function withLinuxLifecycleLock(
 	try {
 		return await body();
 	} finally {
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await new Promise<void>((resolve) =>
+			setImmediate(() => setImmediate(resolve)),
+		);
 		process.off("SIGINT", onSigint);
 		process.off("SIGTERM", onSigterm);
 		releaseLinuxLifecycleLock();
