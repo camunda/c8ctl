@@ -629,29 +629,73 @@ Cancel a process instance
 
 ### `suspend`
 
-Suspend a process instance (Camunda 8.10+)
+Suspend a process instance (Camunda 8.10+) or process definition versions (Camunda 8.11+)
 
-**Usage:** `c8ctl suspend <resource> <key>`
+**Usage:** `c8ctl suspend <resource> [key]`
 
-**Resources:** pi (process-instance)
+**Resources:** pi (process-instance), pd (process-definition)
 
 **Positional arguments:**
 
 - **process-instance:** `<key>` (required)
+- **process-definition:** `<key>` (optional)
+
+**Resource-specific flags:**
+
+<details>
+<summary><code>process-definition</code> (<code>pd</code>)</summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--processDefinitionId` | string |  | Select by BPMN process ID instead of key (all versions unless --version is given) |
+| `--version` | string |  | Process definition version (only with --processDefinitionId) |
+| `--tenantId` | string |  | Tenant ID (only with --processDefinitionId) |
+| `--includeProcessInstances` | boolean |  | Also suspend or resume the running instances through a batch operation |
+
+</details>
+
+**Examples:**
+
+```bash
+c8ctl suspend pd 2251799813685249                           # Suspend one process definition version by key
+c8ctl suspend pd --processDefinitionId order-process --version 2 --includeProcessInstances  # Suspend a version by process ID and its running instances
+```
 
 ---
 
 ### `resume`
 
-Resume a suspended process instance (Camunda 8.10+)
+Resume a suspended process instance (Camunda 8.10+) or process definition versions (Camunda 8.11+)
 
-**Usage:** `c8ctl resume <resource> <key>`
+**Usage:** `c8ctl resume <resource> [key]`
 
-**Resources:** pi (process-instance)
+**Resources:** pi (process-instance), pd (process-definition)
 
 **Positional arguments:**
 
 - **process-instance:** `<key>` (required)
+- **process-definition:** `<key>` (optional)
+
+**Resource-specific flags:**
+
+<details>
+<summary><code>process-definition</code> (<code>pd</code>)</summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--processDefinitionId` | string |  | Select by BPMN process ID instead of key (all versions unless --version is given) |
+| `--version` | string |  | Process definition version (only with --processDefinitionId) |
+| `--tenantId` | string |  | Tenant ID (only with --processDefinitionId) |
+| `--includeProcessInstances` | boolean |  | Also suspend or resume the running instances through a batch operation |
+
+</details>
+
+**Examples:**
+
+```bash
+c8ctl resume pd 2251799813685249                            # Resume one process definition version by key
+c8ctl resume pd --processDefinitionId order-process --version 2 --includeProcessInstances  # Resume a version by process ID and its instances
+```
 
 ---
 

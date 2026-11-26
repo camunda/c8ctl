@@ -553,6 +553,31 @@ c8 await pi --id=order-process --variables="{\"orderData\": $processVar}" --fetc
 
 :::
 
+## Suspend and resume process definitions
+
+Suspend a process definition to stop new instances from starting, and resume it to allow them again. This requires Camunda 8.11 or later.
+
+Select the definition by key, or by process ID with an optional version and tenant:
+
+```bash
+# By key
+c8ctl suspend pd 2251799813685249
+
+# By process ID: all versions, or one version
+c8ctl suspend pd --processDefinitionId order-process
+c8ctl resume pd --processDefinitionId order-process --version 2 --tenantId my-tenant
+```
+
+A key cannot be combined with `--processDefinitionId`, `--version` or `--tenantId`. `--version` and `--tenantId` need `--processDefinitionId`.
+
+Add `--includeProcessInstances` to also suspend or resume the running instances of the definition. This starts a batch operation on the server.
+
+```bash
+c8ctl suspend pd --processDefinitionId order-process --includeProcessInstances
+```
+
+The output has one row per affected version with these columns: `processDefinitionKey`, `version`, `outcome` and `batchOperationKey`. Every row shows the same batch operation key, or `-` when no batch operation was started. Use `--dry-run` to preview the request first.
+
 ## Open web applications
 
 Open Camunda web applications in your default browser using the `open` command:
