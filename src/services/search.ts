@@ -1,14 +1,17 @@
 /**
  * Search services: process definitions, process instances, user tasks,
- * incidents, jobs, variables, wait states.
+ * incidents, jobs, variables, wait states, element instances, message
+ * subscriptions.
  *
  * String filters take `*` and `?` wildcards. The `i…` inputs (e.g. `iid`,
  * `iname`) match case-insensitively; the API cannot, so these searches
  * fetch larger pages and filter the results here.
  */
 
+import { ProcessInstanceKey } from "@camunda8/orchestration-cluster-api";
 import type { C8ctlContext, ClusterInput } from "../core/index.ts";
 import {
+	brandInput,
 	C8ctlError,
 	callCluster,
 	connect,
@@ -305,6 +308,9 @@ export interface SearchIncidentsInput {
 	iid?: string;
 	/** Creation time range `<from>..<to>`, e.g. `7d` or `2024-01-01..`. */
 	between?: string;
+	/** Also the incidents of the process and decision instances that
+	 *  `processInstanceKey` called. Requires `processInstanceKey`. */
+	includeCalled?: boolean;
 }
 
 /**
@@ -319,9 +325,17 @@ export function searchIncidentsRequest(
 	input: SearchIncidentsInput,
 	tenantId: string | undefined,
 ) {
+	if (input.includeCalled && !input.processInstanceKey) {
+		throw new C8ctlError(
+			"invalid-input",
+			"--includeCalled requires --processInstanceKey",
+			{ field: "processInstanceKey" },
+		);
+	}
 	const filter: Record<string, unknown> = { tenantId };
 	if (input.state) filter.state = input.state;
-	if (input.processInstanceKey) {
+	// With includeCalled, the key is the root in the endpoint path.
+	if (input.processInstanceKey && !input.includeCalled) {
 		filter.processInstanceKey = input.processInstanceKey;
 	}
 	if (input.processDefinitionKey) {
@@ -335,7 +349,10 @@ export function searchIncidentsRequest(
 		filter.processDefinitionId = toStringFilter(input.processDefinitionId);
 	}
 	if (input.between) filter.creationTime = dateRangeFilter(input.between);
-	return { method: "POST", endpoint: "/incidents/search", body: { filter } };
+	const endpoint = input.includeCalled
+		? `/process-instances/${input.processInstanceKey}/incidents/search`
+		: "/incidents/search";
+	return { method: "POST", endpoint, body: { filter } };
 }
 
 export async function searchIncidents(
@@ -353,10 +370,23 @@ export async function searchIncidents(
 		input.iid ||
 		wildcardMessage
 	);
+	const rootKey = input.includeCalled
+		? brandInput(
+				"processInstanceKey",
+				input.processInstanceKey ?? "",
+				ProcessInstanceKey.assumeExists,
+			)
+		: undefined;
 	let items = await callCluster(
 		(signal) =>
 			fetchAllPages<SearchItem>(
-				(f, opts) => client.searchIncidents(f, opts),
+				(f, opts) =>
+					rootKey
+						? client.searchProcessInstanceIncidents(
+								{ ...f, processInstanceKey: rootKey },
+								opts,
+							)
+						: client.searchIncidents(f, opts),
 				body,
 				caseInsensitive ? CI_PAGE_SIZE : undefined,
 				undefined,
@@ -580,6 +610,121 @@ export async function searchWaitStates(
 		(signal) =>
 			fetchAllPages<SearchItem>(
 				(f, opts) => client.searchElementInstanceWaitStates(f, opts),
+				body,
+				DEFAULT_PAGE_SIZE,
+				input.limit,
+				signal,
+			),
+		ctx,
+	);
+	return { items };
+}
+
+// ─── element instances ───────────────────────────────────────────────────────
+
+export interface SearchElementInstancesInput {
+	processInstanceKey?: string;
+	processDefinitionKey?: string;
+	elementId?: string;
+	/** BPMN element type, e.g. `SERVICE_TASK`. */
+	elementType?: string;
+	/** `ACTIVE`, `COMPLETED` or `TERMINATED`. */
+	state?: string;
+	/** Maximum number of element instances. Default: all. */
+	limit?: number;
+}
+
+export function searchElementInstancesRequest(
+	input: SearchElementInstancesInput,
+	tenantId: string | undefined,
+) {
+	const filter: Record<string, unknown> = { tenantId };
+	if (input.processInstanceKey) {
+		filter.processInstanceKey = input.processInstanceKey;
+	}
+	if (input.processDefinitionKey) {
+		filter.processDefinitionKey = input.processDefinitionKey;
+	}
+	if (input.elementId) filter.elementId = toStringFilter(input.elementId);
+	if (input.elementType) filter.type = input.elementType;
+	if (input.state) filter.state = input.state;
+	return {
+		method: "POST",
+		endpoint: "/element-instances/search",
+		body: { filter },
+	};
+}
+
+export async function searchElementInstances(
+	input: SearchElementInstancesInput & ClusterInput,
+	ctx: C8ctlContext = {},
+): Promise<{ items: SearchItem[] }> {
+	const { client, defaultTenantId } = connect(input.target, ctx);
+	const { body } = searchElementInstancesRequest(
+		input,
+		input.tenantId ?? defaultTenantId,
+	);
+	const items = await callCluster(
+		(signal) =>
+			fetchAllPages<SearchItem>(
+				(f, opts) => client.searchElementInstances(f, opts),
+				body,
+				DEFAULT_PAGE_SIZE,
+				input.limit,
+				signal,
+			),
+		ctx,
+	);
+	return { items };
+}
+
+// ─── message subscriptions ───────────────────────────────────────────────────
+
+export interface SearchMessageSubscriptionsInput {
+	processInstanceKey?: string;
+	messageName?: string;
+	correlationKey?: string;
+	/** `CREATED`, `CORRELATED`, `DELETED` or `MIGRATED`. */
+	state?: string;
+	/** Maximum number of message subscriptions. Default: all. */
+	limit?: number;
+}
+
+export function searchMessageSubscriptionsRequest(
+	input: SearchMessageSubscriptionsInput,
+	tenantId: string | undefined,
+) {
+	const filter: Record<string, unknown> = { tenantId };
+	if (input.processInstanceKey) {
+		filter.processInstanceKey = input.processInstanceKey;
+	}
+	if (input.messageName) {
+		filter.messageName = toStringFilter(input.messageName);
+	}
+	if (input.correlationKey) {
+		filter.correlationKey = toStringFilter(input.correlationKey);
+	}
+	if (input.state) filter.messageSubscriptionState = input.state;
+	return {
+		method: "POST",
+		endpoint: "/message-subscriptions/search",
+		body: { filter },
+	};
+}
+
+export async function searchMessageSubscriptions(
+	input: SearchMessageSubscriptionsInput & ClusterInput,
+	ctx: C8ctlContext = {},
+): Promise<{ items: SearchItem[] }> {
+	const { client, defaultTenantId } = connect(input.target, ctx);
+	const { body } = searchMessageSubscriptionsRequest(
+		input,
+		input.tenantId ?? defaultTenantId,
+	);
+	const items = await callCluster(
+		(signal) =>
+			fetchAllPages<SearchItem>(
+				(f, opts) => client.searchMessageSubscriptions(f, opts),
 				body,
 				DEFAULT_PAGE_SIZE,
 				input.limit,

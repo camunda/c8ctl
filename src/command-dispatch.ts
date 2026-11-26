@@ -104,8 +104,10 @@ import {
 } from "./commands/profiles.ts";
 import { runCommand } from "./commands/run.ts";
 import {
+	searchElementInstancesCommand,
 	searchIncidentsCommand,
 	searchJobsCommand,
+	searchMessageSubscriptionsCommand,
 	searchProcessDefinitionsCommand,
 	searchProcessInstancesCommand,
 	searchUserTasksCommand,
@@ -208,6 +210,8 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["search:authorization", searchIdentityAuthorizationsCommand],
 	["search:mapping-rule", searchIdentityMappingRulesCommand],
 	["search:wait-state", searchWaitStatesCommand],
+	["search:element-instance", searchElementInstancesCommand],
+	["search:message-subscription", searchMessageSubscriptionsCommand],
 
 	// ── Identity: list ─────────────────────────────────────────────────
 	["list:user", listUsersCommand],

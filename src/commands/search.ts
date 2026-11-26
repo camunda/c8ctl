@@ -7,10 +7,14 @@
 import { isRecord, type Logger, sortTableData } from "../core/index.ts";
 import { clusterInputOf, defineCommand } from "../framework/index.ts";
 import {
+	searchElementInstances,
+	searchElementInstancesRequest,
 	searchIncidents,
 	searchIncidentsRequest,
 	searchJobs,
 	searchJobsRequest,
+	searchMessageSubscriptions,
+	searchMessageSubscriptionsRequest,
 	searchProcessDefinitions,
 	searchProcessDefinitionsRequest,
 	searchProcessInstances,
@@ -416,10 +420,14 @@ export const searchIncidentsCommand = defineCommand(
 		if (ctx.between) {
 			criteria.push(`'creationTime' between "${ctx.between}"`);
 		}
+		if (flags.includeCalled) {
+			criteria.push("including called instances");
+		}
 
 		const input = {
 			state: flags.state,
 			processInstanceKey: flags.processInstanceKey,
+			includeCalled: flags.includeCalled,
 			processDefinitionKey: flags.processDefinitionKey,
 			errorType: flags.errorType,
 			errorMessage: flags.errorMessage,
@@ -735,6 +743,157 @@ export const searchWaitStatesCommand = defineCommand(
 			);
 		} else {
 			logNoResults(logger, "wait states", criteria.length > 0);
+		}
+	},
+);
+
+/**
+ * Search element instances.
+ * API: POST /v2/element-instances/search
+ */
+export const searchElementInstancesCommand = defineCommand(
+	"search",
+	"element-instance",
+	async (ctx, flags, _args) => {
+		const { logger } = ctx;
+
+		const criteria: string[] = [];
+		if (flags.processInstanceKey) {
+			criteria.push(
+				formatCriterion("Process Instance Key", flags.processInstanceKey),
+			);
+		}
+		if (flags.processDefinitionKey) {
+			criteria.push(
+				formatCriterion("Process Definition Key", flags.processDefinitionKey),
+			);
+		}
+		if (flags.elementId) {
+			criteria.push(formatCriterion("Element ID", flags.elementId));
+		}
+		if (flags.elementType) {
+			criteria.push(formatCriterion("Element Type", flags.elementType));
+		}
+		if (flags.state) {
+			criteria.push(formatCriterion("state", flags.state));
+		}
+
+		const input = {
+			processInstanceKey: flags.processInstanceKey,
+			processDefinitionKey: flags.processDefinitionKey,
+			elementId: flags.elementId,
+			elementType: flags.elementType,
+			state: flags.state,
+			limit: ctx.limit,
+		};
+
+		const dr = ctx.dryRun({
+			command: "search element-instance",
+			profile: ctx.profile,
+			...searchElementInstancesRequest(input, ctx.tenantId),
+		});
+		if (dr) return dr;
+
+		logSearchCriteria(logger, "Element Instances", criteria);
+
+		const { items } = await searchElementInstances(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
+		);
+
+		if (items.length > 0) {
+			let tableData = items.map((ei) => ({
+				Key: ei.elementInstanceKey,
+				"Element ID": ei.elementId,
+				Type: ei.type,
+				State: ei.state,
+				Incident: ei.hasIncident ? "✓" : "",
+				Started: ei.startDate || "-",
+				"Process Instance": ei.processInstanceKey,
+				"Tenant ID": ei.tenantId,
+			}));
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
+			logger.table(tableData);
+			logResultCount(
+				logger,
+				items.length,
+				"element instance(s)",
+				criteria.length > 0,
+			);
+		} else {
+			logNoResults(logger, "element instances", criteria.length > 0);
+		}
+	},
+);
+
+/**
+ * Search message subscriptions.
+ * API: POST /v2/message-subscriptions/search
+ */
+export const searchMessageSubscriptionsCommand = defineCommand(
+	"search",
+	"message-subscription",
+	async (ctx, flags, _args) => {
+		const { logger } = ctx;
+
+		const criteria: string[] = [];
+		if (flags.processInstanceKey) {
+			criteria.push(
+				formatCriterion("Process Instance Key", flags.processInstanceKey),
+			);
+		}
+		if (flags.messageName) {
+			criteria.push(formatCriterion("Message Name", flags.messageName));
+		}
+		if (flags.correlationKey) {
+			criteria.push(formatCriterion("Correlation Key", flags.correlationKey));
+		}
+		if (flags.state) {
+			criteria.push(formatCriterion("state", flags.state));
+		}
+
+		const input = {
+			processInstanceKey: flags.processInstanceKey,
+			messageName: flags.messageName,
+			correlationKey: flags.correlationKey,
+			state: flags.state,
+			limit: ctx.limit,
+		};
+
+		const dr = ctx.dryRun({
+			command: "search message-subscription",
+			profile: ctx.profile,
+			...searchMessageSubscriptionsRequest(input, ctx.tenantId),
+		});
+		if (dr) return dr;
+
+		logSearchCriteria(logger, "Message Subscriptions", criteria);
+
+		const { items } = await searchMessageSubscriptions(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
+		);
+
+		if (items.length > 0) {
+			let tableData = items.map((sub) => ({
+				Key: sub.messageSubscriptionKey,
+				Message: sub.messageName,
+				"Correlation Key": sub.correlationKey ?? "-",
+				State: sub.messageSubscriptionState,
+				"Element ID": sub.elementId,
+				"Process Instance": sub.processInstanceKey,
+				"Tenant ID": sub.tenantId,
+			}));
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
+			logger.table(tableData);
+			logResultCount(
+				logger,
+				items.length,
+				"message subscription(s)",
+				criteria.length > 0,
+			);
+		} else {
+			logNoResults(logger, "message subscriptions", criteria.length > 0);
 		}
 	},
 );

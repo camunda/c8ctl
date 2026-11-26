@@ -132,6 +132,17 @@ async function startFakeCluster(): Promise<FakeCluster> {
 				});
 				return;
 			}
+			if (
+				req.method === "POST" &&
+				(url.endsWith("/element-instances/search") ||
+					url.endsWith("/message-subscriptions/search"))
+			) {
+				send(200, {
+					items: [{ processInstanceKey: "2251799813690000" }],
+					page: { totalItems: 1 },
+				});
+				return;
+			}
 			if (req.method === "POST" && url.endsWith("/deployments")) {
 				if (nextProblem) {
 					const problem = nextProblem;
@@ -393,10 +404,12 @@ describe("@camunda8/cli/internal", () => {
 			"resolveIncident",
 			"resumeProcessInstance",
 			"searchAuthorizations",
+			"searchElementInstances",
 			"searchGroups",
 			"searchIncidents",
 			"searchJobs",
 			"searchMappingRules",
+			"searchMessageSubscriptions",
 			"searchProcessDefinitions",
 			"searchProcessInstances",
 			"searchRoles",
@@ -936,6 +949,38 @@ describe("@camunda8/cli/internal", () => {
 		const body = JSON.parse(request.body);
 		assert.strictEqual(body.expression, "= a + 1");
 		assert.deepStrictEqual(body.variables, { a: 41 });
+	});
+
+	test("task-testing searches query a process instance", async () => {
+		const ctx = { dataDir: createDataDir(cluster.baseUrl) };
+		const target: InternalApi.Target = { profile: "embedded" };
+		const processInstanceKey = "2251799813690000";
+		const requestsBefore = cluster.requests.length;
+
+		const results = [
+			await api.searchElementInstances({ target, processInstanceKey }, ctx),
+			await api.searchMessageSubscriptions({ target, processInstanceKey }, ctx),
+			await api.searchIncidents(
+				{ target, processInstanceKey, includeCalled: true },
+				ctx,
+			),
+		];
+
+		assert.deepStrictEqual(
+			results.map(({ items }) => items.length),
+			[1, 1, 1],
+		);
+		assert.deepStrictEqual(
+			cluster.requests.slice(requestsBefore).map((request) => {
+				const { filter } = JSON.parse(request.body);
+				return [new URL(request.url, cluster.baseUrl).pathname, filter];
+			}),
+			[
+				["/v2/element-instances/search", { processInstanceKey }],
+				["/v2/message-subscriptions/search", { processInstanceKey }],
+				[`/v2/process-instances/${processInstanceKey}/incidents/search`, {}],
+			],
+		);
 	});
 
 	test("evaluateExpression reports a rejected expression as invalid input", async () => {
