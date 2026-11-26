@@ -564,7 +564,7 @@ Object.defineProperty(childProcess, "spawn", {
 						stderr: "No cluster is currently running.\n",
 					});
 				}
-				const stoppedVersion = runningVersion() ?? clusterMarkerVersion();
+				const stoppedVersion = clusterMarkerVersion() ?? runningVersion();
 				clusterRunning = false;
 				const stoppedMarker = clusterMarkerPath();
 				if (stoppedMarker) fs.rmSync(stoppedMarker, { force: true });

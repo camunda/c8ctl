@@ -2014,6 +2014,44 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("purges the durable-marker version before deleting multiple installs", async () => {
+		const stub = stubbedExecution({
+			clusterUp: true,
+			failStep: "delete-cluster",
+		});
+		try {
+			stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+			plantC8RunInstall(stub.c8runCache, "8.9.0", "8.10.0");
+			writeFileSync(join(stub.c8runCache, "cluster.running"), "8.9.0");
+
+			const removal = await c8WithOptions(
+				stub.options,
+				"setup",
+				"--remove",
+				"--yes",
+			);
+			const output = `${removal.stderr}\n${removal.stdout}`;
+			assert.strictEqual(removal.status, 1, output);
+			assert.match(output, /Stopped local Camunda 8 cluster/);
+			assert.match(output, /Purged runtime data for 8\.9\.0/);
+			assert.match(output, /Could not remove Camunda 8 Run 8\.9\.0/);
+			assert.ok(existsSync(join(stub.c8runCache, "c8run-8.9.0")));
+			assert.ok(
+				!existsSync(join(stub.c8runCache, "c8run-8.9.0", "camunda-data")),
+			);
+			assert.ok(
+				!existsSync(
+					join(stub.c8runCache, "c8run-8.9.0", "camunda-zeebe-8.9.0", "data"),
+				),
+			);
+			assert.ok(
+				!existsSync(join(stub.c8runCache, "c8run-8.10.0", "camunda-data")),
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("preserves the cluster installation when its preview status probe fails", async () => {
 		const stub = stubbedExecution();
 		try {
