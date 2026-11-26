@@ -2448,6 +2448,28 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("Camunda skills installed by another tool do not fail the skills step or skip the deploy", async () => {
+		const stub = stubbedExecution();
+		stub.options.env.C8CTL_SETUP_STUB_UNMANAGED_SKILLS = "1";
+		mkdirSync(join(stub.home, ".claude", "skills", "camunda-c8ctl"), {
+			recursive: true,
+		});
+		try {
+			const result = await c8WithOptions(stub.options, "setup", "--yes");
+			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			// The keep-notice is actionable, so it is not buffered away.
+			assert.match(
+				stripVTControlCharacters(result.stderr),
+				/Kept 1 Camunda skill for Claude Code that another tool installed/,
+			);
+		} finally {
+			stub.cleanup();
+		}
+	});
+
 	test("interactive: toggling the cluster off disables the blueprint", async () => {
 		// Space on the highlighted "Local cluster" row, then Enter. The
 		// blueprint option is dependency-disabled, so no blueprint prompt.

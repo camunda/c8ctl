@@ -174,6 +174,13 @@ export interface CamundaSkillInstallation extends InstalledCamundaSkill {
 }
 
 function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
+	return listedSkills(stdout).camunda;
+}
+
+function listedSkills(stdout: string): {
+	camunda: InstalledCamundaSkill[];
+	others: string[];
+} {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(stdout);
@@ -185,12 +192,16 @@ function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
 	}
 
 	const skills: InstalledCamundaSkill[] = [];
+	const others: string[] = [];
 	for (const entry of parsed) {
-		if (!isRecord(entry) || typeof entry.sourceURL !== "string") continue;
+		if (!isRecord(entry)) continue;
 		if (
+			typeof entry.sourceURL !== "string" ||
 			entry.sourceURL.replace(/\/+$/, "").toLowerCase() !== CAMUNDA_SKILLS_URL
-		)
+		) {
+			if (typeof entry.skillName === "string") others.push(entry.skillName);
 			continue;
+		}
 		if (
 			typeof entry.skillName !== "string" ||
 			entry.skillName.length === 0 ||
@@ -205,7 +216,7 @@ function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
 			path: entry.path,
 		});
 	}
-	return skills;
+	return { camunda: skills, others };
 }
 
 function availableCamundaSkills(stdout: string): string[] {
@@ -574,24 +585,35 @@ export function removeCamundaSkill(
 	rmSync(directory, { recursive: true });
 }
 
+export interface SkillInstallOutcome {
+	/** Camunda skill names present from another source, left untouched. */
+	readonly unmanaged: string[];
+}
+
 export async function runSkillInstall(
 	harness: string,
 	runner: SkillInstallRunner = runCommand,
-): Promise<void> {
-	const installed = await listCamundaSkills(harness, runner);
-	if (installed.length === 0) {
+): Promise<SkillInstallOutcome> {
+	const listed = await runner("gh", buildSkillListArgs(harness));
+	requireSuccessfulSkillCommand(listed, "check for installed");
+	const { camunda: installed, others } = listedSkills(listed.stdout);
+	if (installed.length === 0 && others.length === 0) {
 		requireSuccessfulSkillCommand(
 			await runner("gh", buildSkillInstallArgs(harness)),
 			"install",
 		);
-		return;
+		return { unmanaged: [] };
 	}
 
 	const availableResult = await runner("gh", buildSkillDiscoveryArgs());
 	requireSuccessfulSkillCommand(availableResult, "list available");
 	const available = availableCamundaSkills(availableResult.stdout);
 	const installedNames = new Set(installed.map(({ name }) => name));
-	const missing = available.filter((skill) => !installedNames.has(skill));
+	// gh refuses to install over a same-named skill from another source.
+	const unmanaged = available.filter((skill) => others.includes(skill));
+	const missing = available.filter(
+		(skill) => !installedNames.has(skill) && !unmanaged.includes(skill),
+	);
 
 	const byDirectory = new Map<string, string[]>();
 	for (const skill of installed) {
@@ -611,6 +633,7 @@ export async function runSkillInstall(
 			"install",
 		);
 	}
+	return { unmanaged };
 }
 
 function requireSuccessfulSkillCommand(

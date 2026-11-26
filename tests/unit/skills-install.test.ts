@@ -313,6 +313,181 @@ test("installs missing Camunda skills despite multiline catalog descriptions", a
 	]);
 });
 
+test("leaves Camunda skills installed by another tool in place and installs only the missing ones", async () => {
+	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
+	const listed = [
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "",
+			path: join(skillRoot, "camunda-ai-agents"),
+		},
+		{ skillName: "camunda-bpmn", path: join(skillRoot, "camunda-bpmn") },
+		{
+			skillName: "unrelated",
+			sourceURL: "",
+			path: join(skillRoot, "unrelated"),
+		},
+	];
+	const calls: string[][] = [];
+
+	const result = await runSkillInstall(
+		"claude-code",
+		async (_command, args) => {
+			calls.push(args);
+			if (args[1] === "list") {
+				return { status: 0, stdout: JSON.stringify(listed), stderr: "" };
+			}
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout: [
+						"camunda-ai-agents\tCamunda skill",
+						"camunda-bpmn\tCamunda skill",
+						"camunda-c8ctl\tCamunda skill",
+					].join("\n"),
+					stderr: "",
+				};
+			}
+			return { status: 0, stdout: "", stderr: "" };
+		},
+	);
+
+	// A fresh `--all` install would collide with the foreign copies.
+	assert.deepEqual(calls.slice(1), [
+		["skill", "install", "camunda/skills"],
+		[
+			"skill",
+			"install",
+			"camunda/skills",
+			"camunda-c8ctl",
+			"--agent",
+			"claude-code",
+			"--scope",
+			"user",
+		],
+	]);
+	assert.deepEqual(result.unmanaged, ["camunda-ai-agents", "camunda-bpmn"]);
+});
+
+test("updates managed Camunda skills alongside ones installed by another tool", async () => {
+	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
+	const listed = [
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "https://github.com/camunda/skills",
+			path: join(skillRoot, "camunda-ai-agents"),
+		},
+		{
+			skillName: "camunda-bpmn",
+			sourceURL: "https://github.com/someone/fork",
+			path: join(skillRoot, "camunda-bpmn"),
+		},
+	];
+	const calls: string[][] = [];
+
+	const result = await runSkillInstall(
+		"claude-code",
+		async (_command, args) => {
+			calls.push(args);
+			if (args[1] === "list") {
+				return { status: 0, stdout: JSON.stringify(listed), stderr: "" };
+			}
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout:
+						"camunda-ai-agents\tCamunda skill\ncamunda-bpmn\tCamunda skill",
+					stderr: "",
+				};
+			}
+			return { status: 0, stdout: "", stderr: "" };
+		},
+	);
+
+	assert.deepEqual(calls.slice(1), [
+		["skill", "install", "camunda/skills"],
+		["skill", "update", "--all", "--dir", skillRoot, "camunda-ai-agents"],
+	]);
+	assert.deepEqual(result.unmanaged, ["camunda-bpmn"]);
+});
+
+test("reports an unmanaged copy even when a managed copy of the same skill exists elsewhere", async () => {
+	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
+	const otherRoot = join(tmpdir(), "home", ".agents", "skills");
+	const listed = [
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "https://github.com/camunda/skills",
+			path: join(skillRoot, "camunda-ai-agents"),
+		},
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "",
+			path: join(otherRoot, "camunda-ai-agents"),
+		},
+	];
+	const calls: string[][] = [];
+
+	const result = await runSkillInstall(
+		"claude-code",
+		async (_command, args) => {
+			calls.push(args);
+			if (args[1] === "list") {
+				return { status: 0, stdout: JSON.stringify(listed), stderr: "" };
+			}
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout: "camunda-ai-agents\tCamunda skill",
+					stderr: "",
+				};
+			}
+			return { status: 0, stdout: "", stderr: "" };
+		},
+	);
+
+	assert.deepEqual(calls.slice(1), [
+		["skill", "install", "camunda/skills"],
+		["skill", "update", "--all", "--dir", skillRoot, "camunda-ai-agents"],
+	]);
+	assert.deepEqual(result.unmanaged, ["camunda-ai-agents"]);
+});
+
+test("skills install warns about, and keeps, Camunda skills installed by another tool", async () => {
+	const fixture = createSkillFixture();
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_UNMANAGED_SKILLS: "1",
+				},
+			},
+			"skills",
+			"install",
+			"--harness",
+			"claude-code",
+		);
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(
+			result.stderr,
+			/Kept 1 Camunda skill for Claude Code that another tool installed: camunda-c8ctl\./,
+		);
+		assert.match(
+			result.stderr,
+			/gh skill install camunda\/skills --all --agent claude-code --scope user --force/,
+		);
+		assert.equal(
+			readFileSync(join(fixture.skillDirectory, "SKILL.md"), "utf8"),
+			"# Camunda c8ctl\n",
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("fails when available Camunda skills cannot be listed", async () => {
 	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
 	const installedSkills = [
