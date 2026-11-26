@@ -240,8 +240,8 @@ export const ENVIRONMENT_VARIABLES_HELP: readonly {
 	{ name: "CAMUNDA_OAUTH_URL", description: "OAuth token endpoint" },
 	{ name: "CAMUNDA_TOKEN_AUDIENCE", description: "OAuth token audience" },
 	{ name: "CAMUNDA_OAUTH_SCOPE", description: "OAuth scope (space-separated)" },
-	{ name: "CAMUNDA_USERNAME", description: "Basic auth username" },
-	{ name: "CAMUNDA_PASSWORD", description: "Basic auth password" },
+	{ name: "CAMUNDA_USERNAME", description: "Basic authentication username" },
+	{ name: "CAMUNDA_PASSWORD", description: "Basic authentication password" },
 	{ name: "CAMUNDA_DEFAULT_TENANT_ID", description: "Default tenant ID" },
 ];
 
@@ -715,8 +715,8 @@ const PROFILE_CONNECTION_FLAGS = {
 	oAuthUrl: { type: "string", description: "OAuth token URL" },
 	scope: { type: "string", description: "OAuth scope (space-separated)" },
 	defaultTenantId: { type: "string", description: "Default tenant ID" },
-	username: { type: "string", description: "Basic auth username" },
-	password: { type: "string", description: "Basic auth password" },
+	username: { type: "string", description: "Basic authentication username" },
+	password: { type: "string", description: "Basic authentication password" },
 	"from-file": { type: "string", description: "Import from .env file" },
 	"from-env": {
 		type: "boolean",
