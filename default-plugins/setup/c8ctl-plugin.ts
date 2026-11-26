@@ -1044,7 +1044,6 @@ function setupRemovalPreview(inventory: SetupRemovalInventory): {
 	lines.push(
 		"  Listed skill directories and blueprint files may contain local edits; those contents will be removed. Untracked blueprint files are kept.",
 	);
-	lines.push("Nothing was removed.");
 
 	return {
 		text: lines.join("\n"),
@@ -1342,6 +1341,7 @@ async function runSetupRemoval(ctx: PluginCtx): Promise<void> {
 
 	logger.output(preview.text);
 	if (preview.payload.items.length === 0) {
+		logger.output("Nothing was removed.");
 		if (
 			inventory.mcpPlanningFailures.length > 0 ||
 			inventory.skillDiscoveryFailures.length > 0 ||
