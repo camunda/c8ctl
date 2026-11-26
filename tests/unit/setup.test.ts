@@ -2422,6 +2422,48 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("an unmanaged skills collision warns but does not block setup deployment", async () => {
+		const captureDir = mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-"));
+		const capture = join(captureDir, "capture.json");
+		const stub = stubbedExecution({ capture });
+		const unmanagedSkillName = "camunda-ai-agents";
+		const unmanagedSkillDirectory = join(
+			stub.home,
+			".claude",
+			"skills",
+			unmanagedSkillName,
+		);
+		const userFile = join(unmanagedSkillDirectory, "local.md");
+		mkdirSync(unmanagedSkillDirectory, { recursive: true });
+		writeFileSync(userFile, "user-owned content\n");
+		stub.options.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL = unmanagedSkillName;
+		stub.options.env.C8CTL_SETUP_STUB_EXTRA_SKILLS =
+			"camunda-ai-agents,camunda-bpmn";
+
+		try {
+			const result = await c8WithOptions(stub.options, "setup", "--yes");
+			const out = stripVTControlCharacters(result.stdout + result.stderr);
+
+			assert.strictEqual(result.status, 0, out);
+			stepLine(out, "Install AI assistant skills", "SUCCESS");
+			stepLine(out, "Deploy and start the process", "SUCCESS");
+			assert.match(out, /Skipped Camunda skill.*camunda-ai-agents/i);
+			assert.match(out, /move or rename/i);
+			assert.ok(
+				existsSync(capture),
+				"setup should deploy and start the process",
+			);
+			assert.ok(
+				existsSync(join(stub.home, ".claude", "skills", "camunda-bpmn")),
+				"non-colliding Camunda skills should still be installed",
+			);
+			assert.equal(readFileSync(userFile, "utf8"), "user-owned content\n");
+		} finally {
+			stub.cleanup();
+			rmSync(captureDir, { recursive: true, force: true });
+		}
+	});
+
 	test("a failed skills install skips the deploy finale but not the independent MCP step", async () => {
 		const capture = join(
 			mkdtempSync(join(tmpdir(), "c8ctl-setup-capture-")),

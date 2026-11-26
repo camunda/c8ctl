@@ -548,7 +548,13 @@ async function skillsHandler(
 		}
 
 		for (const harness of harnesses) {
-			await runSkillInstall(harness);
+			const skipped = await runSkillInstall(harness);
+			if (skipped.length > 0) {
+				const label = HARNESS_LABELS[harness] ?? harness;
+				logger.warn(
+					`Skipped Camunda skill${skipped.length === 1 ? "" : "s"} for ${label} (${harness}): ${skipped.map((name) => `"${name}"`).join(", ")}. These names are already present without \`camunda/skills\` source attribution. Existing user files were left untouched. To install Camunda's versions, move or rename the conflicting directories (find them with \`gh skill list --scope user --agent ${harness}\`), then rerun \`c8ctl skills install --harness ${harness}\`.`,
+				);
+			}
 		}
 
 		const labels = harnesses

@@ -169,11 +169,23 @@ interface InstalledCamundaSkill {
 	readonly path: string;
 }
 
+interface InstalledSkillInventory {
+	readonly camundaSkills: InstalledCamundaSkill[];
+	readonly unmanagedNames: string[];
+}
+
 export interface CamundaSkillInstallation extends InstalledCamundaSkill {
 	readonly harness: string;
 }
 
-function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
+function isCamundaSkillsSource(sourceURL: unknown): boolean {
+	return (
+		typeof sourceURL === "string" &&
+		sourceURL.replace(/\/+$/, "").toLowerCase() === CAMUNDA_SKILLS_URL
+	);
+}
+
+function installedSkillInventory(stdout: string): InstalledSkillInventory {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(stdout);
@@ -184,28 +196,31 @@ function installedCamundaSkills(stdout: string): InstalledCamundaSkill[] {
 		throw new Error("GitHub CLI returned an invalid installed-skills list.");
 	}
 
-	const skills: InstalledCamundaSkill[] = [];
+	const camundaSkills: InstalledCamundaSkill[] = [];
+	const unmanagedNames: string[] = [];
 	for (const entry of parsed) {
-		if (!isRecord(entry) || typeof entry.sourceURL !== "string") continue;
-		if (
-			entry.sourceURL.replace(/\/+$/, "").toLowerCase() !== CAMUNDA_SKILLS_URL
-		)
+		if (!isRecord(entry)) {
+			throw new Error("GitHub CLI returned an invalid installed-skills list.");
+		}
+		if (typeof entry.skillName !== "string" || entry.skillName.length === 0) {
+			throw new Error(
+				"GitHub CLI returned incomplete installed-skills metadata.",
+			);
+		}
+		if (!isCamundaSkillsSource(entry.sourceURL)) {
+			unmanagedNames.push(entry.skillName);
 			continue;
-		if (
-			typeof entry.skillName !== "string" ||
-			entry.skillName.length === 0 ||
-			typeof entry.path !== "string" ||
-			entry.path.length === 0
-		) {
+		}
+		if (typeof entry.path !== "string" || entry.path.length === 0) {
 			throw new Error("GitHub CLI returned incomplete Camunda skill metadata.");
 		}
-		skills.push({
+		camundaSkills.push({
 			name: entry.skillName,
 			directory: dirname(entry.path),
 			path: entry.path,
 		});
 	}
-	return skills;
+	return { camundaSkills, unmanagedNames };
 }
 
 function availableCamundaSkills(stdout: string): string[] {
@@ -356,7 +371,7 @@ export async function listCamundaSkills(
 ): Promise<CamundaSkillInstallation[]> {
 	const listed = await runner("gh", buildSkillListArgs(harness));
 	requireSuccessfulSkillCommand(listed, "check for installed");
-	return installedCamundaSkills(listed.stdout).map((skill) => ({
+	return installedSkillInventory(listed.stdout).camundaSkills.map((skill) => ({
 		...skill,
 		harness,
 	}));
@@ -577,21 +592,39 @@ export function removeCamundaSkill(
 export async function runSkillInstall(
 	harness: string,
 	runner: SkillInstallRunner = runCommand,
-): Promise<void> {
-	const installed = await listCamundaSkills(harness, runner);
-	if (installed.length === 0) {
+): Promise<string[]> {
+	const listed = await runner("gh", buildSkillListArgs(harness));
+	requireSuccessfulSkillCommand(listed, "check for installed");
+	const { camundaSkills: installed, unmanagedNames } = installedSkillInventory(
+		listed.stdout,
+	);
+	if (installed.length === 0 && unmanagedNames.length === 0) {
 		requireSuccessfulSkillCommand(
 			await runner("gh", buildSkillInstallArgs(harness)),
 			"install",
 		);
-		return;
+		return [];
 	}
 
 	const availableResult = await runner("gh", buildSkillDiscoveryArgs());
 	requireSuccessfulSkillCommand(availableResult, "list available");
 	const available = availableCamundaSkills(availableResult.stdout);
-	const installedNames = new Set(installed.map(({ name }) => name));
-	const missing = available.filter((skill) => !installedNames.has(skill));
+	const installedNames = new Set(
+		installed.map(({ name }) => name.toLowerCase()),
+	);
+	const unmanagedNameSet = new Set(
+		unmanagedNames.map((name) => name.toLowerCase()),
+	);
+	const skipped = available.filter(
+		(skill) =>
+			!installedNames.has(skill.toLowerCase()) &&
+			unmanagedNameSet.has(skill.toLowerCase()),
+	);
+	const missing = available.filter(
+		(skill) =>
+			!installedNames.has(skill.toLowerCase()) &&
+			!unmanagedNameSet.has(skill.toLowerCase()),
+	);
 
 	const byDirectory = new Map<string, string[]>();
 	for (const skill of installed) {
@@ -611,6 +644,7 @@ export async function runSkillInstall(
 			"install",
 		);
 	}
+	return skipped;
 }
 
 function requireSuccessfulSkillCommand(

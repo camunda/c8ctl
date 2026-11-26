@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 import {
 	buildSkillInstallArgs,
 	detectInstalledHarnesses,
@@ -313,6 +314,63 @@ test("installs missing Camunda skills despite multiline catalog descriptions", a
 	]);
 });
 
+test("skips unmanaged Camunda skill name collisions and installs remaining skills", async () => {
+	const unmanagedSkillName = "Camunda-AI-Agents";
+	const availableSkills = ["camunda-ai-agents", "camunda-bpmn"];
+	const attemptedInstalls: string[][] = [];
+	const skipped = await runSkillInstall(
+		"claude-code",
+		async (_command, args) => {
+			if (args[1] === "list") {
+				return {
+					status: 0,
+					stdout: JSON.stringify([
+						{
+							skillName: unmanagedSkillName,
+							path: join(
+								tmpdir(),
+								"home",
+								".claude",
+								"skills",
+								unmanagedSkillName,
+							),
+						},
+					]),
+					stderr: "",
+				};
+			}
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout: availableSkills
+						.map((skill) => `${skill}\tCamunda skill`)
+						.join("\n"),
+					stderr: "",
+				};
+			}
+
+			attemptedInstalls.push(args);
+			if (
+				args.includes("--all") ||
+				args[3]?.toLowerCase() === unmanagedSkillName.toLowerCase()
+			) {
+				return {
+					status: 1,
+					stdout: "",
+					stderr: `skill directory already exists for ${unmanagedSkillName}`,
+				};
+			}
+			return { status: 0, stdout: "", stderr: "" };
+		},
+	);
+
+	assert.deepEqual(skipped, ["camunda-ai-agents"]);
+	assert.deepEqual(
+		attemptedInstalls.map((args) => args[3]),
+		["camunda-bpmn"],
+	);
+});
+
 test("fails when available Camunda skills cannot be listed", async () => {
 	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
 	const installedSkills = [
@@ -368,6 +426,44 @@ test("surfaces GitHub CLI skill install failures", async () => {
 		/network denied/,
 	);
 	assert.equal(install, true);
+});
+
+test("skills install reports unmanaged collisions and leaves their files untouched", async () => {
+	const fixture = createSkillFixture();
+	const unmanagedSkillName = "camunda-ai-agents";
+	const unmanagedSkillDirectory = join(fixture.skillRoot, unmanagedSkillName);
+	const userFile = join(unmanagedSkillDirectory, "local.md");
+	mkdirSync(unmanagedSkillDirectory, { recursive: true });
+	writeFileSync(userFile, "user-owned content\n");
+
+	try {
+		const result = await c8WithOptions(
+			{
+				...fixture.options,
+				env: {
+					...fixture.options.env,
+					C8CTL_SETUP_STUB_UNMANAGED_SKILL: unmanagedSkillName,
+					C8CTL_SETUP_STUB_EXTRA_SKILLS: "camunda-ai-agents,camunda-bpmn",
+				},
+			},
+			"skills",
+			"install",
+			"--harness",
+			"claude-code",
+		);
+		const output = stripVTControlCharacters(result.stdout + result.stderr);
+
+		assert.equal(result.status, 0, output);
+		assert.match(output, /Skipped Camunda skill.*camunda-ai-agents/i);
+		assert.match(output, /move or rename/i);
+		assert.equal(readFileSync(userFile, "utf8"), "user-owned content\n");
+		assert.ok(
+			existsSync(join(fixture.skillRoot, "camunda-bpmn")),
+			"non-colliding Camunda skills should still be installed",
+		);
+	} finally {
+		fixture.cleanup();
+	}
 });
 
 test("skills help documents lifecycle actions and removal selectors", async () => {

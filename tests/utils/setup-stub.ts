@@ -73,6 +73,9 @@
  *   C8CTL_SETUP_STUB_SKILL_NAME_AFTER_FIRST_LIST=name and
  *   C8CTL_SETUP_STUB_SKILL_NAME_STATE=file — report a changed skill identity
  *                                   after the first `gh skill list`.
+ *   C8CTL_SETUP_STUB_UNMANAGED_SKILL=name — list a user skill with no source
+ *                                   attribution and reject attempts to install it.
+ *   C8CTL_SETUP_STUB_EXTRA_SKILLS=names — add comma-separated catalog skills.
  *   C8CTL_SETUP_STUB_MCP_CONFLICT_PATH=file — replace the orchestration
  *                                   entry with a foreign one before the
  *                                   first `mcp uninstall` child.
@@ -122,6 +125,13 @@ syncBuiltinESMExports();
 
 const COMMIT_SHA = "a".repeat(40);
 const CAMUNDA_SKILL_NAMES = ["camunda-c8ctl"];
+
+function setupStubAvailableSkillNames(): string[] {
+	const extraSkills = (process.env.C8CTL_SETUP_STUB_EXTRA_SKILLS ?? "")
+		.split(",")
+		.filter((skillName) => skillName.length > 0);
+	return [...new Set([...CAMUNDA_SKILL_NAMES, ...extraSkills])];
+}
 
 const ROCKET_LAUNCH_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
@@ -372,8 +382,8 @@ function fakeGh(commandArgs: string[]): {
 		}
 		return {
 			status: 0,
-			stdout: JSON.stringify(
-				installedSkillNames.flatMap((skillName) => {
+			stdout: JSON.stringify([
+				...installedSkillNames.flatMap((skillName) => {
 					const paths = [
 						process.env.C8CTL_SETUP_STUB_SKILL_PATH ??
 							join(skillRoot, skillName),
@@ -400,16 +410,30 @@ function fakeGh(commandArgs: string[]): {
 							path,
 						}));
 				}),
-			),
+				...(process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL &&
+				fs.existsSync(
+					join(skillRoot, process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL),
+				)
+					? [
+							{
+								skillName: process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL,
+								path: join(
+									skillRoot,
+									process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL,
+								),
+							},
+						]
+					: []),
+			]),
 			stderr: "",
 		};
 	}
 	if (commandArgs[1] === "install" && commandArgs.length === 3) {
 		return {
 			status: 0,
-			stdout: CAMUNDA_SKILL_NAMES.map(
-				(skillName) => `${skillName}\tCamunda skill`,
-			).join("\n"),
+			stdout: setupStubAvailableSkillNames()
+				.map((skillName) => `${skillName}\tCamunda skill`)
+				.join("\n"),
 			stderr: "",
 		};
 	}
@@ -421,10 +445,22 @@ function fakeGh(commandArgs: string[]): {
 		return { status: 1, stdout: "", stderr: "stubbed gh failure" };
 	}
 	if (commandArgs[1] === "install") {
-		fs.mkdirSync(skillRoot, { recursive: true });
 		const requestedSkills = commandArgs.includes("--all")
-			? CAMUNDA_SKILL_NAMES
+			? setupStubAvailableSkillNames()
 			: [commandArgs[3]].filter((skillName) => skillName !== undefined);
+		const unmanagedSkill = process.env.C8CTL_SETUP_STUB_UNMANAGED_SKILL;
+		if (
+			unmanagedSkill &&
+			requestedSkills.includes(unmanagedSkill) &&
+			fs.existsSync(join(skillRoot, unmanagedSkill))
+		) {
+			return {
+				status: 1,
+				stdout: "",
+				stderr: `skill directory already exists for unmanaged ${unmanagedSkill}`,
+			};
+		}
+		fs.mkdirSync(skillRoot, { recursive: true });
 		for (const skillName of requestedSkills) {
 			fs.mkdirSync(join(skillRoot, skillName), { recursive: true });
 		}
