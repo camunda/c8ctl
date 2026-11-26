@@ -716,13 +716,28 @@ test("mcp uninstall rejects unknown and swallowed flags before config changes", 
 	assert.ok(servers.camunda);
 	assert.ok(servers["camunda-docs"]);
 
-	for (const flags of [["--doc"], ["--fields", "--doc"]]) {
-		const result = await s.run("mcp", "uninstall", "cursor", ...flags);
+	for (const { args, suspicious } of [
+		{ args: ["mcp", "uninstall", "cursor", "--doc"], suspicious: false },
+		{
+			args: ["mcp", "uninstall", "cursor", "--fields", "--doc"],
+			suspicious: true,
+		},
+		{
+			args: ["mcp", "uninstall", "cursor", "--fields=--doc"],
+			suspicious: true,
+		},
+		{
+			args: ["--fields=--doc", "mcp", "uninstall", "cursor"],
+			suspicious: true,
+		},
+	] as const) {
+		const result = await s.run(...args);
+		const label = args.join(" ");
 		const output = result.stdout + result.stderr;
-		assert.equal(result.status, 1, output);
-		assert.match(output, /--doc/);
-		if (flags.length > 1) assert.match(output, /looks like a flag/);
-		assert.equal(readFileSync(s.paths.cursor, "utf8"), before);
+		assert.equal(result.status, 1, `${label}: ${output}`);
+		assert.match(output, /--doc/, label);
+		if (suspicious) assert.match(output, /looks like a flag/, label);
+		assert.equal(readFileSync(s.paths.cursor, "utf8"), before, label);
 	}
 });
 

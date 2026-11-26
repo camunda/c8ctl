@@ -721,7 +721,11 @@ describe("CLI behavioural: modeler install", () => {
 		skip: !isMac,
 	}, async () => {
 		for (const action of ["uninstall", "remove"]) {
-			for (const flags of [["--mistyped"], ["--fields", "--mistyped"]]) {
+			for (const flags of [
+				["--mistyped"],
+				["--fields", "--mistyped"],
+				["--fields=--mistyped"],
+			]) {
 				const sandbox = createSandbox();
 				fakeReleaseTools(sandbox);
 				const appPath = join(sandbox.applicationsRoot, MODELER_BUNDLE);

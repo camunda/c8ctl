@@ -905,28 +905,32 @@ test("skills uninstall rejects an option-like value swallowed by a string flag",
 	const fixture = createSkillFixture();
 	const ghCapture = join(fixture.root, "gh-calls.jsonl");
 	try {
-		const result = await c8WithOptions(
-			{
-				...fixture.options,
-				env: {
-					...fixture.options.env,
-					C8CTL_SETUP_STUB_GH_CAPTURE: ghCapture,
+		for (const flags of [
+			["--fields", "--harnes=cursor", "--yes"],
+			["--fields=--harnes=cursor", "--yes"],
+		]) {
+			const result = await c8WithOptions(
+				{
+					...fixture.options,
+					env: {
+						...fixture.options.env,
+						C8CTL_SETUP_STUB_GH_CAPTURE: ghCapture,
+					},
 				},
-			},
-			"skills",
-			"uninstall",
-			"--fields",
-			"--harnes=cursor",
-			"--yes",
-		);
+				"skills",
+				"uninstall",
+				...flags,
+			);
 
-		assert.equal(result.status, 1);
-		assert.match(result.stderr, /--harnes=cursor/);
-		assert.ok(existsSync(fixture.skillDirectory));
-		assert.ok(
-			!existsSync(ghCapture),
-			"GitHub CLI discovery must not run before flag validation",
-		);
+			assert.equal(result.status, 1);
+			assert.match(result.stderr, /--harnes=cursor/);
+			assert.match(result.stderr, /looks like a flag/);
+			assert.ok(existsSync(fixture.skillDirectory));
+			assert.ok(
+				!existsSync(ghCapture),
+				"GitHub CLI discovery must not run before flag validation",
+			);
+		}
 	} finally {
 		fixture.cleanup();
 	}
