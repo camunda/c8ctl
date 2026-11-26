@@ -411,6 +411,48 @@ test("updates managed Camunda skills alongside ones installed by another tool", 
 	assert.deepEqual(result.unmanaged, ["camunda-bpmn"]);
 });
 
+test("reports an unmanaged copy even when a managed copy of the same skill exists elsewhere", async () => {
+	const skillRoot = join(tmpdir(), "home", ".claude", "skills");
+	const otherRoot = join(tmpdir(), "home", ".agents", "skills");
+	const listed = [
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "https://github.com/camunda/skills",
+			path: join(skillRoot, "camunda-ai-agents"),
+		},
+		{
+			skillName: "camunda-ai-agents",
+			sourceURL: "",
+			path: join(otherRoot, "camunda-ai-agents"),
+		},
+	];
+	const calls: string[][] = [];
+
+	const result = await runSkillInstall(
+		"claude-code",
+		async (_command, args) => {
+			calls.push(args);
+			if (args[1] === "list") {
+				return { status: 0, stdout: JSON.stringify(listed), stderr: "" };
+			}
+			if (args[1] === "install" && args.length === 3) {
+				return {
+					status: 0,
+					stdout: "camunda-ai-agents\tCamunda skill",
+					stderr: "",
+				};
+			}
+			return { status: 0, stdout: "", stderr: "" };
+		},
+	);
+
+	assert.deepEqual(calls.slice(1), [
+		["skill", "install", "camunda/skills"],
+		["skill", "update", "--all", "--dir", skillRoot, "camunda-ai-agents"],
+	]);
+	assert.deepEqual(result.unmanaged, ["camunda-ai-agents"]);
+});
+
 test("skills install warns about, and keeps, Camunda skills installed by another tool", async () => {
 	const fixture = createSkillFixture();
 	try {

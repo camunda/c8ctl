@@ -610,9 +610,7 @@ export async function runSkillInstall(
 	const available = availableCamundaSkills(availableResult.stdout);
 	const installedNames = new Set(installed.map(({ name }) => name));
 	// gh refuses to install over a same-named skill from another source.
-	const unmanaged = available.filter(
-		(skill) => !installedNames.has(skill) && others.includes(skill),
-	);
+	const unmanaged = available.filter((skill) => others.includes(skill));
 	const missing = available.filter(
 		(skill) => !installedNames.has(skill) && !unmanaged.includes(skill),
 	);
