@@ -3238,6 +3238,46 @@ export async function stopC8Run(
     }
   }
 
+  const pidfileStopCandidates = [];
+  for (const { version, processes } of pidfileAttempts) {
+    for (const [pid, identity] of processes) {
+      // A mismatched signature proves the numeric PID was reused.
+      if (
+        identity.recordedSignature &&
+        identity.signature &&
+        identity.recordedSignature !== identity.signature
+      ) {
+        continue;
+      }
+      pidfileStopCandidates.push({
+        version,
+        pid,
+        signature:
+          identity.recordedSignature ?? identity.signature ?? null,
+      });
+    }
+  }
+  const recordBeforeReaping = readRunningClusterRecord(config.cacheDir);
+  const signaturesBeforeReaping = recordBeforeReaping
+    ? recordedClusterPidSignatures(recordBeforeReaping)
+    : new Map();
+  const reaperCandidates = [];
+  for (const pid of liveRecordedPids(config.cacheDir)) {
+    const signature = signaturesBeforeReaping.get(pid) ?? null;
+    if (recordBeforeReaping?.pids.includes(pid)) {
+      reaperCandidates.push({
+        version: recordBeforeReaping.version,
+        pid,
+        signature,
+      });
+    }
+    for (const survivor of recordBeforeReaping?.pidfileSurvivors ?? []) {
+      if (survivor.pid === pid) {
+        reaperCandidates.push({ version: survivor.version, pid, signature });
+      }
+    }
+  }
+
   // Reap any cluster processes still alive after the c8run stop attempt(s).
   // In the orphan case (#560) the version's install dir — and with it the
   // .process pidfiles c8run's own stop relies on — was replaced or removed
@@ -3245,9 +3285,6 @@ export async function stopC8Run(
   // cache-root PID record lets us find and terminate the process directly.
   const reaped = await reapClusterProcesses(config.cacheDir);
   if (reaped > 0) {
-    if (!hadSuccessfulStop) {
-      stoppedVersion = markerVersion || record?.version || null;
-    }
     hadSuccessfulStop = true;
     logger.warn(
       `Terminated ${reaped} orphaned cluster process${reaped === 1 ? '' : 'es'} that c8run no longer tracked.`,
@@ -3403,8 +3440,22 @@ export async function stopC8Run(
     );
   }
 
+  // A durable record can retain a stale top-level version while its live
+  // pidfile survivors belong to other installs. Only return a purge target
+  // when every stopped process identity points to the same version.
+  const stoppedVersions = new Set(stoppedVersion ? [stoppedVersion] : []);
+  for (const candidate of [...pidfileStopCandidates, ...reaperCandidates]) {
+    if (!recordedPidIsLive(candidate.pid, candidate.signature)) {
+      stoppedVersions.add(candidate.version);
+    }
+  }
+  const purgeVersion =
+    stoppedVersions.size === 1
+      ? stoppedVersions.values().next().value
+      : null;
+
   logger.info('Cluster stopped.');
-  return stoppedVersion;
+  return purgeVersion;
 }
 
 // ---------------------------------------------------------------------------
@@ -4712,7 +4763,7 @@ export const commands = {
         });
         if (parsed.purge) {
           if (!stoppedVersion) {
-            logger.warn('Cannot determine which version to purge (version marker is missing). ' +
+            logger.warn('Cannot determine a single version to purge. ' +
                 'To purge manually, run: c8ctl cluster purge <version>');
           } else if (!existsSync(join(theCacheDir, `c8run-${stoppedVersion}`))) {
             // The install dir itself is already gone — e.g. the orphan case
