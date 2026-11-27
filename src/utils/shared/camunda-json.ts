@@ -21,7 +21,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isRecord, normalizeToError } from "../../core/index.ts";
+import { C8ctlError, isRecord, normalizeToError } from "../../core/index.ts";
 
 /** File that marks a folder as a Camunda project. */
 export const CAMUNDA_PROJECT_FILE = "camunda.json";
@@ -41,12 +41,11 @@ export type DeployResourcesErrorCode =
  * path that cannot be read (`read-error`). `code` matches the `error`
  * value used by the shared parity fixtures.
  */
-export class DeployResourcesError extends Error {
-	readonly code: DeployResourcesErrorCode;
+export class DeployResourcesError extends C8ctlError {
+	declare readonly code: DeployResourcesErrorCode;
 	constructor(code: DeployResourcesErrorCode, message: string) {
-		super(message);
+		super(code, message);
 		this.name = "DeployResourcesError";
-		this.code = code;
 	}
 }
 

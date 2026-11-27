@@ -6,28 +6,33 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import {
-	addProfile as addProfileConfig,
 	c8ctl,
+	clearActiveProfile,
 	DEFAULT_PROFILE,
 	envVarsToProfile,
-	getAllProfiles,
 	getLogger,
 	hasCamundaEnvVars,
 	MODELER_PREFIX,
 	type Profile,
 	parseEnvFile,
 	parseHeaderFlags,
-	removeProfile as removeProfileConfig,
 	resolveEnvBaseUrl,
 } from "../core/index.ts";
 import { confirm, defineCommand, select } from "../framework/index.ts";
+import {
+	addProfile as addProfileService,
+	listProfiles as listProfilesService,
+	type ProfileInput,
+	removeProfile as removeProfileService,
+	validateProfileName,
+} from "../services/index.ts";
 
 /**
  * List all profiles (c8ctl + Modeler)
  */
-function listProfiles(): void {
+async function listProfiles(): Promise<void> {
 	const logger = getLogger();
-	const profiles = getAllProfiles();
+	const { items: profiles } = await listProfilesService({}, {});
 
 	if (profiles.length === 0) {
 		logger.info("No profiles configured", { essential: true });
@@ -49,23 +54,17 @@ function listProfiles(): void {
 	}
 
 	const activeProfile = c8ctl.activeProfile;
-	const tableData: ProfileTableRow[] = profiles.map((profile) => {
-		const isModeler = profile.name.startsWith(MODELER_PREFIX);
-
-		return {
-			Name: profile.name === activeProfile ? `* ${profile.name}` : profile.name,
-			URL: profile.baseUrl || "(not set)",
-			Tenant: profile.defaultTenantId || "<default>",
-			Source: isModeler ? "Modeler" : "c8ctl",
-		};
-	});
+	const tableData: ProfileTableRow[] = profiles.map((profile) => ({
+		Name: profile.name === activeProfile ? `* ${profile.name}` : profile.name,
+		URL: profile.baseUrl || "(not set)",
+		Tenant: profile.tenantId || "<default>",
+		Source: profile.source === "modeler" ? "Modeler" : "c8ctl",
+	}));
 
 	logger.table(tableData);
 
 	// Show hint about read-only Modeler profiles
-	const hasModelerProfiles = profiles.some((p) =>
-		p.name.startsWith(MODELER_PREFIX),
-	);
+	const hasModelerProfiles = profiles.some((p) => p.source === "modeler");
 	if (hasModelerProfiles) {
 		logger.info("");
 		logger.info(
@@ -103,10 +102,19 @@ function describeAuth(profile: Profile): string {
 	return "None";
 }
 
+/** The service input for a profile in the stored format. */
+function toProfileInput(profile: Profile): ProfileInput {
+	const { defaultTenantId, ...rest } = profile;
+	return { ...rest, tenantId: defaultTenantId };
+}
+
 /**
  * Add a c8ctl profile
  */
-function addProfile(name: string, options: AddProfileOptions): void {
+async function addProfile(
+	name: string,
+	options: AddProfileOptions,
+): Promise<void> {
 	const logger = getLogger();
 
 	// Prevent adding profiles with "modeler:" prefix
@@ -115,10 +123,10 @@ function addProfile(name: string, options: AddProfileOptions): void {
 			"Please choose a different name or manage this profile in Camunda Modeler",
 			{ essential: true },
 		);
-		throw new Error(
-			`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`,
-		);
 	}
+	validateProfileName(name, "name");
+	const save = (profile: Profile) =>
+		addProfileService({ profile: toProfileInput(profile), replace: true }, {});
 
 	let profile: Profile;
 
@@ -154,7 +162,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 				`CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found in ${options.envFile}`,
 			);
 		}
-		addProfileConfig(profile);
+		await save(profile);
 		logger.success(`Profile '${name}' added (from ${options.envFile})`);
 		logger.info(`  Base URL: ${profile.baseUrl}`);
 		logger.info(`  Auth: ${describeAuth(profile)}`);
@@ -172,7 +180,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 				"CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set in environment",
 			);
 		}
-		addProfileConfig(profile);
+		await save(profile);
 		logger.success(`Profile '${name}' added (from environment)`);
 		logger.info(`  Base URL: ${profile.baseUrl}`);
 		logger.info(`  Auth: ${describeAuth(profile)}`);
@@ -192,7 +200,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 			password: options.password,
 			defaultTenantId: options.tenantId,
 		};
-		addProfileConfig(profile);
+		await save(profile);
 		logger.success(`Profile '${name}' added`);
 	}
 
@@ -207,23 +215,22 @@ function addProfile(name: string, options: AddProfileOptions): void {
 /**
  * Remove a c8ctl profile
  */
-function removeProfile(name: string): void {
+async function removeProfile(name: string): Promise<void> {
 	const logger = getLogger();
 
-	// Prevent removing Modeler profiles
+	// Modeler profiles are read-only; the service rejects them.
 	if (name.startsWith(MODELER_PREFIX)) {
 		logger.info("Manage Modeler connections directly in Camunda Modeler", {
 			essential: true,
 		});
-		throw new Error("Cannot remove Modeler profiles via c8ctl");
 	}
 
-	const removed = removeProfileConfig(name);
-	if (removed) {
-		logger.success(`Profile '${name}' removed`);
-	} else {
-		throw new Error(`Profile '${name}' not found`);
+	await removeProfileService({ name }, {});
+	// The session must not point at a profile that no longer exists.
+	if (c8ctl.activeProfile === name) {
+		clearActiveProfile();
 	}
+	logger.success(`Profile '${name}' removed`);
 }
 
 /**
@@ -269,8 +276,8 @@ export const removeProfileCommand = defineCommand(
 
 		if (!name) {
 			// No name provided — show interactive picker (c8ctl profiles only)
-			const profiles = getAllProfiles().filter(
-				(p) => !p.name.startsWith(MODELER_PREFIX),
+			const profiles = (await listProfilesService({}, {})).items.filter(
+				(p) => p.source === "c8ctl",
 			);
 			if (profiles.length === 0) {
 				throw new Error("No c8ctl profiles to remove");
@@ -309,7 +316,7 @@ export const removeProfileCommand = defineCommand(
 			}
 		}
 
-		removeProfile(name);
+		await removeProfile(name);
 		return { kind: "none" };
 	},
 );
@@ -318,7 +325,7 @@ export const addProfileCommand = defineCommand(
 	"add",
 	"profile",
 	async (_ctx, flags, args) => {
-		addProfile(args.name, {
+		await addProfile(args.name, {
 			url: flags.baseUrl,
 			clientId: flags.clientId,
 			clientSecret: flags.clientSecret,
@@ -338,6 +345,6 @@ export const addProfileCommand = defineCommand(
 );
 
 export const listProfileCommand = defineCommand("list", "profile", async () => {
-	listProfiles();
+	await listProfiles();
 	return { kind: "none" };
 });

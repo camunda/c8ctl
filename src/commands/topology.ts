@@ -1,27 +1,16 @@
 /**
- * Topology commands
+ * Topology commands — CLI bindings of the topology services.
  */
 
-import { defineCommand } from "../framework/index.ts";
+import { defineServiceCommand } from "../framework/index.ts";
+import { getTopology, getTopologyRequest } from "../services/index.ts";
 
 /**
  * Get cluster topology
  */
-export const getTopologyCommand = defineCommand(
-	"get",
-	"topology",
-	async (ctx) => {
-		const { client, profile } = ctx;
-
-		const dr = ctx.dryRun({
-			command: "get topology",
-			method: "GET",
-			endpoint: "/topology",
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getTopology();
-		return { kind: "get", data: result };
-	},
-);
+export const getTopologyCommand = defineServiceCommand("get", "topology", {
+	toInput: () => ({}),
+	dryRun: { command: "get topology", request: getTopologyRequest },
+	service: getTopology,
+	render: (topology) => ({ kind: "get", data: topology }),
+});

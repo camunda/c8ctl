@@ -1,123 +1,67 @@
 /**
- * Incident commands
+ * Incident commands — CLI bindings of the incident services.
  */
 
-import { fetchAllPages } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
-import { buildDateFilter, parseBetween } from "../utils/index.ts";
+import { defineServiceCommand } from "../framework/index.ts";
+import {
+	getIncident,
+	getIncidentRequest,
+	listIncidents,
+	listIncidentsRequest,
+	resolveIncident,
+	resolveIncidentRequest,
+} from "../services/index.ts";
 
 /**
  * List incidents
  */
-export const listIncidentsCommand = defineCommand(
-	"list",
-	"incident",
-	async (ctx, flags) => {
-		const { client, tenantId, profile, limit, between } = ctx;
-
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
-		};
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		}
-
-		if (flags.processInstanceKey) {
-			filter.filter.processInstanceKey = flags.processInstanceKey;
-		}
-
-		if (between) {
-			const parsed = parseBetween(between);
-			if (parsed) {
-				filter.filter.creationTime = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
-
-		const dr = ctx.dryRun({
-			command: "list incidents",
-			method: "POST",
-			endpoint: "/incidents/search",
-			profile,
-			body: filter,
-		});
-		if (dr) return dr;
-
-		const allItems = await fetchAllPages(
-			(f, opts) => client.searchIncidents(f, opts),
-			filter,
-			undefined,
-			limit,
-		);
-
-		return {
-			kind: "list",
-			items: allItems.map((incident) => ({
-				Key: incident.incidentKey,
-				Type: incident.errorType,
-				Message: incident.errorMessage?.substring(0, 50) || "",
-				State: incident.state,
-				Created: incident.creationTime || "-",
-				"Process Instance": incident.processInstanceKey,
-				"Tenant ID": incident.tenantId,
-			})),
-			emptyMessage: "No incidents found",
-		};
-	},
-);
+export const listIncidentsCommand = defineServiceCommand("list", "incident", {
+	toInput: (flags, _args, scope) => ({
+		state: flags.state,
+		processInstanceKey: flags.processInstanceKey,
+		between: scope.between,
+		limit: scope.limit,
+	}),
+	dryRun: { command: "list incidents", request: listIncidentsRequest },
+	service: listIncidents,
+	render: ({ items }) => ({
+		kind: "list",
+		items: items.map((incident) => ({
+			Key: incident.incidentKey,
+			Type: incident.errorType,
+			Message: incident.errorMessage?.substring(0, 50) || "",
+			State: incident.state,
+			Created: incident.creationTime || "-",
+			"Process Instance": incident.processInstanceKey,
+			"Tenant ID": incident.tenantId,
+		})),
+		emptyMessage: "No incidents found",
+	}),
+});
 
 /**
  * Get incident by key
  */
-export const getIncidentCommand = defineCommand(
-	"get",
-	"incident",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const dr = ctx.dryRun({
-			command: "get incident",
-			method: "GET",
-			endpoint: `/incidents/${key}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getIncident(
-			{ incidentKey: key },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		return { kind: "get", data: result };
-	},
-);
+export const getIncidentCommand = defineServiceCommand("get", "incident", {
+	toInput: (_flags, args) => ({ incidentKey: args.key }),
+	dryRun: { command: "get incident", request: getIncidentRequest },
+	service: getIncident,
+	render: (incident) => ({ kind: "get", data: incident }),
+});
 
 /**
  * Resolve incident
  */
-export const resolveIncidentCommand = defineCommand(
+export const resolveIncidentCommand = defineServiceCommand(
 	"resolve",
 	"incident",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const dr = ctx.dryRun({
-			command: "resolve incident",
-			method: "POST",
-			endpoint: `/incidents/${key}/resolution`,
-			profile,
-			body: {},
-		});
-		if (dr) return dr;
-
-		await client.resolveIncident({ incidentKey: key });
-		return { kind: "success", message: `Incident ${key} resolved` };
+	{
+		toInput: (_flags, args) => ({ incidentKey: args.key }),
+		dryRun: { command: "resolve incident", request: resolveIncidentRequest },
+		service: resolveIncident,
+		render: ({ incidentKey }) => ({
+			kind: "success",
+			message: `Incident ${incidentKey} resolved`,
+		}),
 	},
 );

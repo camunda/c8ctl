@@ -1,24 +1,34 @@
 /**
- * Search commands
+ * Search commands — CLI bindings of the search services. Each command
+ * describes its criteria, runs the service, and prints a table with the
+ * result count.
  */
 
+import { isRecord, type Logger, sortTableData } from "../core/index.ts";
+import { clusterInputOf, defineCommand } from "../framework/index.ts";
 import {
-	DEFAULT_PAGE_SIZE,
-	fetchAllPages,
-	isRecord,
-	type Logger,
-	sortTableData,
-} from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+	searchIncidents,
+	searchIncidentsRequest,
+	searchJobs,
+	searchJobsRequest,
+	searchProcessDefinitions,
+	searchProcessDefinitionsRequest,
+	searchProcessInstances,
+	searchProcessInstancesRequest,
+	searchUserTasks,
+	searchUserTasksRequest,
+	searchVariables,
+	searchVariablesRequest,
+	searchWaitStates,
+	searchWaitStatesRequest,
+} from "../services/index.ts";
 import {
 	API_DEFAULT_PAGE_SIZE,
-	buildDateFilter,
 	hasUnescapedWildcard,
 	logNoResults,
 	logResultCount,
 	matchesCaseInsensitive,
 	matchesCaseSensitive,
-	parseBetween,
 	renderWaitStateDetails,
 	toStringFilter,
 	wildcardToRegex,
@@ -34,22 +44,6 @@ export {
 	toStringFilter,
 	wildcardToRegex,
 };
-
-export type SearchResult = {
-	items: Array<Record<string, unknown>>;
-	total?: number;
-};
-
-const toBigIntSafe = (value: unknown): bigint => {
-	try {
-		return BigInt(String(value));
-	} catch {
-		return 0n;
-	}
-};
-
-/** Max page size for case-insensitive search (client-side filtering needs broader result set) */
-const CI_PAGE_SIZE = 1000;
 
 /**
  * Build a human-readable description of a filter criterion.
@@ -111,11 +105,10 @@ export const searchProcessDefinitionsCommand = defineCommand(
 	"search",
 	"process-definition",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
+		const { logger } = ctx;
 		const processDefinitionId =
 			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
 		const version = ctx.version;
-		const hasCiFilter = !!(flags.iid || flags.iname);
 
 		// Build search criteria description for user feedback
 		const criteria: string[] = [];
@@ -140,72 +133,28 @@ export const searchProcessDefinitionsCommand = defineCommand(
 			criteria.push(formatCriterion("name", flags.iname, true));
 		}
 
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
+		const input = {
+			processDefinitionId,
+			name: flags.name,
+			version,
+			key: flags.key,
+			iid: flags.iid,
+			iname: flags.iname,
 		};
-
-		if (processDefinitionId) {
-			filter.filter.processDefinitionId = toStringFilter(processDefinitionId);
-		}
-
-		if (flags.name) {
-			filter.filter.name = toStringFilter(flags.name);
-		}
-
-		if (version !== undefined) {
-			filter.filter.version = version;
-		}
-
-		if (flags.key) {
-			filter.filter.processDefinitionKey = flags.key;
-		}
 
 		const dr = ctx.dryRun({
 			command: "search process-definitions",
-			method: "POST",
-			endpoint: "/process-definitions/search",
-			profile,
-			body: filter,
+			profile: ctx.profile,
+			...searchProcessDefinitionsRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		logSearchCriteria(logger, "Process Definitions", criteria);
 
-		const allItems = await fetchAllPages<Record<string, unknown>>(
-			(f, opts) => client.searchProcessDefinitions(f, opts),
-			filter,
-			...(hasCiFilter ? ([CI_PAGE_SIZE] as const) : []),
+		const result = await searchProcessDefinitions(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
 		);
-		const result: SearchResult = { items: allItems };
-
-		if (result.items?.length) {
-			result.items = [...result.items].sort((left, right) => {
-				const versionDelta =
-					(Number(right.version) || 0) - (Number(left.version) || 0);
-				if (versionDelta !== 0) return versionDelta;
-
-				const leftKey = toBigIntSafe(left.processDefinitionKey ?? left.key);
-				const rightKey = toBigIntSafe(right.processDefinitionKey ?? right.key);
-				if (leftKey === rightKey) return 0;
-				return rightKey > leftKey ? 1 : -1;
-			});
-		}
-
-		// Client-side case-insensitive post-filtering
-		if (hasCiFilter && result.items) {
-			result.items = result.items.filter((pd) => {
-				if (
-					flags.iid &&
-					!matchesCaseInsensitive(pd.processDefinitionId, flags.iid)
-				)
-					return false;
-				if (flags.iname && !matchesCaseInsensitive(pd.name, flags.iname))
-					return false;
-				return true;
-			});
-		}
 
 		if (result.items && result.items.length > 0) {
 			let tableData = result.items.map((pd) => ({
@@ -236,11 +185,10 @@ export const searchProcessInstancesCommand = defineCommand(
 	"search",
 	"process-instance",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
+		const { logger } = ctx;
 		const processDefinitionId =
 			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
 		const version = ctx.version;
-		const hasCiFilter = !!flags.iid;
 
 		// Build search criteria description for user feedback
 		const criteria: string[] = [];
@@ -282,79 +230,32 @@ export const searchProcessInstancesCommand = defineCommand(
 			criteria.push(`'${field}' between "${ctx.between}"`);
 		}
 
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
+		const input = {
+			processDefinitionId,
+			businessId: flags.businessId,
+			processDefinitionKey: flags.processDefinitionKey,
+			state: flags.state,
+			version,
+			key: flags.key,
+			parentProcessInstanceKey: flags.parentProcessInstanceKey,
+			iid: flags.iid,
+			between: ctx.between,
+			dateField: ctx.dateField,
 		};
-
-		if (processDefinitionId) {
-			filter.filter.processDefinitionId = toStringFilter(processDefinitionId);
-		}
-		if (flags.businessId) {
-			filter.filter.businessId = toStringFilter(flags.businessId);
-		}
-
-		if (flags.processDefinitionKey) {
-			filter.filter.processDefinitionKey = flags.processDefinitionKey;
-		}
-
-		if (version !== undefined) {
-			filter.filter.processDefinitionVersion = version;
-		}
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		}
-
-		if (flags.key) {
-			filter.filter.processInstanceKey = flags.key;
-		}
-
-		if (flags.parentProcessInstanceKey) {
-			filter.filter.parentProcessInstanceKey = flags.parentProcessInstanceKey;
-		}
-
-		if (ctx.between) {
-			const parsed = parseBetween(ctx.between);
-			if (parsed) {
-				const field = ctx.dateField ?? "startDate";
-				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
 
 		const dr = ctx.dryRun({
 			command: "search process-instances",
-			method: "POST",
-			endpoint: "/process-instances/search",
-			profile,
-			body: filter,
+			profile: ctx.profile,
+			...searchProcessInstancesRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		logSearchCriteria(logger, "Process Instances", criteria);
 
-		const allItems = await fetchAllPages<Record<string, unknown>>(
-			(f, opts) => client.searchProcessInstances(f, opts),
-			filter,
-			...(hasCiFilter ? ([CI_PAGE_SIZE] as const) : []),
+		const result = await searchProcessInstances(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
 		);
-		const result: SearchResult = { items: allItems };
-
-		if (hasCiFilter && result.items) {
-			result.items = result.items.filter((pi) => {
-				if (
-					flags.iid &&
-					!matchesCaseInsensitive(pi.processDefinitionId, flags.iid)
-				)
-					return false;
-				return true;
-			});
-		}
 
 		if (result.items && result.items.length > 0) {
 			let tableData = result.items.map((pi) => ({
@@ -387,8 +288,7 @@ export const searchUserTasksCommand = defineCommand(
 	"search",
 	"user-task",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
-		const hasCiFilter = !!flags.iassignee;
+		const { logger } = ctx;
 
 		// Build search criteria description for user feedback
 		const criteria: string[] = [];
@@ -419,72 +319,30 @@ export const searchUserTasksCommand = defineCommand(
 			criteria.push(`'${field}' between "${ctx.between}"`);
 		}
 
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
+		const input = {
+			state: flags.state,
+			assignee: flags.assignee,
+			processInstanceKey: flags.processInstanceKey,
+			processDefinitionKey: flags.processDefinitionKey,
+			elementId: flags.elementId,
+			iassignee: flags.iassignee,
+			between: ctx.between,
+			dateField: ctx.dateField,
 		};
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		}
-
-		if (flags.assignee) {
-			filter.filter.assignee = toStringFilter(flags.assignee);
-		}
-
-		if (flags.processInstanceKey) {
-			filter.filter.processInstanceKey = flags.processInstanceKey;
-		}
-
-		if (flags.processDefinitionKey) {
-			filter.filter.processDefinitionKey = flags.processDefinitionKey;
-		}
-
-		if (flags.elementId) {
-			filter.filter.elementId = flags.elementId;
-		}
-
-		if (ctx.between) {
-			const parsed = parseBetween(ctx.between);
-			if (parsed) {
-				const field = ctx.dateField ?? "creationDate";
-				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
 
 		const dr = ctx.dryRun({
 			command: "search user-tasks",
-			method: "POST",
-			endpoint: "/user-tasks/search",
-			profile,
-			body: filter,
+			profile: ctx.profile,
+			...searchUserTasksRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		logSearchCriteria(logger, "User Tasks", criteria);
 
-		const allItems = await fetchAllPages<Record<string, unknown>>(
-			(f, opts) => client.searchUserTasks(f, opts),
-			filter,
-			...(hasCiFilter ? ([CI_PAGE_SIZE] as const) : []),
+		const result = await searchUserTasks(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
 		);
-		const result: SearchResult = { items: allItems };
-
-		if (hasCiFilter && result.items) {
-			result.items = result.items.filter((task) => {
-				if (
-					flags.iassignee &&
-					!matchesCaseInsensitive(task.assignee, flags.iassignee)
-				)
-					return false;
-				return true;
-			});
-		}
 
 		if (result.items && result.items.length > 0) {
 			let tableData = result.items.map((task) => ({
@@ -517,18 +375,9 @@ export const searchIncidentsCommand = defineCommand(
 	"search",
 	"incident",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
+		const { logger } = ctx;
 		const processDefinitionId =
 			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
-		// The incident API does not support a $like filter for errorMessage; fall back to client-side filtering for wildcard patterns
-		const errorMessageHasWildcard = !!(
-			flags.errorMessage && hasUnescapedWildcard(flags.errorMessage)
-		);
-		const hasCiFilter = !!(
-			flags.ierrorMessage ||
-			flags.iid ||
-			errorMessageHasWildcard
-		);
 
 		// Build search criteria description for user feedback
 		const criteria: string[] = [];
@@ -568,86 +417,31 @@ export const searchIncidentsCommand = defineCommand(
 			criteria.push(`'creationTime' between "${ctx.between}"`);
 		}
 
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
+		const input = {
+			state: flags.state,
+			processInstanceKey: flags.processInstanceKey,
+			processDefinitionKey: flags.processDefinitionKey,
+			errorType: flags.errorType,
+			errorMessage: flags.errorMessage,
+			processDefinitionId,
+			ierrorMessage: flags.ierrorMessage,
+			iid: flags.iid,
+			between: ctx.between,
 		};
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		}
-
-		if (flags.processInstanceKey) {
-			filter.filter.processInstanceKey = flags.processInstanceKey;
-		}
-
-		if (flags.processDefinitionKey) {
-			filter.filter.processDefinitionKey = flags.processDefinitionKey;
-		}
-
-		if (flags.errorType) {
-			filter.filter.errorType = flags.errorType;
-		}
-
-		if (flags.errorMessage && !errorMessageHasWildcard) {
-			filter.filter.errorMessage = flags.errorMessage;
-		}
-
-		if (processDefinitionId) {
-			filter.filter.processDefinitionId = toStringFilter(processDefinitionId);
-		}
-
-		if (ctx.between) {
-			const parsed = parseBetween(ctx.between);
-			if (parsed) {
-				filter.filter.creationTime = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
 
 		const dr = ctx.dryRun({
 			command: "search incidents",
-			method: "POST",
-			endpoint: "/incidents/search",
-			profile,
-			body: filter,
+			profile: ctx.profile,
+			...searchIncidentsRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		logSearchCriteria(logger, "Incidents", criteria);
 
-		const allItems = await fetchAllPages<Record<string, unknown>>(
-			(f, opts) => client.searchIncidents(f, opts),
-			filter,
-			...(hasCiFilter ? ([CI_PAGE_SIZE] as const) : []),
+		const result = await searchIncidents(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
 		);
-		const result: SearchResult = { items: allItems };
-
-		if (hasCiFilter && result.items) {
-			result.items = result.items.filter((incident) => {
-				if (
-					flags.ierrorMessage &&
-					!matchesCaseInsensitive(incident.errorMessage, flags.ierrorMessage)
-				)
-					return false;
-				if (
-					flags.iid &&
-					!matchesCaseInsensitive(incident.processDefinitionId, flags.iid)
-				)
-					return false;
-				if (
-					errorMessageHasWildcard &&
-					flags.errorMessage &&
-					!matchesCaseSensitive(incident.errorMessage, flags.errorMessage)
-				)
-					return false;
-				return true;
-			});
-		}
 
 		if (result.items && result.items.length > 0) {
 			let tableData = result.items.map((incident) => ({
@@ -683,8 +477,7 @@ export const searchJobsCommand = defineCommand(
 	"search",
 	"jobs",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
-		const hasCiFilter = !!flags.itype;
+		const { logger } = ctx;
 
 		// Build search criteria description for user feedback
 		const criteria: string[] = [];
@@ -712,65 +505,26 @@ export const searchJobsCommand = defineCommand(
 			criteria.push(`'${field}' between "${ctx.between}"`);
 		}
 
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
+		const input = {
+			state: flags.state,
+			type: flags.type,
+			processInstanceKey: flags.processInstanceKey,
+			processDefinitionKey: flags.processDefinitionKey,
+			itype: flags.itype,
+			between: ctx.between,
+			dateField: ctx.dateField,
 		};
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		}
-
-		if (flags.type) {
-			filter.filter.type = toStringFilter(flags.type);
-		}
-
-		if (flags.processInstanceKey) {
-			filter.filter.processInstanceKey = flags.processInstanceKey;
-		}
-
-		if (flags.processDefinitionKey) {
-			filter.filter.processDefinitionKey = flags.processDefinitionKey;
-		}
-
-		if (ctx.between) {
-			const parsed = parseBetween(ctx.between);
-			if (parsed) {
-				const field = ctx.dateField ?? "creationTime";
-				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
 
 		const dr = ctx.dryRun({
 			command: "search jobs",
-			method: "POST",
-			endpoint: "/jobs/search",
-			profile,
-			body: filter,
+			profile: ctx.profile,
+			...searchJobsRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		logSearchCriteria(logger, "Jobs", criteria);
 
-		const allItems = await fetchAllPages<Record<string, unknown>>(
-			(f, opts) => client.searchJobs(f, opts),
-			filter,
-			...(hasCiFilter ? ([CI_PAGE_SIZE] as const) : []),
-		);
-		const result: SearchResult = { items: allItems };
-
-		if (hasCiFilter && result.items) {
-			result.items = result.items.filter((job) => {
-				if (flags.itype && !matchesCaseInsensitive(job.type, flags.itype))
-					return false;
-				return true;
-			});
-		}
+		const result = await searchJobs({ ...input, ...clusterInputOf(ctx) }, {});
 
 		if (result.items && result.items.length > 0) {
 			let tableData = result.items.map((job) => ({
@@ -803,8 +557,7 @@ export const searchVariablesCommand = defineCommand(
 	"search",
 	"variable",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
-		const hasCiFilter = !!(flags.iname || flags.ivalue);
+		const { logger } = ctx;
 
 		// Build search criteria description for user feedback
 		const criteria: string[] = [];
@@ -832,73 +585,30 @@ export const searchVariablesCommand = defineCommand(
 			criteria.push(formatCriterion("fullValue", true));
 		}
 
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
+		const input = {
+			name: flags.name,
+			value: flags.value,
+			processInstanceKey: flags.processInstanceKey,
+			scopeKey: flags.scopeKey,
+			iname: flags.iname,
+			ivalue: flags.ivalue,
+			fullValue: flags.fullValue,
+			limit: ctx.limit,
 		};
-
-		if (flags.name) {
-			filter.filter.name = toStringFilter(flags.name);
-		}
-
-		if (flags.value) {
-			filter.filter.value = toStringFilter(flags.value);
-		}
-
-		if (flags.processInstanceKey) {
-			filter.filter.processInstanceKey = flags.processInstanceKey;
-		}
-
-		if (flags.scopeKey) {
-			filter.filter.scopeKey = flags.scopeKey;
-		}
-
-		// By default, truncate values unless --fullValue is specified
-		const truncateValues = !flags.fullValue;
 
 		const dr = ctx.dryRun({
 			command: "search variables",
-			method: "POST",
-			endpoint: "/variables/search",
-			profile,
-			body: { ...filter, truncateValues },
+			profile: ctx.profile,
+			...searchVariablesRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
 		logSearchCriteria(logger, "Variables", criteria);
 
-		const allItems = await fetchAllPages<Record<string, unknown>>(
-			(f, opts) => client.searchVariables({ ...f, truncateValues }, opts),
-			filter,
-			hasCiFilter ? CI_PAGE_SIZE : DEFAULT_PAGE_SIZE,
-			ctx.limit,
+		const result = await searchVariables(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
 		);
-
-		const result: SearchResult = { items: allItems };
-
-		if (hasCiFilter && result.items) {
-			result.items = result.items.filter((variable) => {
-				if (flags.iname && !matchesCaseInsensitive(variable.name, flags.iname))
-					return false;
-				if (flags.ivalue) {
-					// Variable values come JSON-encoded from the API (e.g., '"PendingReview"').
-					// Unwrap the JSON string for comparison so users can match the actual value.
-					let rawValue =
-						typeof variable.value === "string"
-							? variable.value
-							: String(variable.value ?? "");
-					try {
-						const parsed = JSON.parse(rawValue);
-						if (typeof parsed === "string") rawValue = parsed;
-					} catch {
-						/* keep original value */
-					}
-					if (!matchesCaseInsensitive(rawValue, flags.ivalue)) return false;
-				}
-				return true;
-			});
-		}
 
 		if (result.items && result.items.length > 0) {
 			let tableData = result.items.map((variable) => {
@@ -947,7 +657,7 @@ export const searchWaitStatesCommand = defineCommand(
 	"search",
 	"wait-state",
 	async (ctx, flags, _args) => {
-		const { client, logger, profile } = ctx;
+		const { logger } = ctx;
 
 		const criteria: string[] = [];
 		if (flags.processInstanceKey) {
@@ -978,45 +688,28 @@ export const searchWaitStatesCommand = defineCommand(
 			criteria.push(formatCriterion("Wait State Type", flags.waitStateType));
 		}
 
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {},
+		const input = {
+			processInstanceKey: flags.processInstanceKey,
+			rootProcessInstanceKey: flags.rootProcessInstanceKey,
+			elementInstanceKey: flags.elementInstanceKey,
+			elementId: flags.elementId,
+			elementType: flags.elementType,
+			waitStateType: flags.waitStateType,
+			limit: ctx.limit,
 		};
-
-		if (flags.processInstanceKey) {
-			filter.filter.processInstanceKey = flags.processInstanceKey;
-		}
-		if (flags.rootProcessInstanceKey) {
-			filter.filter.rootProcessInstanceKey = flags.rootProcessInstanceKey;
-		}
-		if (flags.elementInstanceKey) {
-			filter.filter.elementInstanceKey = flags.elementInstanceKey;
-		}
-		if (flags.elementId) {
-			filter.filter.elementId = toStringFilter(flags.elementId);
-		}
-		if (flags.elementType) {
-			filter.filter.elementType = flags.elementType;
-		}
-		if (flags.waitStateType) {
-			filter.filter.waitStateType = flags.waitStateType;
-		}
 
 		const dr = ctx.dryRun({
 			command: "search wait-state",
-			method: "POST",
-			endpoint: "/element-instances/wait-states/search",
-			profile,
-			body: filter,
+			profile: ctx.profile,
+			...searchWaitStatesRequest(input),
 		});
 		if (dr) return dr;
 
 		logSearchCriteria(logger, "Wait States", criteria);
 
-		const allItems = await fetchAllPages<Record<string, unknown>>(
-			(f, opts) => client.searchElementInstanceWaitStates(f, opts),
-			filter,
-			DEFAULT_PAGE_SIZE,
-			ctx.limit,
+		const { items: allItems } = await searchWaitStates(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
 		);
 
 		if (allItems.length > 0) {

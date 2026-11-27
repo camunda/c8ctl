@@ -119,6 +119,7 @@ Use `c8ctl help mcp-proxy` for full setup and configuration details.
 ## Error Handling
 
 - In JSON mode, errors emit `{"status":"error","message":"..."}` to stderr
+- Classified errors also carry a stable `code` (e.g. `profile-not-found`, `invalid-config`, `no-deployable-files`, `connection-failed`, `deployment-rejected`), and when known the input `field` and the cluster's RFC 9457 `problem`. Branch on `code`, not on the message text
 - Exit code 1 on error, 0 on success (including `--dry-run`)
 - Warnings emit `{"status":"warning","message":"..."}` to stderr
 

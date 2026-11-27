@@ -1,173 +1,113 @@
 /**
- * Identity tenant commands
+ * Identity tenant commands — CLI bindings of the tenant services.
  */
 
-import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+import { defineServiceCommand } from "../framework/index.ts";
+import {
+	createTenant,
+	createTenantRequest,
+	deleteTenant,
+	deleteTenantRequest,
+	getTenant,
+	getTenantRequest,
+	listTenants,
+	listTenantsRequest,
+	searchTenants,
+	searchTenantsRequest,
+} from "../services/index.ts";
+
+/** Table row of a tenant. */
+function row(t: {
+	tenantId?: string | null;
+	name?: string | null;
+	description?: string | null;
+}) {
+	return {
+		"Tenant ID": t.tenantId ?? "",
+		Name: t.name ?? "",
+		Description: t.description ?? "",
+	};
+}
 
 /**
  * List all tenants
  */
-export const listTenantsCommand = defineCommand(
-	"list",
-	"tenant",
-	async (ctx) => {
-		const { client, profile, limit } = ctx;
+export const listTenantsCommand = defineServiceCommand("list", "tenant", {
+	toInput: (_flags, _args, scope) => ({ limit: scope.limit }),
+	dryRun: { command: "list tenants", request: listTenantsRequest },
+	service: listTenants,
+	render: ({ items }) => ({
+		kind: "list",
+		items: items.map(row),
+		emptyMessage: "No tenants found",
+	}),
+});
 
-		const dr = ctx.dryRun({
-			command: "list tenants",
-			method: "POST",
-			endpoint: "/tenants/search",
-			profile,
-			body: {},
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(filter, opts) => client.searchTenants(filter, opts),
-			{},
-			undefined,
-			limit,
-		);
-
-		return {
-			kind: "list",
-			items: items.map((t) => ({
-				"Tenant ID": t.tenantId ?? "",
-				Name: t.name ?? "",
-				Description: t.description ?? "",
-			})),
-			emptyMessage: "No tenants found",
-		};
-	},
-);
 /**
  * Search tenants with filters
  */
-export const searchIdentityTenantsCommand = defineCommand(
+export const searchIdentityTenantsCommand = defineServiceCommand(
 	"search",
 	"tenant",
-	async (ctx, flags, _args) => {
-		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
-
-		const filter: Record<string, unknown> = {};
-		if (flags.tenantId) filter.tenantId = flags.tenantId;
-		if (flags.name) filter.name = flags.name;
-
-		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
-
-		const dr = ctx.dryRun({
-			command: "search tenants",
-			method: "POST",
-			endpoint: "/tenants/search",
-			profile,
-			body: searchFilter,
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(f, opts) => client.searchTenants(f, opts),
-			searchFilter,
-			undefined,
-			limit,
-		);
-
-		if (items.length === 0) {
-			logger.info("No tenants found", { essential: true });
-			return;
-		}
-
-		let tableData = items.map((t) => ({
-			"Tenant ID": t.tenantId ?? "",
-			Name: t.name ?? "",
-			Description: t.description ?? "",
-		}));
-		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
-		logger.table(tableData);
+	{
+		toInput: (flags, _args, scope) => ({
+			tenant: flags.tenantId,
+			name: flags.name,
+			limit: scope.limit,
+		}),
+		dryRun: { command: "search tenants", request: searchTenantsRequest },
+		service: searchTenants,
+		render: ({ items }) => ({
+			kind: "list",
+			items: items.map(row),
+			emptyMessage: "No tenants found",
+		}),
 	},
 );
 
 /**
  * Get a single tenant by tenantId
  */
-export const getIdentityTenantCommand = defineCommand(
-	"get",
-	"tenant",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const tenantId = args.tenantId;
-
-		const dr = ctx.dryRun({
-			command: "get tenant",
-			method: "GET",
-			endpoint: `/tenants/${tenantId}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getTenant(
-			{ tenantId },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		return { kind: "get", data: result };
-	},
-);
+export const getIdentityTenantCommand = defineServiceCommand("get", "tenant", {
+	toInput: (_flags, args) => ({ tenant: args.tenantId }),
+	dryRun: { command: "get tenant", request: getTenantRequest },
+	service: getTenant,
+	render: (tenant) => ({ kind: "get", data: tenant }),
+});
 
 /**
  * Create a new tenant
  */
-export const createIdentityTenantCommand = defineCommand(
+export const createIdentityTenantCommand = defineServiceCommand(
 	"create",
 	"tenant",
-	async (ctx, flags, _args) => {
-		const { client, profile } = ctx;
-
-		if (!flags.tenantId) {
-			throw new Error("--tenantId is required");
-		}
-		if (!flags.name) {
-			throw new Error("--name is required");
-		}
-
-		const body = {
-			tenantId: flags.tenantId,
-			name: flags.name,
-		};
-
-		const dr = ctx.dryRun({
-			command: "create tenant",
-			method: "POST",
-			endpoint: "/tenants",
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.createTenant(body);
-		return { kind: "success", message: `Tenant '${flags.tenantId}' created` };
+	{
+		toInput: (flags) => ({
+			tenant: flags.tenantId ?? "",
+			name: flags.name ?? "",
+		}),
+		dryRun: { command: "create tenant", request: createTenantRequest },
+		service: createTenant,
+		render: (_result, input) => ({
+			kind: "success",
+			message: `Tenant '${input.tenant}' created`,
+		}),
 	},
 );
 
 /**
  * Delete a tenant by tenantId
  */
-export const deleteIdentityTenantCommand = defineCommand(
+export const deleteIdentityTenantCommand = defineServiceCommand(
 	"delete",
 	"tenant",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const tenantId = args.tenantId;
-
-		const dr = ctx.dryRun({
-			command: "delete tenant",
-			method: "DELETE",
-			endpoint: `/tenants/${encodeURIComponent(String(tenantId))}`,
-			profile,
-			body: null,
-		});
-		if (dr) return dr;
-
-		await client.deleteTenant({ tenantId });
-		return { kind: "success", message: `Tenant '${tenantId}' deleted` };
+	{
+		toInput: (_flags, args) => ({ tenant: args.tenantId }),
+		dryRun: { command: "delete tenant", request: deleteTenantRequest },
+		service: deleteTenant,
+		render: (_result, input) => ({
+			kind: "success",
+			message: `Tenant '${input.tenant}' deleted`,
+		}),
 	},
 );

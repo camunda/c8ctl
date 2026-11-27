@@ -60,7 +60,7 @@ version resolution.
   to stdout** (`installStdoutEpipeHandler()` in `helpers.ts`). New
   subcommands that write to stdout must do the same — otherwise
   `... | head -c N` closing the pipe early crashes the process.
-- **`apply` vs `edit`: applying a template is not the same operation as
+- **`apply` vs `edit`: applying a template is not the same service as
   editing one property on an already-applied element.** `apply` calls
   `elementTemplates.applyTemplate()`, which unconditionally resets every
   `Hidden`-typed template property to its template default on *every*
@@ -82,7 +82,7 @@ version resolution.
   strips before serializing.
 - **Property dedup is by object reference, not by `binding.name|type`.**
   Template authors sometimes attach two properties with the same binding
-  name + type but different `condition` clauses (operation-conditional
+  name + type but different `condition` clauses (service-conditional
   duplicates); the engine drops inactive ones at apply time. The
   WeakMap-based `sourceByDetail` side table in `loadTemplate` preserves
   this identity so `get-properties` doesn't collapse them and `--set`

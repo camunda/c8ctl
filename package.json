@@ -14,6 +14,10 @@
     "./runtime": {
       "types": "./dist/core/runtime.d.ts",
       "default": "./dist/core/runtime.js"
+    },
+    "./internal": {
+      "types": "./dist/internal/index.d.ts",
+      "default": "./dist/internal/index.js"
     }
   },
   "files": [

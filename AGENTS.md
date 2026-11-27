@@ -30,6 +30,7 @@ The following are upstream dependencies — when they misbehave, report it. Do n
 | `src/utils/` | Leaf-layer helpers (alongside `core`; never import `framework`/`commands`) |
 | `src/utils/shared/` | Genuine cross-cutting leaves — `date-filter`, `resource-extensions`, `ignore`, `validation` |
 | `src/utils/command-local/` | Pure helpers that are the guts of a single command, kept test-visible — `open-helpers`, `search-helpers`, `mcp-proxy-helpers`, `watch-constants` |
+| `src/services/` | Embedding contract — services (`deploy`, `resolveDeployment`) shared by the CLI and other hosts. Hosts import them through `src/internal/` (see below). See [Services](#services-the-embedding-contract) |
 | `src/commands/` | Command handler implementations |
 | `src/commands/helpers/` | Command-private helpers, test-invisible (guarded by `helpers-import-boundary.test.ts`) |
 | `src/templates/` | Plugin scaffold templates — do not edit directly |
@@ -69,22 +70,24 @@ Key components:
 
 ```
 composition root (src/index.ts, src/command-dispatch.ts)  →  commands  →  framework  →  core
-                                                                          utils (leaf)
+                                                               services  →  utils (leaf)
 ```
 
 | Layer | May import from |
 | --- | --- |
 | `core/` | `core` |
 | `utils/` | `core`, `utils` (leaf: never `framework`/`commands`) |
-| `framework/` | `core`, `utils`, `framework` (never `commands`) |
-| `commands/` | `core`, `utils`, `framework`, `commands` |
+| `services/` | `core`, `utils`, `services` (never `framework`/`commands`) |
+| `framework/` | `core`, `utils`, `services`, `framework` (never `commands`) |
+| `internal/` | `core`, `utils`, `services` — the `@camunda8/cli/internal` entry for hosts; nothing in `src/` imports it |
+| `commands/` | `core`, `utils`, `services`, `framework`, `commands` |
 | composition root (`src/index.ts`, `src/command-dispatch.ts`) | anything |
 
 This is guarded by [`tests/unit/layering-import-boundary.test.ts`](tests/unit/layering-import-boundary.test.ts). The guard classifies a file by its **first** path segment, so sub-directories (`framework/plugins/`, `framework/ui/`, `utils/shared/`, `utils/command-local/`) inherit their parent layer — sub-grouping is free w.r.t. the guard. The composition root is pinned to an explicit allow-list (`src/index.ts`, `src/command-dispatch.ts`); any *new* top-level `src/*.ts` file fails the guard until it is deliberately classified.
 
 ##### Per-layer barrels (module encapsulation, #424)
 
-The three barreled layers — `core`, `utils`, `framework` — each expose a single public entry point, `<layer>/index.ts` (`export *` over their internal files). The same guard enforces two further rules:
+The four barreled layers — `core`, `utils`, `services`, `framework` — each expose a single public entry point, `<layer>/index.ts` (`export *` over their internal files). The same guard enforces two further rules:
 
 - **Rule A — cross-layer imports go through the barrel.** A file importing *into* a barreled layer must target `../core/index.ts`, never a deep file like `../core/logger.ts`. This holds for `commands/**` and the composition root alike.
 - **Rule B — intra-layer imports stay direct.** A file *within* a barreled layer imports its siblings by direct path (`./logger.ts`), never via its own barrel — this keeps module-eval order obvious and avoids self-referential cycles. (The barrel file re-exporting siblings via `./file.ts` is itself an intra-layer direct import, so it is allowed.)
@@ -107,6 +110,28 @@ Per-invocation request state — whether `--dry-run` / `--verbose` were passed �
 - **`ctx.verbose`** — whether `--verbose` was passed.
 
 `src/commands/**` and `src/framework/**` must obtain these from `ctx` (handlers) or an explicit parameter (non-handler framework entry points such as `installCompletion`/`refreshCompletionsIfStale`), and must **not** read `c8ctl.dryRun` or `c8ctl.verbose` back off the global. This is guarded by [`tests/unit/no-runtime-global-reads-in-handlers.test.ts`](tests/unit/no-runtime-global-reads-in-handlers.test.ts) (AST-based, so the field names are safe to mention in comments and strings). `c8ctl.outputMode` is *session display state*, not a per-invocation request flag — read it via `logger.mode` where a logger is in scope; the `session` command reads it directly because managing session state is its job.
+
+##### Services: the embedding contract
+
+`src/services/` holds the logic that other hosts import instead of spawning the CLI, such as Desktop Modeler. The package exports the curated host surface as `@camunda8/cli/internal` (`src/internal/index.ts`). "Internal" means no compatibility promise: versions follow the CLI, and consumers pin an exact version.
+
+- **Shape.** A service is `fn(input, ctx)`. Inputs and results are plain, serializable objects. `ctx` (`C8ctlContext`) carries everything host-specific: `signal` (cancellation), `onProgress` (notices, warnings, progress), data directories, `fetch`, and the `env` the cluster client may read. Contract helpers live in `src/core/` (`src/core/context.ts`, `src/core/target.ts`, `src/core/cluster-errors.ts`, `src/core/input.ts`); deploy path resolution in `src/utils/shared/deploy-resolution.ts`.
+- **Target.** `{ profile }` (a c8ctl profile or `modeler:<id>`) or `{ cluster }` (a resolved configuration). Hosts resolve session, `--profile` and env into a target; services never do.
+- **Errors.** Every failure is a `C8ctlError` (`src/core/c8ctl-error.ts`) with a stable `code` from `C8CTL_ERROR_CODES`, an optional `field`, `problem` (RFC 9457 from the cluster) and `details`. Hosts branch on `code`, never on `message`.
+- **No host state.** Services do not read the CLI runtime, `process.env`, `process.argv` or `process.cwd`, never print and never exit. Guarded statically by [`tests/unit/services-boundary.test.ts`](tests/unit/services-boundary.test.ts) and behaviorally by [`tests/unit/internal.test.ts`](tests/unit/internal.test.ts) (runs the packaged entry point from CommonJS with a poisoned runtime).
+- **The CLI is a host too.** `src/commands/helpers/deploy-helpers.ts` resolves the CLI's target, passes `process.env`, and renders the services' events, results and errors. Keep CLI wording, prompts and output there, not in services.
+- **Cluster-API services** (one module per resource, e.g. `src/services/incidents.ts`):
+  - Name services after the command: `listIncidents`, `getIncident`, `resolveIncident`.
+  - Input = the command's parameters (plain, serializable) plus `ClusterInput` (`target`, optional `tenantId`). Connect with `connect(input.target, ctx)`; the tenant is `input.tenantId ?? defaultTenantId`.
+  - Wrap every SDK call in `callCluster(() => …, ctx)`, so failures become `C8ctlError`s (`connection-failed`, `unauthorized`, `forbidden`, `not-found`, `request-rejected`, …) with the message the CLI showed before, and `ctx.signal` cancels the request (`cancelled`; nothing is sent after an abort). A paged request passes the signal it receives on: `callCluster((signal) => fetchAllPages(…, signal), ctx)`. Cancelling a mutation that was already sent does not undo it.
+  - Return the SDK's objects: `{ items }` for lists, the object for gets, a small result (e.g. the key) for mutations. Keep today's `limit` behavior (`fetchAllPages`).
+  - Export `<service>Request(input, tenantId)` → `{ method, endpoint, body }`; the service sends that body and `--dry-run` shows it.
+  - Invalid input throws `C8ctlError("invalid-input", <the CLI's message>, { field })`. For an SDK branded type (`ProcessDefinitionKey`, `BusinessId`, …) use `brandInput(field, value, Brand.assumeExists)` (`src/core/input.ts`): a value the SDK rejects becomes `invalid-input` for `field`.
+  - The command is `defineServiceCommand(verb, resource, { toInput, dryRun, service, render })` in `src/commands/`: `toInput` maps flags, positionals and context; `render(output, input, scope)` turns the result into a `CommandResult` and keeps the CLI's columns and messages.
+  - A command that does more than one service call (prompts, several requests, its own output) stays a plain `defineCommand` handler and calls the service with `{ ...input, ...clusterInputOf(ctx) }` and an empty context: `clusterInputOf(ctx)` is the client the CLI resolved and the active tenant. Example: `run` creates its instance with `createProcessInstance`.
+  - Export the service and its input types from `src/internal/index.ts`.
+- **Profile services** (`src/services/profiles.ts`): `listProfiles`, `getProfile`, `addProfile`, `removeProfile`. They read and write `profiles.json` in `ctx.dataDir` and Modeler connections in `ctx.modelerDir` (read-only); an explicit dir is never created by a read. Results are `ProfileSummary`s: no secrets (client secret, password, header values), and `ref` is what a host passes as `target.profile` (`modeler:<connection id>` for a Modeler connection). `addProfile` fails with `profile-exists` unless `replace: true`; removing a `modeler:` profile is `invalid-input`. Session state (`use`, `which`, the active profile) and prompts stay in the CLI: `remove profile` clears the session's active profile itself.
+- **Plugins are CLI surfaces.** A default plugin command is a CLI wrapper like a core command: it parses its arguments, prompts and renders, and the work it shares with hosts is a core service it calls (example: `feel evaluate` on the cluster calls `evaluateExpression`). `build:plugins` loads `src/` from `dist/` in plugin bundles instead of inlining a copy, so a plugin and the core share one `C8ctlError`. Onboarding journeys (`setup`, `modeler install`, `skills install`, `mcp install`) stay plugin-only.
 
 ### Commit message guidelines
 

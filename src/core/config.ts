@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { C8ctlError } from "./c8ctl-error.ts";
 import { resolveEnvBaseUrl, resolveEnvBasicAuth } from "./env-address.ts";
 import type { OutputMode } from "./logger.ts";
 import { getLogger, isRecord } from "./logger.ts";
@@ -343,12 +344,22 @@ function getSessionStatePath(): string {
 	return join(ensureUserDataDir(), "session.json");
 }
 
-function getProfilesPath(): string {
-	return join(ensureUserDataDir(), "profiles.json");
+function getProfilesPath(dataDir?: string): string {
+	return join(dataDir ?? ensureUserDataDir(), "profiles.json");
 }
 
-function getModelerSettingsPath(): string {
-	return join(getModelerDataDir(), "settings.json");
+function getModelerSettingsPath(modelerDir?: string): string {
+	return join(modelerDir ?? getModelerDataDir(), "settings.json");
+}
+
+/**
+ * Data directories passed explicitly by a host (a service's context).
+ * A missing entry falls back to the platform default; reading through an
+ * explicit directory never creates it.
+ */
+export interface DataDirs {
+	dataDir?: string;
+	modelerDir?: string;
 }
 
 // ============================================================================
@@ -727,8 +738,8 @@ function throwCorruptProfiles(
  * preserving the original bytes in a content-addressed backup), so no caller can
  * mistake corruption for emptiness and clobber the user's profiles.
  */
-export function loadProfiles(): Profile[] {
-	const profilesPath = getProfilesPath();
+export function loadProfiles(dataDir?: string): Profile[] {
+	const profilesPath = getProfilesPath(dataDir);
 
 	let data: Buffer;
 	let fd: number | undefined;
@@ -855,8 +866,9 @@ export function loadProfiles(): Profile[] {
  * file and `rename`-ing over the target makes the swap atomic: a reader sees
  * either the whole old file or the whole new one, never a partial one.
  */
-export function saveProfiles(profiles: Profile[]): void {
-	const profilesPath = getProfilesPath();
+export function saveProfiles(profiles: Profile[], dataDir?: string): void {
+	if (dataDir !== undefined) mkdirSync(dataDir, { recursive: true });
+	const profilesPath = getProfilesPath(dataDir);
 	const profilesFile: ProfilesFile = { profiles };
 	// Randomise the temp name and open it EXCLUSIVE + no-follow (O_EXCL |
 	// O_NOFOLLOW) below. The old `<pid>.<ms>.tmp` name was predictable, so in a
@@ -911,16 +923,19 @@ export function saveProfiles(profiles: Profile[]): void {
 /**
  * Get a c8ctl profile by name
  */
-export function getProfile(name: string): Profile | undefined {
-	const profiles = loadProfiles();
+export function getProfile(
+	name: string,
+	dataDir?: string,
+): Profile | undefined {
+	const profiles = loadProfiles(dataDir);
 	return profiles.find((p) => p.name === name);
 }
 
 /**
- * Add a c8ctl profile
+ * Add a c8ctl profile, replacing one with the same name
  */
-export function addProfile(profile: Profile): void {
-	const profiles = loadProfiles();
+export function addProfile(profile: Profile, dataDir?: string): void {
+	const profiles = loadProfiles(dataDir);
 
 	// Check if profile already exists
 	const existingIndex = profiles.findIndex((p) => p.name === profile.name);
@@ -930,25 +945,38 @@ export function addProfile(profile: Profile): void {
 		profiles.push(profile);
 	}
 
-	saveProfiles(profiles);
+	saveProfiles(profiles, dataDir);
 }
 
 /**
- * Remove a c8ctl profile by name
+ * Remove a c8ctl profile by name from profiles.json only; the CLI session
+ * is left as is.
  */
-export function removeProfile(name: string): boolean {
-	const profiles = loadProfiles();
+export function removeStoredProfile(name: string, dataDir?: string): boolean {
+	const profiles = loadProfiles(dataDir);
 	const filtered = profiles.filter((p) => p.name !== name);
 
 	if (filtered.length === profiles.length) {
 		return false;
 	}
 
-	saveProfiles(filtered);
+	saveProfiles(filtered, dataDir);
+	return true;
+}
+
+/**
+ * Remove a c8ctl profile by name, and clear the CLI session's active
+ * profile when it was this one. With an explicit `dataDir`, the session
+ * (which lives in the default data dir) is left as is.
+ */
+export function removeProfile(name: string, dataDir?: string): boolean {
+	if (!removeStoredProfile(name, dataDir)) {
+		return false;
+	}
 
 	// If the removed profile was the active session profile, clear it
 	// so `which profile` doesn't report a ghost profile.
-	if (c8ctl.activeProfile === name) {
+	if (dataDir === undefined && c8ctl.activeProfile === name) {
 		clearActiveProfile();
 	}
 
@@ -970,8 +998,8 @@ interface ModelerSettingsFile {
  * Load connections from Modeler's settings.json (read-only)
  * These are NOT modified by c8ctl
  */
-export function loadModelerConnections(): Connection[] {
-	const settingsPath = getModelerSettingsPath();
+export function loadModelerConnections(modelerDir?: string): Connection[] {
+	const settingsPath = getModelerSettingsPath(modelerDir);
 
 	if (!existsSync(settingsPath)) {
 		return [];
@@ -1016,9 +1044,12 @@ export function getAllProfiles(): Profile[] {
  * Get a profile by name, checking both c8ctl and Modeler sources
  * For Modeler profiles, accepts name with or without "modeler:" prefix
  */
-export function getProfileOrModeler(name: string): Profile | undefined {
+export function getProfileOrModeler(
+	name: string,
+	dirs: DataDirs = {},
+): Profile | undefined {
 	// Try c8ctl profiles first
-	const c8ctlProfile = getProfile(name);
+	const c8ctlProfile = getProfile(name, dirs.dataDir);
 	if (c8ctlProfile) {
 		return c8ctlProfile;
 	}
@@ -1027,7 +1058,7 @@ export function getProfileOrModeler(name: string): Profile | undefined {
 	const modelerName = name.startsWith(MODELER_PREFIX)
 		? name.slice(MODELER_PREFIX.length)
 		: name;
-	const modelerConnections = loadModelerConnections();
+	const modelerConnections = loadModelerConnections(dirs.modelerDir);
 	const modelerConnection = modelerConnections.find(
 		(c) => c.name === modelerName || c.id === modelerName,
 	);
@@ -1647,17 +1678,21 @@ function warnOnIgnoredSdkEnvVars(fallbackBaseUrl: string): void {
  */
 function requireExplicitProfile(name: string): Profile {
 	if (name.trim() === "") {
-		throw new Error(
+		throw new C8ctlError(
+			"invalid-input",
 			"Profile name must not be empty. Check that the value passed to --profile is set.",
+			{ field: "profile" },
 		);
 	}
 	const profile = getProfileOrModeler(name);
 	if (!profile) {
-		throw new Error(
+		throw new C8ctlError(
+			"profile-not-found",
 			`Profile '${name}' not found. Run 'c8 list profiles' to see available profiles` +
 				(c8ctl.activeProfile === name
 					? ", or 'c8 use profile --none' to clear the active profile."
 					: "."),
+			{ field: "profile", details: { profile: name } },
 		);
 	}
 	return profile;

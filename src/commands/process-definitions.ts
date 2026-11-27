@@ -1,46 +1,59 @@
 /**
- * Process definition commands
+ * Process definition commands — CLI bindings of the process definition
+ * services.
  */
 
-import { fetchAllPages } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+import {
+	clusterInputOf,
+	defineCommand,
+	defineServiceCommand,
+} from "../framework/index.ts";
+import {
+	getProcessDefinition,
+	getProcessDefinitionRequest,
+	getProcessDefinitionXml,
+	getProcessDefinitionXmlRequest,
+	listProcessDefinitions,
+	listProcessDefinitionsRequest,
+} from "../services/index.ts";
 
 // ─── get pd ──────────────────────────────────────────────────────────────────
 
+/**
+ * Get a process definition, or its BPMN XML with `--xml`. Two services
+ * behind one command, so it stays a plain handler.
+ */
 export const getProcessDefinitionCommand = defineCommand(
 	"get",
 	"process-definition",
 	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
+		const input = { processDefinitionKey: args.key };
 
 		if (flags.xml) {
 			const dr = ctx.dryRun({
 				command: "get process-definition xml",
-				method: "GET",
-				endpoint: `/process-definitions/${key}/xml`,
-				profile,
+				profile: ctx.profile,
+				...getProcessDefinitionXmlRequest(input),
 			});
 			if (dr) return dr;
 
-			const result = await client.getProcessDefinitionXml(
-				{ processDefinitionKey: key },
-				{ consistency: { waitUpToMs: 0 } },
+			const xml = await getProcessDefinitionXml(
+				{ ...input, ...clusterInputOf(ctx) },
+				{},
 			);
-			return { kind: "raw", content: result };
+			return { kind: "raw", content: xml };
 		}
 
 		const dr = ctx.dryRun({
 			command: "get process-definition",
-			method: "GET",
-			endpoint: `/process-definitions/${key}`,
-			profile,
+			profile: ctx.profile,
+			...getProcessDefinitionRequest(input),
 		});
 		if (dr) return dr;
 
-		const result = await client.getProcessDefinition(
-			{ processDefinitionKey: key },
-			{ consistency: { waitUpToMs: 0 } },
+		const result = await getProcessDefinition(
+			{ ...input, ...clusterInputOf(ctx) },
+			{},
 		);
 		return { kind: "get", data: result };
 	},
@@ -49,37 +62,19 @@ export const getProcessDefinitionCommand = defineCommand(
 /**
  * List process definitions
  */
-export const listProcessDefinitionsCommand = defineCommand(
+export const listProcessDefinitionsCommand = defineServiceCommand(
 	"list",
 	"process-definition",
-	async (ctx) => {
-		const { client, tenantId, profile, limit } = ctx;
-
-		const filter: Record<string, unknown> = {
-			filter: {
-				tenantId,
-			},
-		};
-
-		const dr = ctx.dryRun({
+	{
+		toInput: (_flags, _args, scope) => ({ limit: scope.limit }),
+		dryRun: {
 			command: "list process-definitions",
-			method: "POST",
-			endpoint: "/process-definitions/search",
-			profile,
-			body: filter,
-		});
-		if (dr) return dr;
-
-		const allItems = await fetchAllPages(
-			(f, opts) => client.searchProcessDefinitions(f, opts),
-			filter,
-			undefined,
-			limit,
-		);
-
-		return {
+			request: listProcessDefinitionsRequest,
+		},
+		service: listProcessDefinitions,
+		render: ({ items }) => ({
 			kind: "list",
-			items: allItems.map((pd) => ({
+			items: items.map((pd) => ({
 				Key: pd.processDefinitionKey,
 				"Process ID": pd.processDefinitionId,
 				Name: pd.name || "-",
@@ -87,6 +82,6 @@ export const listProcessDefinitionsCommand = defineCommand(
 				"Tenant ID": pd.tenantId,
 			})),
 			emptyMessage: "No process definitions found",
-		};
+		}),
 	},
 );

@@ -1,174 +1,116 @@
 /**
- * Identity user commands
+ * Identity user commands — CLI bindings of the user services.
  */
 
-import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
-import { toStringFilter } from "./search.ts";
+import { defineServiceCommand } from "../framework/index.ts";
+import {
+	createUser,
+	createUserRequest,
+	deleteUser,
+	deleteUserRequest,
+	getUser,
+	getUserRequest,
+	listUsers,
+	listUsersRequest,
+	searchUsers,
+	searchUsersRequest,
+} from "../services/index.ts";
+
+/** Table row of a user. */
+function row(u: {
+	username?: string | null;
+	name?: string | null;
+	email?: string | null;
+}) {
+	return {
+		Username: u.username ?? "",
+		Name: u.name ?? "",
+		Email: u.email ?? "",
+	};
+}
 
 /**
  * List all users
  */
-export const listUsersCommand = defineCommand("list", "user", async (ctx) => {
-	const { client, profile, limit } = ctx;
-
-	const dr = ctx.dryRun({
-		command: "list users",
-		method: "POST",
-		endpoint: "/users/search",
-		profile,
-		body: {},
-	});
-	if (dr) return dr;
-
-	const items = await fetchAllPages(
-		(filter, opts) => client.searchUsers(filter, opts),
-		{},
-		undefined,
-		limit,
-	);
-
-	return {
+export const listUsersCommand = defineServiceCommand("list", "user", {
+	toInput: (_flags, _args, scope) => ({ limit: scope.limit }),
+	dryRun: { command: "list users", request: listUsersRequest },
+	service: listUsers,
+	render: ({ items }) => ({
 		kind: "list",
-		items: items.map((u) => ({
-			Username: u.username ?? "",
-			Name: u.name ?? "",
-			Email: u.email ?? "",
-		})),
+		items: items.map(row),
 		emptyMessage: "No users found",
-	};
+	}),
 });
+
 /**
  * Search users with filters
  */
-export const searchIdentityUsersCommand = defineCommand(
+export const searchIdentityUsersCommand = defineServiceCommand(
 	"search",
 	"user",
-	async (ctx, flags, _args) => {
-		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
-
-		const filter: Record<string, unknown> = {};
-		if (flags.username)
-			filter.username = toStringFilter(String(flags.username));
-		if (flags.name) filter.name = toStringFilter(String(flags.name));
-		if (flags.email) filter.email = toStringFilter(String(flags.email));
-
-		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
-
-		const dr = ctx.dryRun({
-			command: "search users",
-			method: "POST",
-			endpoint: "/users/search",
-			profile,
-			body: searchFilter,
-		});
-		if (dr) return dr;
-
-		const items = await fetchAllPages(
-			(f, opts) => client.searchUsers(f, opts),
-			searchFilter,
-			undefined,
-			limit,
-		);
-
-		if (items.length === 0) {
-			logger.info("No users found", { essential: true });
-			return;
-		}
-
-		let tableData = items.map((u) => ({
-			Username: u.username ?? "",
-			Name: u.name ?? "",
-			Email: u.email ?? "",
-		}));
-		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
-		logger.table(tableData);
+	{
+		toInput: (flags, _args, scope) => ({
+			username: flags.username,
+			name: flags.name,
+			email: flags.email,
+			limit: scope.limit,
+		}),
+		dryRun: { command: "search users", request: searchUsersRequest },
+		service: searchUsers,
+		render: ({ items }) => ({
+			kind: "list",
+			items: items.map(row),
+			emptyMessage: "No users found",
+		}),
 	},
 );
 
 /**
  * Get a single user by username
  */
-export const getIdentityUserCommand = defineCommand(
-	"get",
-	"user",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const username = args.username;
-
-		const dr = ctx.dryRun({
-			command: "get user",
-			method: "GET",
-			endpoint: `/users/${username}`,
-			profile,
-		});
-		if (dr) return dr;
-
-		const result = await client.getUser(
-			{ username },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		return { kind: "get", data: result };
-	},
-);
+export const getIdentityUserCommand = defineServiceCommand("get", "user", {
+	toInput: (_flags, args) => ({ username: args.username }),
+	dryRun: { command: "get user", request: getUserRequest },
+	service: getUser,
+	render: (user) => ({ kind: "get", data: user }),
+});
 
 /**
  * Create a new user
  */
-export const createIdentityUserCommand = defineCommand(
+export const createIdentityUserCommand = defineServiceCommand(
 	"create",
 	"user",
-	async (ctx, flags, _args) => {
-		const { client, profile } = ctx;
-
-		if (!flags.username) {
-			throw new Error("--username is required");
-		}
-		if (!flags.password) {
-			throw new Error("--password is required");
-		}
-
-		const body = {
-			username: flags.username,
-			password: flags.password,
-			...(flags.name ? { name: flags.name } : {}),
-			...(flags.email ? { email: flags.email } : {}),
-		};
-
-		const dr = ctx.dryRun({
-			command: "create user",
-			method: "POST",
-			endpoint: "/users",
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.createUser(body);
-		return { kind: "success", message: `User '${flags.username}' created` };
+	{
+		toInput: (flags) => ({
+			username: flags.username ?? "",
+			password: flags.password ?? "",
+			name: flags.name,
+			email: flags.email,
+		}),
+		dryRun: { command: "create user", request: createUserRequest },
+		service: createUser,
+		render: ({ username }) => ({
+			kind: "success",
+			message: `User '${username}' created`,
+		}),
 	},
 );
 
 /**
  * Delete a user by username
  */
-export const deleteIdentityUserCommand = defineCommand(
+export const deleteIdentityUserCommand = defineServiceCommand(
 	"delete",
 	"user",
-	async (ctx, _flags, args) => {
-		const { client, profile } = ctx;
-		const username = args.username;
-
-		const dr = ctx.dryRun({
-			command: "delete user",
-			method: "DELETE",
-			endpoint: `/users/${encodeURIComponent(String(username))}`,
-			profile,
-			body: null,
-		});
-		if (dr) return dr;
-
-		await client.deleteUser({ username });
-		return { kind: "success", message: `User '${username}' deleted` };
+	{
+		toInput: (_flags, args) => ({ username: args.username }),
+		dryRun: { command: "delete user", request: deleteUserRequest },
+		service: deleteUser,
+		render: ({ username }) => ({
+			kind: "success",
+			message: `User '${username}' deleted`,
+		}),
 	},
 );

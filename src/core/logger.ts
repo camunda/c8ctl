@@ -3,6 +3,7 @@
  * Handles output in multiple modes (text, json) based on session state
  */
 
+import { isC8ctlError } from "./c8ctl-error.ts";
 import { resolveEnvBaseUrl } from "./env-address.ts";
 import { c8ctl } from "./runtime.ts";
 
@@ -151,6 +152,7 @@ function isNetworkError(error: Error): boolean {
 	const message = error.message || "";
 	// Node.js native fetch surfaces this when the TCP connection is refused
 	if (message.toLowerCase().includes("fetch failed")) return true;
+	if (isC8ctlError(error)) return error.code === "connection-failed";
 
 	// Check for Node.js system error codes (e.g. ECONNREFUSED). The `code` and
 	// `cause` properties are carried by Node's system errors but not declared on
@@ -324,6 +326,13 @@ export class Logger {
 			const output: Record<string, unknown> = { status: "error", message };
 			if (error) {
 				output.error = error.message;
+				// The stable code is the machine-readable part of the error
+				// contract; scripts and agents branch on it, not on `error`.
+				if (isC8ctlError(error)) {
+					output.code = error.code;
+					if (error.field !== undefined) output.field = error.field;
+					if (error.problem !== undefined) output.problem = error.problem;
+				}
 				if (isNetworkError(error) && c8ctl.resolvedBaseUrl) {
 					output.url = c8ctl.resolvedBaseUrl;
 				}

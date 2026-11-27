@@ -1,48 +1,46 @@
 /**
- * Shared deployment helpers — resource collection, deployment execution,
- * and Camunda project marker detection (`camunda.json`, legacy
- * `.process-application`).
+ * CLI adapter for the deploy services (`src/services/`): resolves the
+ * CLI's target (`--profile`, session, env), prints the services' events
+ * and results, and renders deploy errors with actionable hints.
  *
  * Consumed by:
  * - `src/commands/deploy.ts` (the `deployCommand` handler)
  * - `src/commands/watch.ts` (change-triggered re-deploys)
  */
 
-import {
-	existsSync,
-	readdirSync,
-	readFileSync,
-	realpathSync,
-	statSync,
-} from "node:fs";
-import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { relative } from "node:path";
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-import { TenantId } from "@camunda8/orchestration-cluster-api";
 import {
-	createClient,
+	type C8ctlErrorCode,
+	type C8ctlEvent,
+	cliSdkLogLevel,
 	getLogger,
+	isC8ctlError,
 	isRecord,
 	normalizeToError,
+	resolveClusterConfig,
 	resolveTenantId,
 	SilentError,
 } from "../../core/index.ts";
 import {
-	CAMUNDA_PROJECT_FILE,
-	type CamundaProject,
-	DEPLOY_RESOURCES_FIELD,
+	checkServerSupportsExtensions as checkServerSupportsExtensionsOp,
+	type DeployedResource,
+	type DeployResult,
+	deploy,
+} from "../../services/index.ts";
+import {
+	type CollectResult,
+	collectResourcesForPaths as collectResourcesForPathsOp,
 	DEPLOYABLE_EXTENSIONS,
-	deployResourcesStateOf,
-	type Ignore,
-	isIgnored,
-	loadDeployAlwaysRules,
-	loadIgnoreRules,
-	meetsMinExtensionVersion,
-	PROCESS_APPLICATION_FILE,
-	readCamundaProject,
-	readProjectDescriptor,
-	resolveDeployResources,
-	resolveIgnoreBaseDir,
-	unreadablePath,
+	type DeployPathPlan,
+	type ProjectMarkerCache,
+	planDeployPaths as planDeployPathsOp,
+} from "../../utils/index.ts";
+
+export {
+	type DeployPathPlan,
+	findProjectRoot,
+	rejectSelectionFlagsForDescriptor,
 } from "../../utils/index.ts";
 
 /**
@@ -61,7 +59,9 @@ export function logMessage(message: string): void {
  * Shared between the dry-run preview and the execute path so the
  * message stays consistent. See https://github.com/camunda/c8ctl/issues/350
  */
-export function logSkippedExtensions(skippedExtensions: Set<string>): void {
+export function logSkippedExtensions(
+	skippedExtensions: ReadonlySet<string>,
+): void {
 	if (skippedExtensions.size === 0) return;
 	const exts = [...skippedExtensions].sort().join(", ");
 	logMessage(
@@ -72,789 +72,93 @@ export function logSkippedExtensions(skippedExtensions: Set<string>): void {
 
 /**
  * Check whether the connected Camunda server supports extended file extensions.
- * Returns `true` for 8.10+, `false` for older versions.
- * Falls back to `false` on any error (network, auth, unparseable version)
- * so unsupported resource types are not deployed to older clusters.
+ * Returns `true` for 8.10+, `false` for older versions or on any error.
  */
-export async function checkServerSupportsExtensions(
+export function checkServerSupportsExtensions(
 	client: CamundaClient,
 ): Promise<boolean> {
-	const logger = getLogger();
-	try {
-		const topology = await client.getTopology();
-		const version = String(topology.gatewayVersion ?? "");
-		const result = meetsMinExtensionVersion(version);
-		if (result === null) {
-			logger.warn(
-				`Could not parse server version "${version}" — assuming extended extensions are NOT supported.`,
-			);
-			return false;
-		}
-		return result;
-	} catch {
-		logger.warn(
-			"Could not reach the server to check its version (topology call failed).",
-		);
-		logger.warn(
-			"This can happen with OAuth/SaaS clusters before the first token is fetched, " +
-				"or if the server is not yet ready. Assuming extended extensions are NOT supported.",
-		);
-		return false;
-	}
-}
-
-/**
- * Extract process/decision IDs from BPMN/DMN files to detect duplicates
- */
-function extractDefinitionId(
-	content: Buffer,
-	extension: string,
-): string | null {
-	const text = content.toString("utf-8");
-
-	if (extension === ".bpmn") {
-		// Extract bpmn:process id attribute
-		const match = text.match(/<bpmn\d?:process[^>]+id="([^"]+)"/);
-		return match ? match[1] : null;
-	} else if (extension === ".dmn") {
-		// Extract decision id attribute
-		const match = text.match(/<decision[^>]+id="([^"]+)"/);
-		return match ? match[1] : null;
-	} else if (extension === ".form") {
-		// Forms are identified by filename, not internal ID
-		return null;
-	}
-
-	return null;
-}
-
-interface ResourceFile {
-	path: string;
-	name: string;
-	content: Buffer;
-	isBuildingBlock: boolean;
-	isProcessApplication: boolean;
-	groupPath?: string; // Path to the root of the group (BB or PA folder)
-	relativePath?: string;
-}
-
-/**
- * Check if a path is a building block folder (contains _bb- in name)
- */
-function isBuildingBlockFolder(path: string): boolean {
-	return basename(path).includes("_bb-");
-}
-
-/**
- * Per-invocation cache for project-marker checks. The marker predicate
- * reads (and parses) `camunda.json`, and `findGroupRoot` runs once per
- * collected file — without a cache the descriptor would be read and
- * parsed again for every resource in the project.
- */
-type ProjectMarkerCache = Map<string, boolean>;
-
-/**
- * Check if a directory contains a .process-application file
- */
-function hasProcessApplicationFile(dirPath: string): boolean {
-	const paFilePath = join(dirPath, PROCESS_APPLICATION_FILE);
-	try {
-		return statSync(paFilePath).isFile();
-	} catch {
-		return false;
-	}
-}
-
-/**
- * Check if a directory is a Camunda project root — it contains a
- * `camunda.json` descriptor or a legacy `.process-application` marker.
- *
- * The descriptor is read once: a present `camunda.json` is parsed and
- * validated, so malformed JSON is a hard error (the file must never
- * silently count as a project marker). In lenient mode (display tagging,
- * nested-project checks) an unreadable descriptor does not select this
- * directory as a root; in strict mode (resolving the project root to
- * deploy or watch) it is an `invalid-config` error. Results
- * are memoized in `cache` when one is provided.
- */
-function hasProjectMarker(
-	dirPath: string,
-	cache?: ProjectMarkerCache,
-	{
-		strict = false,
-		descriptors,
-	}: {
-		strict?: boolean;
-		/** Collects the descriptor read for each folder checked (strict). */
-		descriptors?: Map<string, CamundaProject>;
-	} = {},
-): boolean {
-	const cached = cache?.get(dirPath);
-	if (cached !== undefined) {
-		return cached;
-	}
-	// Strict (project-root resolution for deploy/watch): a camunda.json
-	// that exists but cannot be read is an error, never "not a project" —
-	// that would fall back to the default scan and bypass deployResources.
-	const descriptor = strict
-		? readProjectDescriptor(dirPath)
-		: readCamundaProject(dirPath);
-	if (descriptor) descriptors?.set(dirPath, descriptor);
-	const result = descriptor ? true : hasProcessApplicationFile(dirPath);
-	cache?.set(dirPath, result);
-	return result;
-}
-
-/**
- * Find the root building block or Camunda project folder by traversing up the path
- * Returns the path to the group root, or null if not in a group
- */
-function findGroupRoot(
-	filePath: string,
-	basePath: string,
-	cache?: ProjectMarkerCache,
-):
-	| { type: "bb"; root: string }
-	| { type: "pa"; root: string }
-	| { type: null; root: null } {
-	let currentDir = dirname(filePath);
-
-	// Traverse up the directory tree until we reach or go outside basePath
-	while (true) {
-		// Check if this directory is a building block
-		if (isBuildingBlockFolder(currentDir)) {
-			return { type: "bb", root: currentDir };
-		}
-
-		// Check if this directory is a Camunda project root
-		// (camunda.json or legacy .process-application marker). Display
-		// tagging only: it runs after the plan was resolved, so a
-		// descriptor that changed or broke meanwhile must not fail the run
-		// (it cannot change what is deployed either).
-		let isProjectRoot = false;
-		try {
-			isProjectRoot = hasProjectMarker(currentDir, cache);
-		} catch {
-			isProjectRoot = false;
-		}
-		if (isProjectRoot) {
-			return { type: "pa", root: currentDir };
-		}
-
-		// Check if we've reached or gone outside the basePath
-		const rel = relative(basePath, currentDir);
-		if (rel.startsWith("..") || rel === "") {
-			break;
-		}
-
-		// Move up one level
-		const parentDir = dirname(currentDir);
-		if (parentDir === currentDir) break; // Reached filesystem root
-		currentDir = parentDir;
-	}
-
-	return { type: null, root: null };
-}
-
-/**
- * Walk up from `startDir` looking for a project marker — a `camunda.json`
- * descriptor or a legacy `.process-application` file. Returns the
- * directory that contains the marker, or `null` if none is found before
- * reaching the filesystem root. Throws when a `camunda.json` exists but
- * contains invalid JSON.
- *
- * `startDir` may be a file path — the walk starts from its parent
- * directory in that case (the initial `hasProjectMarker` call
- * harmlessly returns false for non-directories).
- *
- * Unlike `findGroupRoot()` (which tags individual files for display),
- * this function determines the *deploy scope*: when a project root is
- * found, `collectResourcesForPaths` expands the input to the project
- * root so that the entire project is deployed.
- */
-export function findProjectRoot(
-	startDir: string,
-	cache?: ProjectMarkerCache,
-	/** When given, receives the descriptor read for the returned root, so
-	 *  callers can use that single read instead of reading it again. */
-	descriptors?: Map<string, CamundaProject>,
-): string | null {
-	let currentDir = resolve(startDir);
-
-	while (true) {
-		if (hasProjectMarker(currentDir, cache, { strict: true, descriptors })) {
-			return currentDir;
-		}
-
-		const parentDir = dirname(currentDir);
-		if (parentDir === currentDir) break; // Reached filesystem root
-		currentDir = parentDir;
-	}
-
-	return null;
-}
-
-/**
- * Recursively collect resource files from a directory.
- *
- * @param extensionList - The active allow-list of extensions. Only used
- *   during directory walks; explicit file paths bypass this check (the
- *   caller's intent is unambiguous). Pass `undefined` to skip extension
- *   filtering entirely (equivalent to `--force`).
- * @param skippedExtensions - Mutable set that accumulates extensions
- *   skipped during directory walks, so the caller can log them.
- */
-function collectResourceFiles(
-	dirPath: string,
-	collected: ResourceFile[] = [],
-	basePath?: string,
-	ig?: Ignore,
-	ignoreBaseDir?: string,
-	force?: boolean,
-	extensionList?: readonly string[],
-	skippedExtensions?: Set<string>,
-	skippedFiles?: string[],
-	deployAlways?: Ignore,
-	markerCache?: ProjectMarkerCache,
-): ResourceFile[] {
-	if (!existsSync(dirPath)) {
-		return collected;
-	}
-
-	const stat = statSync(dirPath);
-
-	// Set basePath to a directory on first call — when the initial input
-	// is a file, use its parent so findGroupRoot can walk up correctly.
-	if (!basePath) {
-		basePath = stat.isFile() ? dirname(dirPath) : dirPath;
-	}
-
-	if (stat.isFile()) {
-		// The camunda.json project descriptor is metadata, never a
-		// deployable resource — even when named explicitly.
-		if (basename(dirPath) === CAMUNDA_PROJECT_FILE) {
-			return collected;
-		}
-		if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
-			return collected;
-		}
-		// Explicit file paths always pass through — the user named the
-		// file directly, so their intent is unambiguous. Extension
-		// filtering only applies during directory discovery (below).
-		const groupInfo = findGroupRoot(dirPath, basePath, markerCache);
-		collected.push({
-			path: dirPath,
-			name: basename(dirPath),
-			content: readFileSync(dirPath),
-			isBuildingBlock: groupInfo.type === "bb",
-			isProcessApplication: groupInfo.type === "pa",
-			groupPath: groupInfo.root || undefined,
-		});
-		return collected;
-	}
-
-	if (stat.isDirectory()) {
-		// Skip entire directory if it matches an ignore rule
-		if (ig && ignoreBaseDir && isIgnored(ig, `${dirPath}/`, ignoreBaseDir)) {
-			return collected;
-		}
-
-		const entries = readdirSync(dirPath);
-
-		// Separate building block folders from regular ones
-		const bbFolders: string[] = [];
-		const regularFolders: string[] = [];
-		const files: string[] = [];
-
-		entries.forEach((entry) => {
-			const fullPath = join(dirPath, entry);
-			const entryStat = statSync(fullPath);
-
-			if (entryStat.isDirectory()) {
-				// Skip ignored directories early to avoid descending into them
-				if (
-					ig &&
-					ignoreBaseDir &&
-					isIgnored(ig, `${fullPath}/`, ignoreBaseDir)
-				) {
-					return;
-				}
-				if (isBuildingBlockFolder(entry)) {
-					bbFolders.push(fullPath);
-				} else if (
-					basePath !== undefined &&
-					hasProjectMarker(basePath, markerCache) &&
-					hasProjectMarker(fullPath, markerCache)
-				) {
-					// A nested project marker inside a project is a boundary —
-					// Camunda projects do not nest. The subtree is a separate
-					// project and is excluded from this walk. (Markerless roots
-					// — e.g. a monorepo folder — still deploy sibling projects.)
-					logMessage(`Skipping nested Camunda project at ${fullPath}`);
-					return;
-				} else {
-					regularFolders.push(fullPath);
-				}
-			} else if (entryStat.isFile()) {
-				// Skip hidden files (e.g. .c8ignore, .process-application) and
-				// the camunda.json project descriptor — it is metadata, never
-				// a deployable resource.
-				if (entry.startsWith(".") || entry === CAMUNDA_PROJECT_FILE) {
-					return;
-				}
-				// Skip ignored files
-				if (ig && ignoreBaseDir && isIgnored(ig, fullPath, ignoreBaseDir)) {
-					return;
-				}
-				// Unless --force, only collect files with known deployable extensions
-				if (
-					!force &&
-					extensionList &&
-					!extensionList.includes(extname(fullPath))
-				) {
-					// Check deploy-always negation rules from .c8ignore
-					if (
-						deployAlways &&
-						ignoreBaseDir &&
-						isIgnored(deployAlways, fullPath, ignoreBaseDir)
-					) {
-						// File matches a !path negation — include it
-						files.push(fullPath);
-						return;
-					}
-					if (skippedExtensions) {
-						const ext = extname(fullPath);
-						skippedExtensions.add(ext || "<no extension>");
-					}
-					if (skippedFiles) {
-						skippedFiles.push(fullPath);
-					}
-					return;
-				}
-				files.push(fullPath);
-			}
-		});
-
-		// Process files in current directory first
-		files.forEach((file) => {
-			const groupInfo = findGroupRoot(file, basePath, markerCache);
-			collected.push({
-				path: file,
-				name: basename(file),
-				content: readFileSync(file),
-				isBuildingBlock: groupInfo.type === "bb",
-				isProcessApplication: groupInfo.type === "pa",
-				groupPath: groupInfo.root || undefined,
-			});
-		});
-
-		// Process building block folders first (prioritized)
-		bbFolders.forEach((bbFolder) => {
-			collectResourceFiles(
-				bbFolder,
-				collected,
-				basePath,
-				ig,
-				ignoreBaseDir,
-				force,
-				extensionList,
-				skippedExtensions,
-				skippedFiles,
-				deployAlways,
-				markerCache,
-			);
-		});
-
-		// Then process regular folders
-		regularFolders.forEach((regularFolder) => {
-			collectResourceFiles(
-				regularFolder,
-				collected,
-				basePath,
-				ig,
-				ignoreBaseDir,
-				force,
-				extensionList,
-				skippedExtensions,
-				skippedFiles,
-				deployAlways,
-				markerCache,
-			);
-		});
-	}
-
-	return collected;
-}
-
-/**
- * Find duplicate process/decision IDs across resources
- */
-function findDuplicateDefinitionIds(
-	resources: ResourceFile[],
-): Map<string, string[]> {
-	const idMap = resources.reduce((map, r) => {
-		const ext = extname(r.path);
-		if (ext === ".bpmn" || ext === ".dmn") {
-			const defId = extractDefinitionId(r.content, ext);
-			if (defId) map.set(defId, [...(map.get(defId) ?? []), r.path]);
-		}
-		return map;
-	}, new Map<string, string[]>());
-
-	return new Map([...idMap].filter(([, paths]) => paths.length > 1));
-}
-
-/**
- * How one deploy/watch input path is collected.
- *
- * - `file`: an explicitly named file — deployed regardless of extension
- *   and of `deployResources`. `inDescriptorProject` is set when the file
- *   lives in a project that declares `deployResources`, in which case
- *   `.c8ignore` is not consulted either.
- * - `scan`: a directory scanned with the default extension allow-list
- *   filtered by `.c8ignore` (possibly expanded to its project root).
- * - `descriptor`: a project root whose `camunda.json` declares
- *   `deployResources`; the descriptor alone selects the files.
- */
-export type DeployPathPlan =
-	| { kind: "file"; path: string; inDescriptorProject: boolean }
-	| { kind: "scan"; path: string }
-	| { kind: "descriptor"; path: string; patterns: string[] };
-
-/**
- * Resolve the input paths of `deploy` / `watch` into a collection plan:
- * directories expand to their Camunda project root (deduplicated), and a
- * root whose descriptor declares `deployResources` is selected by that
- * field. Explicit files are never expanded.
- *
- * Descriptor read discipline: this is the single place where a deploy run
- * reads `camunda.json` to decide what gets deployed. Each descriptor is
- * read once (while finding the project root) and every decision of the
- * run — project mode, `deployResources` patterns, whether `.c8ignore`
- * applies to an explicitly named file — derives from that snapshot. Later
- * steps (dry-run preview, collection, deployment) receive the plan and
- * must not read the descriptor again. `watch --project` follows the same
- * rule per redeploy (see `watch.ts`). Other reads of `camunda.json`
- * (display tagging and the nested-project skip of a default scan) only
- * affect default-scan entries, never a `deployResources` selection.
- *
- * @throws {Error} When a project's `camunda.json` is invalid JSON or its
- *   `deployResources` field is invalid (`DeployResourcesError`).
- */
-export function planDeployPaths(
-	paths: string[],
-	{
-		markerCache = new Map(),
-		announce = true,
-	}: {
-		markerCache?: ProjectMarkerCache;
-		/** Log when a directory expands to an enclosing project root. */
-		announce?: boolean;
-	} = {},
-): DeployPathPlan[] {
-	// ── Project auto-detection ─────────────────────────────────────────
-	// For each directory path, walk up looking for a project marker
-	// (camunda.json or legacy .process-application). If found, expand to
-	// the project root so the entire project is deployed — matching
-	// Desktop Modeler behaviour.
-	// File paths are NOT expanded so that watch-mode single-file deploys
-	// remain scoped to the changed file.
-	const plan: DeployPathPlan[] = [];
-	// The snapshot: the descriptor read for each project root found.
-	const descriptors = new Map<string, CamundaProject>();
-	const seenRoots = new Set<string>();
-	for (const p of paths) {
-		const abs = resolve(p);
-		let isFile = false;
-		try {
-			isFile = statSync(abs).isFile();
-		} catch {
-			// Path does not exist — skip project detection and keep the
-			// absolute path so collectResourceFiles (which silently
-			// skips missing paths) falls through to the "No deployable
-			// files found" guard.
-			plan.push({ kind: "scan", path: abs });
-			continue;
-		}
-
-		if (isFile) {
-			plan.push({
-				kind: "file",
-				path: abs,
-				inDescriptorProject: fileInDescriptorProject(
-					abs,
-					markerCache,
-					descriptors,
-				),
-			});
-			continue;
-		}
-
-		const projectRoot = findProjectRoot(abs, markerCache, descriptors);
-		if (!projectRoot) {
-			plan.push({ kind: "scan", path: abs });
-			continue;
-		}
-		// Deduplicate: multiple input dirs inside the same project
-		// should only trigger one resource walk from the project root.
-		// Use realpathSync for the dedup key to handle symlinks/case.
-		let canonical = projectRoot;
-		try {
-			canonical = realpathSync(projectRoot);
-		} catch {
-			// Best-effort fallback.
-		}
-		if (seenRoots.has(canonical)) continue;
-		seenRoots.add(canonical);
-		// Tell the user when the deploy scope widened beyond the
-		// paths they named — a stray marker in a parent directory
-		// should never silently expand the deploy.
-		if (announce && projectRoot !== abs) {
-			logMessage(`📦 Deploying Camunda project at ${projectRoot}`);
-		}
-		const state = deployResourcesStateOf(
-			descriptors.get(projectRoot) ?? null,
-			projectRoot,
-		);
-		plan.push(
-			state.kind === "patterns"
-				? { kind: "descriptor", path: projectRoot, patterns: state.patterns }
-				: { kind: "scan", path: projectRoot },
-		);
-	}
-	return plan;
-}
-
-/**
- * Reject resource-selection flags when an input path expands to a project
- * that selects its resources with `deployResources`: the descriptor is the
- * single source of truth for the project's resource set.
- *
- * `force` is only passed by `deploy`, where it bypasses extension
- * filtering. `watch --project --force` keeps its separate meaning
- * (continue after deployment errors) and is never rejected.
- */
-export function rejectSelectionFlagsForDescriptor({
-	descriptorRoots,
-	extensions,
-	allExtensions,
-	force,
-}: {
-	descriptorRoots: readonly string[];
-	extensions?: string;
-	allExtensions?: boolean;
-	force?: boolean;
-}): void {
-	if (descriptorRoots.length === 0) return;
-	const conflicting = [
-		extensions !== undefined ? "--extensions" : null,
-		allExtensions ? "--all-extensions" : null,
-		force ? "--force" : null,
-	].filter((flag): flag is string => flag !== null);
-	if (conflicting.length === 0) return;
-	const descriptor = join(descriptorRoots[0], CAMUNDA_PROJECT_FILE);
-	throw new Error(
-		`${conflicting.join(", ")} cannot be used with a project that selects its resources ` +
-			`with "deployResources" (${descriptor}). ` +
-			`The descriptor defines which files deploy: add or adjust patterns in "deployResources" instead, ` +
-			"or name files explicitly on the command line (explicitly named files always deploy).",
+	return checkServerSupportsExtensionsOp(client, (message) =>
+		getLogger().warn(message),
 	);
 }
 
-/**
- * Whether an explicitly named file lives inside a project whose
- * descriptor declares `deployResources`. Lenient: a broken descriptor
- * never blocks an explicit file (explicit files deploy regardless of
- * `deployResources`).
- */
-function fileInDescriptorProject(
-	file: string,
-	markerCache: ProjectMarkerCache,
-	descriptors: Map<string, CamundaProject>,
-): boolean {
-	try {
-		const root = findProjectRoot(dirname(file), markerCache, descriptors);
-		const descriptor = root === null ? undefined : descriptors.get(root);
-		return (
-			descriptor !== undefined &&
-			Object.hasOwn(descriptor, DEPLOY_RESOURCES_FIELD)
-		);
-	} catch {
-		return false;
+/** `planDeployPaths` of the deploy services, announcing on stderr. */
+export function planDeployPaths(
+	paths: string[],
+	options: { markerCache?: ProjectMarkerCache; announce?: boolean } = {},
+): DeployPathPlan[] {
+	return planDeployPathsOp(paths, { ...options, notify: logMessage });
+}
+
+/** Log the skipped-extensions hint carried by a `no-deployable-files` error. */
+function logSkippedForNoFiles(error: unknown): void {
+	if (!isC8ctlError(error) || error.code !== "no-deployable-files") return;
+	const extensions = error.details?.skippedExtensions;
+	if (Array.isArray(extensions)) {
+		logSkippedExtensions(new Set(extensions.map(String)));
 	}
 }
 
 /**
- * Result of collecting deployable resources, including any extensions
- * that were skipped during directory walks (for user feedback).
- */
-interface CollectResult {
-	resources: ResourceFile[];
-	skippedExtensions: Set<string>;
-	skippedFiles: string[];
-	/** Resolved base paths used for resource collection and display.
-	 *  When PA detection fires, these are expanded to the PA root(s)
-	 *  rather than the user-supplied input paths. Used downstream for
-	 *  `ignoreBaseDir` resolution and `basePaths` in `deployResources`. */
-	effectivePaths: string[];
-	/** Project roots whose resources were selected by `deployResources`. */
-	descriptorRoots: string[];
-	/** Directory whose `.c8ignore` was consulted, or `null` when no entry
-	 *  needed `.c8ignore` (only `deployResources` projects). Interactive
-	 *  "always" choices must write `.c8ignore` here. */
-	ignoreBaseDir: string | null;
-}
-
-/**
- * Collect deployable resources from the given paths, applying `.c8ignore`
- * rules. Throws on the two pre-API guard failures so callers (deploy
- * handler, watch, dry-run preview) all surface the same errors with the
- * same wording.
- *
- * Shared between `deployCommand` (used for both the dry-run preview and
- * the execute path via `deployResources`) and `deployResources` itself.
- *
- * @param extensionList - Active allow-list for directory discovery.
- *   Defaults to `DEPLOYABLE_EXTENSIONS` (.bpmn, .dmn, .form).
+ * `collectResourcesForPaths` of the deploy services, with its notices
+ * and the skipped-extensions hint printed to stderr.
  */
 export function collectResourcesForPaths(
 	paths: string[],
 	force?: boolean,
 	extensionList: readonly string[] = DEPLOYABLE_EXTENSIONS,
-	/** When false, skip loading deploy-always negation rules from .c8ignore.
-	 *  Used to suppress them on servers <8.10 that don't support extended extensions. */
 	loadDeployAlways = true,
-	/** A plan resolved earlier in the same invocation. When given, the
-	 *  descriptors are not read again, so an edit that lands mid-command
-	 *  can never switch a `deployResources` project to the default scan. */
 	pinnedPlan?: DeployPathPlan[],
 ): CollectResult {
-	if (paths.length === 0) {
-		throw new Error(
-			"No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)",
-		);
-	}
-
-	// Memoizes marker checks across the scope walk and the per-file
-	// display tagging below — the descriptor would otherwise be read and
-	// parsed once per collected file.
-	const markerCache: ProjectMarkerCache = new Map();
-	const plan = pinnedPlan ?? planDeployPaths(paths, { markerCache });
-	const effectivePaths = plan.map((entry) => entry.path);
-
-	// Load .c8ignore rules from the effective target directory (which may
-	// be the project root) so that `c8 deploy <target>` picks up the
-	// .c8ignore inside the target. (#258) Only default scans and explicit
-	// files outside `deployResources` projects consult .c8ignore, so only
-	// they take part in the base-dir resolution — and when none does, the
-	// file is not read at all (a descriptor-only deploy must not fail on an
-	// unreadable .c8ignore it ignores anyway).
-	const ignorePaths = plan
-		.filter(
-			(entry) =>
-				entry.kind === "scan" ||
-				(entry.kind === "file" && !entry.inDescriptorProject),
-		)
-		.map((entry) => entry.path);
-	const ignoreBaseDir = resolveIgnoreBaseDir(
-		ignorePaths.length > 0 ? ignorePaths : effectivePaths,
-	);
-	const ig =
-		ignorePaths.length > 0 ? loadIgnoreRules(ignoreBaseDir) : undefined;
-
-	// Load !path negation patterns from .c8ignore. Files matching a
-	// negation bypass extension filtering ("deploy them always").
-	// Skipped on servers <8.10 where extended extensions aren't supported.
-	const deployAlways =
-		loadDeployAlways && ignorePaths.length > 0
-			? loadDeployAlwaysRules(ignoreBaseDir)
-			: null;
-
-	const resources: ResourceFile[] = [];
-	const skippedExtensions = new Set<string>();
-	const skippedFiles: string[] = [];
-	for (const entry of plan) {
-		if (entry.kind === "descriptor") {
-			// `deployResources` is an allowlist: the descriptor alone selects
-			// the files — no extension filter, no .c8ignore, no hidden-file
-			// pre-skip, no nested-project boundary.
-			for (const rel of resolveDeployResources(entry.path, entry.patterns)) {
-				const file = join(entry.path, ...rel.split("/"));
-				// All contents are read before any request is sent, so a read
-				// failure aborts the whole deployment (never a partial one).
-				let content: Buffer;
-				try {
-					content = readFileSync(file);
-				} catch (error) {
-					throw unreadablePath(file, error);
-				}
-				resources.push({
-					path: file,
-					name: basename(file),
-					content,
-					isBuildingBlock: false,
-					isProcessApplication: true,
-					groupPath: entry.path,
-				});
-			}
-			continue;
-		}
-		const bypassIgnore = entry.kind === "file" && entry.inDescriptorProject;
-		collectResourceFiles(
-			entry.path,
-			resources,
-			undefined,
-			bypassIgnore ? undefined : ig,
-			ignoreBaseDir,
+	try {
+		return collectResourcesForPathsOp(
+			paths,
 			force,
 			extensionList,
-			skippedExtensions,
-			skippedFiles,
-			deployAlways ?? undefined,
-			markerCache,
+			loadDeployAlways,
+			pinnedPlan,
+			logMessage,
 		);
+	} catch (error) {
+		logSkippedForNoFiles(error);
+		throw error;
 	}
+}
 
-	// Deduplicate resources by canonical path — can happen when an explicit
-	// file path is also covered by a project-root or scoped-directory walk,
-	// or when the same file is reachable via symlinks. The canonical path
-	// is used only as the dedup key; the original path/name are preserved
-	// for display and relative-path calculations.
-	const seen = new Set<string>();
-	const deduped: ResourceFile[] = [];
-	for (const r of resources) {
-		let canonical = r.path;
-		try {
-			canonical = realpathSync(r.path);
-		} catch {
-			// Best-effort: fall back to the original path if realpath
-			// fails (e.g. broken symlink).
-		}
-		if (!seen.has(canonical)) {
-			seen.add(canonical);
-			deduped.push(r);
-		}
-	}
+/** Errors of the deployment request, rendered by `handleDeploymentError`. */
+const REQUEST_ERROR_CODES: ReadonlySet<C8ctlErrorCode> = new Set([
+	"connection-failed",
+	"unauthorized",
+	"forbidden",
+	"payload-too-large",
+	"not-found",
+	"deployment-rejected",
+	"unknown",
+]);
 
-	if (deduped.length === 0) {
-		logSkippedExtensions(skippedExtensions);
-		throw new Error(
-			skippedFiles.length > 0
-				? `No files with allowed extensions found. ${skippedFiles.length} file(s) were skipped (${[...skippedExtensions].sort().join(", ")}). Use --force to include all files, or --extensions to expand the allow-list.`
-				: "No deployable files found in the specified paths",
-		);
-	}
+/** What the error hints need to know about a file that was sent. */
+interface AttemptedResource {
+	name: string;
+	relativePath?: string;
+	content: { byteLength: number };
+}
 
-	return {
-		resources: deduped,
-		skippedExtensions,
-		skippedFiles,
-		effectivePaths,
-		descriptorRoots: plan
-			.filter((entry) => entry.kind === "descriptor")
-			.map((entry) => entry.path),
-		ignoreBaseDir: ignorePaths.length > 0 ? ignoreBaseDir : null,
-	};
+const RESOURCE_TYPE_LABELS: Record<DeployedResource["type"], string> = {
+	process: "Process",
+	decision: "Decision",
+	"decision-requirements": "Decision Requirements",
+	form: "Form",
+	resource: "Resource",
+};
+
+/** The display base for relative file paths. */
+function displayBasePath(
+	explicit: string | undefined,
+	resolvedPaths: readonly string[],
+): string {
+	return (
+		explicit ?? (resolvedPaths.length === 1 ? resolvedPaths[0] : process.cwd())
+	);
 }
 
 /**
@@ -878,12 +182,9 @@ export async function deployResources(
 		extensionList?: readonly string[];
 		/**
 		 * Optional cancellation signal. When aborted, an in-flight
-		 * `createDeployment` HTTP request is cancelled via the SDK's
-		 * `CancelablePromise.cancel()`. Cancellation is handled internally:
-		 * if the signal is aborted, `deployResources()` returns early
-		 * without surfacing the cancellation as a deploy failure (no
-		 * "Deployment failed" log, no rejection from the awaited promise).
-		 * Callers do not need their own try/catch to suppress aborts.
+		 * `createDeployment` HTTP request is cancelled. Cancellation is
+		 * handled internally: `deployResources()` then returns early
+		 * without surfacing the cancellation as a deploy failure.
 		 */
 		signal?: AbortSignal;
 		/** When true, skip the skipped-extensions log (caller already handled it). */
@@ -899,358 +200,103 @@ export async function deployResources(
 		/** Plan resolved earlier in the same invocation (see
 		 *  `collectResourcesForPaths`); descriptors are then not re-read. */
 		plan?: DeployPathPlan[];
-		/** Explicit tenant, bypassing session/env resolution. `c8ctl setup`
-		 *  uses it to pin the local cluster's default tenant. */
+		/** Explicit tenant, bypassing session/env resolution. */
 		tenantId?: string;
 		/** When true, suppress success-path progress output (the "Deploying…"
 		 *  line, the success confirmation and the deployed-resources table).
-		 *  `c8ctl setup` uses it: the step report is the signal. Failures
-		 *  still render in full. */
+		 *  Failures still render in full. */
 		quiet?: boolean;
-		/** Logger override — defaults to the shared singleton. `c8ctl setup`
-		 *  passes its buffered step logger so failure diagnostics close the
-		 *  step's title line before printing instead of colliding with it. */
+		/** Logger override — defaults to the shared singleton. */
 		logger?: ReturnType<typeof getLogger>;
 	},
 ): Promise<void> {
 	const logger = options.logger ?? getLogger();
 	const tenantId = options.tenantId ?? resolveTenantId(options.profile);
+	// The CLI host resolves its target from --profile, the session and the
+	// environment; the service only receives the result.
+	const cluster = resolveClusterConfig(options.profile);
+	const plan = options.plan ?? planDeployPaths(paths);
 
-	// ─── Pre-API-call validation and preparation ────────────────────────
-	// These steps run OUTSIDE any try/catch so validation errors bubble
-	// straight to the framework's `handleCommandError`. Only the actual
-	// HTTP deploy call (further down) is wrapped in a catch that routes
-	// through `handleDeploymentError` for rich Problem-Detail rendering.
-
-	const { resources, skippedExtensions, effectivePaths } =
-		collectResourcesForPaths(
-			paths,
-			options.force,
-			options.extensionList ?? DEPLOYABLE_EXTENSIONS,
-			options.loadDeployAlways ?? true,
-			options.plan,
-		);
-
-	if (!options.suppressSkippedLog) {
-		logSkippedExtensions(skippedExtensions);
-	}
-
-	// Use the effective paths (which may have been expanded to a PA root)
-	// for relative path calculation so display paths make sense.
-	const basePaths = effectivePaths;
-
-	const client = createClient(options.profile);
-
-	// Calculate relative paths for display
-	const basePath =
-		options.basePath ?? (basePaths.length === 1 ? basePaths[0] : process.cwd());
-	resources.forEach((r) => {
-		r.relativePath = relative(basePath, r.path) || r.name;
-	});
-
-	// Sort: group resources by their group, with building blocks first, then process applications, then standalone
-	resources.sort((a, b) => {
-		// Building blocks have highest priority
-		if (a.isBuildingBlock && !b.isBuildingBlock) return -1;
-		if (!a.isBuildingBlock && b.isBuildingBlock) return 1;
-
-		// Within building blocks, group by groupPath
-		if (a.isBuildingBlock && b.isBuildingBlock) {
-			if (a.groupPath && b.groupPath) {
-				const groupCompare = a.groupPath.localeCompare(b.groupPath);
-				if (groupCompare !== 0) return groupCompare;
+	const onProgress = (event: C8ctlEvent): void => {
+		if (event.type === "notice") {
+			logMessage(event.message);
+		} else if (event.type === "warning") {
+			logger.warn(event.message);
+		} else if (event.phase === "resolved") {
+			const skipped = event.data?.skipped;
+			if (!options.suppressSkippedLog && isSkipped(skipped)) {
+				logSkippedExtensions(new Set(skipped.extensions));
 			}
-			return a.path.localeCompare(b.path);
+		} else if (event.phase === "deploy" && !options.quiet) {
+			logger.info(`Deploying ${event.total} resource(s)...`);
 		}
-
-		// Process applications come next
-		if (a.isProcessApplication && !b.isProcessApplication) return -1;
-		if (!a.isProcessApplication && b.isProcessApplication) return 1;
-
-		// Within process applications, group by groupPath
-		if (a.isProcessApplication && b.isProcessApplication) {
-			if (a.groupPath && b.groupPath) {
-				const groupCompare = a.groupPath.localeCompare(b.groupPath);
-				if (groupCompare !== 0) return groupCompare;
-			}
-			return a.path.localeCompare(b.path);
-		}
-
-		// Finally, standalone resources sorted by path
-		return a.path.localeCompare(b.path);
-	});
-
-	// Validate for duplicate process/decision IDs
-	const duplicates = findDuplicateDefinitionIds(resources);
-	if (duplicates.size > 0) {
-		// Single source of truth for both the user-visible logger.error and
-		// the SilentError message — keeps stderr and `--verbose` rethrow
-		// stack message aligned even if the wording is later edited.
-		const duplicateIdsMessage =
-			"Cannot deploy: Multiple files with the same process/decision ID in one deployment";
-		// Pre-render the rich detail (per-id file list + guidance) so the
-		// user sees actionable context, then throw a SilentError so the
-		// framework records the failure without re-rendering a duplicate
-		// summary line.
-		logger.error(duplicateIdsMessage);
-		duplicates.forEach((dupPaths, id) => {
-			logMessage(
-				`  Process/Decision ID "${id}" found in: ${dupPaths.join(", ")}`,
-			);
-		});
-		logMessage(
-			"\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.",
-		);
-		logMessage(
-			"Please deploy these files separately or ensure each process/decision has a unique ID.",
-		);
-		throw new SilentError(duplicateIdsMessage);
-	}
-
-	if (!options.quiet) {
-		logger.info(`Deploying ${resources.length} resource(s)...`);
-	}
-
-	// Create a mapping from definition ID to resource file for later reference
-	const definitionIdToResource = new Map<string, ResourceFile>();
-	const formNameToResource = new Map<string, ResourceFile>();
-	// Map basename → ResourceFile[]: multiple files can share a basename
-	// across directories (e.g. sub-a/model.dmn, sub-b/model.dmn). When
-	// the API returns a resourceName, we pop the first matching entry so
-	// each response record resolves to a distinct local file.
-	const resourcesByName = new Map<string, ResourceFile[]>();
-
-	resources.forEach((r) => {
-		const existing = resourcesByName.get(r.name);
-		if (existing) {
-			existing.push(r);
-		} else {
-			resourcesByName.set(r.name, [r]);
-		}
-
-		const ext = extname(r.path);
-		if (ext === ".bpmn" || ext === ".dmn") {
-			const defId = extractDefinitionId(r.content, ext);
-			if (defId) {
-				definitionIdToResource.set(defId, r);
-			}
-		} else if (ext === ".form") {
-			// Forms are matched by their internal ID from the JSON content.
-			// Fall back to filename (without extension) if the ID can't be parsed.
-			let formId = basename(r.name, ".form");
-			try {
-				const parsed: unknown = JSON.parse(r.content.toString("utf-8"));
-				if (isRecord(parsed) && typeof parsed.id === "string") {
-					formId = parsed.id;
-				}
-			} catch {
-				// Not valid JSON — use filename
-			}
-			formNameToResource.set(formId, r);
-		}
-	});
-
-	/** Pop the first resource with a matching basename, or return undefined. */
-	function popResourceByName(name: string): ResourceFile | undefined {
-		const bucket = resourcesByName.get(name);
-		if (!bucket || bucket.length === 0) return undefined;
-		return bucket.shift();
-	}
-
-	// ─── API call ────────────────────────────────────────────────────────
-	// Only this section is wrapped in a catch that routes through
-	// `handleDeploymentError`. Pre-API errors above bubble to the
-	// framework directly.
-
-	// Create deployment request - convert buffers to File objects with proper MIME types
-	const pendingDeploy = client.createDeployment({
-		tenantId: TenantId.assumeExists(tenantId),
-		resources: resources.map((r) => {
-			// Determine MIME type based on extension
-			const ext = r.name.split(".").pop()?.toLowerCase();
-			const mimeType =
-				ext === "bpmn"
-					? "application/xml"
-					: ext === "dmn"
-						? "application/xml"
-						: ext === "form"
-							? "application/json"
-							: "application/octet-stream";
-			// Convert Buffer to Uint8Array for File constructor
-			return new File([new Uint8Array(r.content)], r.name, {
-				type: mimeType,
-			});
-		}),
-	});
-
-	// Wire optional cancellation: when the caller's AbortSignal fires,
-	// cancel the underlying CancelablePromise so the in-flight HTTP
-	// request is aborted promptly. Used by `watch` so SIGINT mid-deploy
-	// shuts down within ~one event-loop tick rather than blocking on
-	// the network round-trip.
-	const onAbort = (): void => {
-		pendingDeploy.cancel();
 	};
-	if (options.signal) {
-		if (options.signal.aborted) {
-			onAbort();
-		} else {
-			options.signal.addEventListener("abort", onAbort, { once: true });
-		}
-	}
 
-	let result: Awaited<typeof pendingDeploy>;
+	let result: DeployResult;
 	try {
-		result = await pendingDeploy;
+		result = await deploy(
+			{
+				target: { cluster },
+				paths,
+				tenantId,
+				extensions: [...(options.extensionList ?? DEPLOYABLE_EXTENSIONS)],
+				force: options.force,
+			},
+			{
+				signal: options.signal,
+				onProgress,
+				env: process.env,
+				sdkLogLevel: cliSdkLogLevel(),
+			},
+			{
+				plan,
+				serverSupportsExtensions: options.loadDeployAlways ?? true,
+			},
+		);
 	} catch (error) {
-		options.signal?.removeEventListener("abort", onAbort);
-		// Caller-initiated cancellation (e.g. SIGINT in `watch`): the
-		// CancelablePromise rejects with a "Cancelled" error after we
-		// invoked `pendingDeploy.cancel()` from the abort listener. The
-		// caller already knows the request was aborted — do not surface
-		// it as a user-visible deploy failure or exit non-zero.
-		if (options.signal?.aborted) {
+		logSkippedForNoFiles(error);
+		if (!isC8ctlError(error)) throw error;
+		// Caller-initiated cancellation (e.g. SIGINT in `watch`) is not a
+		// deploy failure.
+		if (error.code === "cancelled") return;
+		if (error.code === "duplicate-definition-ids") {
+			renderDuplicateIds(error.message, error.details?.duplicates, logger);
+			// Rendered above; the SilentError exits non-zero without a
+			// duplicate summary line.
+			throw new SilentError(error.message);
+		}
+		if (REQUEST_ERROR_CODES.has(error.code)) {
+			handleDeploymentError(
+				error.cause ?? error,
+				attemptedResources(error.details, options.basePath),
+				logger,
+				options.continueOnError,
+				options.continueOnUserError,
+				options.verbose === true,
+			);
 			return;
 		}
-		handleDeploymentError(
-			error,
-			resources,
-			logger,
-			options.continueOnError,
-			options.continueOnUserError,
-			options.verbose === true,
-		);
-		// `handleDeploymentError` either throws (terminal) or returns
-		// (continue-on-error). On the continue path, skip the success
-		// render below — there's no result to render.
-		return;
+		throw error;
 	}
-	options.signal?.removeEventListener("abort", onAbort);
 
 	if (!options.quiet) {
-		logger.success("Deployment successful", result.deploymentKey.toString());
+		logger.success("Deployment successful", result.deploymentKey);
 	}
 
-	// Group resources by their directory (building block or process application)
-	type ResourceRow = {
-		File: string;
-		Type: string;
-		ID: string;
-		Version: string | number;
-		Key: string;
-		sortKey: string;
-	};
-
-	// Normalize all deployed resources into a common structure
-	const knownResources = new Set<ResourceFile>();
-	const allResources = [
-		...result.processes.map((proc) => {
-			const resource = definitionIdToResource.get(proc.processDefinitionId);
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Process" as const,
-				id: proc.processDefinitionId,
-				version: proc.processDefinitionVersion,
-				key: proc.processDefinitionKey.toString(),
-				resource,
-			};
-		}),
-		...result.decisions.map((dec) => {
-			const resource = definitionIdToResource.get(
-				dec.decisionDefinitionId || "",
-			);
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Decision" as const,
-				id: dec.decisionDefinitionId || "-",
-				version: dec.version ?? "-",
-				key: dec.decisionDefinitionKey?.toString() || "-",
-				resource,
-			};
-		}),
-		...result.decisionRequirements.map((dr) => {
-			const resource = popResourceByName(dr.resourceName || "");
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Decision Requirements" as const,
-				id: dr.decisionRequirementsId || "-",
-				version: dr.version ?? "-",
-				key: dr.decisionRequirementsKey?.toString() || "-",
-				resource,
-			};
-		}),
-		...result.forms.map((form) => {
-			const resource = formNameToResource.get(form.formId || "");
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Form" as const,
-				id: form.formId || "-",
-				version: form.version ?? "-",
-				key: form.formKey?.toString() || "-",
-				resource,
-			};
-		}),
-		// Generic resources (not processes, decisions, or forms)
-		// are returned in the `resources` array by 8.10+.
-		...result.resources.map((res) => {
-			const resource = popResourceByName(res.resourceName || "");
-			if (resource) knownResources.add(resource);
-			return {
-				type: "Resource" as const,
-				id: res.resourceId || "-",
-				version: res.version ?? "-",
-				key: res.resourceKey?.toString() || "-",
-				resource,
-			};
-		}),
-		// Supplementary resources not returned in any response array.
-		// Show them in the table so the user knows they were deployed.
-		...resources
-			.filter((r) => !knownResources.has(r))
-			.map((r) => ({
-				type: "Resource" as const,
-				id: "-",
-				version: "-" as const,
-				key: "-",
-				resource: r,
-			})),
-	];
-
-	const tableData: ResourceRow[] = allResources.map(
-		({ type, id, version, key, resource }) => {
-			const fileDisplay = resource
-				? `${resource.isBuildingBlock ? "🧱 " : ""}${resource.isProcessApplication ? "📦 " : ""}${resource.relativePath || resource.name}`
-				: "-";
-
-			// Extract directory path for grouping (e.g., "bla/_bb-building-block" or "pa")
-			const sortKey = resource?.relativePath
-				? resource.relativePath.substring(
-						0,
-						resource.relativePath.lastIndexOf("/") + 1,
-					) || resource.relativePath
-				: "zzz"; // Resources without paths go last
-
-			return {
-				File: fileDisplay,
-				Type: type,
-				ID: id,
-				Version: version,
-				Key: key,
-				sortKey,
-			};
-		},
+	const basePath = displayBasePath(options.basePath, result.resolvedPaths);
+	const rows = result.resources.map((resource) =>
+		toTableRow(resource, basePath),
 	);
 
 	// Sort by directory path (grouping), then by file name
-	tableData.sort((a, b) => {
+	rows.sort((a, b) => {
 		if (a.sortKey !== b.sortKey) {
 			return a.sortKey.localeCompare(b.sortKey);
 		}
 		return a.File.localeCompare(b.File);
 	});
 
-	// Remove sortKey before displaying
-	const displayData = tableData.map(({ File, Type, ID, Version, Key }) => ({
+	const displayData = rows.map(({ File, Type, ID, Version, Key }) => ({
 		File,
 		Type,
 		ID,
@@ -1263,12 +309,100 @@ export async function deployResources(
 	}
 }
 
+function isSkipped(
+	value: unknown,
+): value is { files: string[]; extensions: string[] } {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"extensions" in value &&
+		Array.isArray(value.extensions)
+	);
+}
+
+function renderDuplicateIds(
+	message: string,
+	duplicates: unknown,
+	logger: ReturnType<typeof getLogger>,
+): void {
+	logger.error(message);
+	if (typeof duplicates === "object" && duplicates !== null) {
+		for (const [id, dupPaths] of Object.entries(duplicates)) {
+			const list = Array.isArray(dupPaths) ? dupPaths.join(", ") : "";
+			logMessage(`  Process/Decision ID "${id}" found in: ${list}`);
+		}
+	}
+	logMessage(
+		"\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.",
+	);
+	logMessage(
+		"Please deploy these files separately or ensure each process/decision has a unique ID.",
+	);
+}
+
+/** The files a failed request sent, from the error's `details.attempted`. */
+function attemptedResources(
+	details: Record<string, unknown> | undefined,
+	explicitBasePath: string | undefined,
+): AttemptedResource[] {
+	const resolvedPaths = Array.isArray(details?.resolvedPaths)
+		? details.resolvedPaths.map(String)
+		: [];
+	const basePath = displayBasePath(explicitBasePath, resolvedPaths);
+	const attempted = Array.isArray(details?.attempted) ? details.attempted : [];
+	return attempted.flatMap((entry: unknown) => {
+		if (!isRecord(entry)) return [];
+		const { path, name, bytes } = entry;
+		if (typeof path !== "string" || typeof name !== "string") return [];
+		return [
+			{
+				name,
+				relativePath: relative(basePath, path) || name,
+				content: { byteLength: typeof bytes === "number" ? bytes : 0 },
+			},
+		];
+	});
+}
+
+interface ResourceRow {
+	File: string;
+	Type: string;
+	ID: string;
+	Version: string | number;
+	Key: string;
+	sortKey: string;
+}
+
+function toTableRow(resource: DeployedResource, basePath: string): ResourceRow {
+	const file = resource.file;
+	const relativePath = file ? relative(basePath, file.path) || file.name : "";
+	const fileDisplay = file
+		? `${file.group?.kind === "building-block" ? "🧱 " : ""}${file.group?.kind === "project" ? "📦 " : ""}${relativePath}`
+		: "-";
+
+	// Directory path for grouping (e.g. "bla/_bb-building-block" or "pa");
+	// resources without a file go last.
+	const sortKey = relativePath
+		? relativePath.substring(0, relativePath.lastIndexOf("/") + 1) ||
+			relativePath
+		: "zzz";
+
+	return {
+		File: fileDisplay,
+		Type: RESOURCE_TYPE_LABELS[resource.type],
+		ID: resource.id ?? "-",
+		Version: resource.version ?? "-",
+		Key: resource.key ?? "-",
+		sortKey,
+	};
+}
+
 /**
  * Format and display deployment errors with actionable guidance
  */
 function handleDeploymentError(
 	error: unknown,
-	resources: ResourceFile[],
+	resources: AttemptedResource[],
 	logger: ReturnType<typeof getLogger>,
 	continueOnError?: boolean,
 	continueOnUserError?: boolean,
@@ -1435,7 +569,7 @@ function printDeploymentHints(
 	title: string,
 	detail: string | undefined,
 	status: number | undefined,
-	resources: ResourceFile[],
+	resources: AttemptedResource[],
 ): void {
 	const hints: string[] = [];
 

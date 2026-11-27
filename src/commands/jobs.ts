@@ -1,146 +1,87 @@
 /**
- * Job commands
+ * Job commands — CLI bindings of the job services.
  */
 
-import { TenantId } from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
 import {
-	buildDateFilter,
-	parseBetween,
-	parseVariablesFlag,
-} from "../utils/index.ts";
+	clusterInputOf,
+	defineCommand,
+	defineServiceCommand,
+} from "../framework/index.ts";
+import {
+	activateJobs,
+	activateJobsRequest,
+	completeJob,
+	completeJobRequest,
+	failJob,
+	failJobRequest,
+	listJobs,
+	listJobsRequest,
+	updateJob,
+	updateJobRequest,
+} from "../services/index.ts";
+import { parseVariablesFlag } from "../utils/index.ts";
+
+/** Parse an optional integer flag; an absent or empty flag is `undefined`. */
+function intFlag(value: string | undefined): number | undefined {
+	return value ? parseInt(value, 10) : undefined;
+}
 
 /**
  * List jobs
  */
-export const listJobsCommand = defineCommand(
-	"list",
-	"jobs",
-	async (ctx, flags) => {
-		const { client, tenantId, profile, limit, between, dateField } = ctx;
-
-		const filter: { filter: Record<string, unknown> } = {
-			filter: {
-				tenantId,
-			},
-		};
-
-		if (flags.state) {
-			filter.filter.state = flags.state;
-		}
-
-		if (flags.type) {
-			filter.filter.type = flags.type;
-		}
-
-		if (between) {
-			const parsed = parseBetween(between);
-			if (parsed) {
-				const field = dateField ?? "creationTime";
-				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
-			} else {
-				throw new Error(
-					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
-				);
-			}
-		}
-
-		const dr = ctx.dryRun({
-			command: "list jobs",
-			method: "POST",
-			endpoint: "/jobs/search",
-			profile,
-			body: filter,
-		});
-		if (dr) return dr;
-
-		const allItems = await fetchAllPages(
-			(f, opts) => client.searchJobs(f, opts),
-			filter,
-			undefined,
-			limit,
-		);
-
-		return {
-			kind: "list",
-			items: allItems.map((job) => ({
-				Key: job.jobKey,
-				Type: job.type,
-				State: job.state,
-				Retries: job.retries,
-				Created: job.creationTime || "-",
-				"Process Instance": job.processInstanceKey,
-				"Tenant ID": job.tenantId,
-			})),
-			emptyMessage: "No jobs found",
-		};
-	},
-);
+export const listJobsCommand = defineServiceCommand("list", "jobs", {
+	toInput: (flags, _args, scope) => ({
+		state: flags.state,
+		type: flags.type,
+		between: scope.between,
+		dateField: scope.dateField,
+		limit: scope.limit,
+	}),
+	dryRun: { command: "list jobs", request: listJobsRequest },
+	service: listJobs,
+	render: ({ items }) => ({
+		kind: "list",
+		items: items.map((job) => ({
+			Key: job.jobKey,
+			Type: job.type,
+			State: job.state,
+			Retries: job.retries,
+			Created: job.creationTime || "-",
+			"Process Instance": job.processInstanceKey,
+			"Tenant ID": job.tenantId,
+		})),
+		emptyMessage: "No jobs found",
+	}),
+});
 
 /**
- * Activate jobs
+ * Activate jobs. A plain handler: `--customHeaders` only changes the
+ * table, it is not part of the request.
  */
 export const activateJobsCommand = defineCommand(
 	"activate",
 	"jobs",
 	async (ctx, flags, args) => {
-		const { client, tenantId, profile } = ctx;
 		const type = args.type;
-		const maxJobsToActivate = flags.maxJobsToActivate
-			? parseInt(flags.maxJobsToActivate, 10)
-			: 10;
-		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
-		const worker = flags.worker || "c8ctl";
-		// --fetchVariable restricts which variables the server returns. Per the
-		// REST spec an *empty* list means "return all visible variables", which
-		// defeats the point of the flag, so if the flag is provided but resolves
-		// to no usable names we reject it rather than silently fetching all.
-		let fetchVariable: string[] | undefined;
-		if (flags.fetchVariable !== undefined) {
-			const fetchVariableNames = flags.fetchVariable
-				.split(",")
+		const input = {
+			type,
+			maxJobsToActivate: intFlag(flags.maxJobsToActivate),
+			timeout: intFlag(flags.timeout),
+			worker: flags.worker,
+			fetchVariable: flags.fetchVariable
+				?.split(",")
 				.map((name) => name.trim())
-				.filter(Boolean);
-			if (fetchVariableNames.length === 0) {
-				throw new Error("--fetchVariable was given no valid variable names");
-			}
-			fetchVariable = fetchVariableNames;
-		}
-
-		if (Number.isNaN(maxJobsToActivate) || maxJobsToActivate < 1) {
-			throw new Error("--maxJobsToActivate must be a positive integer");
-		}
-		if (Number.isNaN(timeout) || timeout < 1) {
-			throw new Error("--timeout must be a positive integer (milliseconds)");
-		}
+				.filter(Boolean),
+		};
 
 		const dr = ctx.dryRun({
 			command: "activate jobs",
-			method: "POST",
-			endpoint: "/jobs/activation",
-			profile,
-			body: {
-				type,
-				...(tenantId !== undefined && { tenantIds: [tenantId] }),
-				maxJobsToActivate,
-				timeout,
-				worker,
-				...(fetchVariable && { fetchVariable }),
-			},
+			profile: ctx.profile,
+			...activateJobsRequest(input, ctx.tenantId),
 		});
 		if (dr) return dr;
 
-		const result = await client.activateJobs({
-			type,
-			...(tenantId !== undefined && {
-				tenantIds: [TenantId.assumeExists(tenantId)],
-			}),
-			maxJobsToActivate,
-			timeout,
-			worker,
-			...(fetchVariable && { fetchVariable }),
-		});
+		const result = await activateJobs({ ...input, ...clusterInputOf(ctx) }, {});
 
 		if (result.jobs && result.jobs.length > 0) {
 			return {
@@ -154,7 +95,7 @@ export const activateJobsCommand = defineCommand(
 					...(flags.customHeaders && {
 						"Custom Headers": job.customHeaders,
 					}),
-					...(fetchVariable && {
+					...(input.fetchVariable && {
 						Variables: job.variables,
 					}),
 				})),
@@ -171,130 +112,57 @@ export const activateJobsCommand = defineCommand(
 /**
  * Complete job
  */
-export const completeJobCommand = defineCommand(
-	"complete",
-	"job",
-	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const body: Record<string, unknown> = {};
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			variables = parseVariablesFlag({ raw: flags.variables });
-			body.variables = variables;
-		}
-
-		const dr = ctx.dryRun({
-			command: "complete job",
-			method: "POST",
-			endpoint: `/jobs/${key}/completion`,
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.completeJob({
-			jobKey: key,
-			...(variables !== undefined && { variables }),
-		});
-		return { kind: "success", message: `Job ${key} completed` };
-	},
-);
+export const completeJobCommand = defineServiceCommand("complete", "job", {
+	toInput: (flags, args) => ({
+		jobKey: args.key,
+		variables: flags.variables
+			? parseVariablesFlag({ raw: flags.variables })
+			: undefined,
+	}),
+	dryRun: { command: "complete job", request: completeJobRequest },
+	service: completeJob,
+	render: ({ jobKey }) => ({
+		kind: "success",
+		message: `Job ${jobKey} completed`,
+	}),
+});
 
 /**
  * Fail job
  */
-export const failJobCommand = defineCommand(
-	"fail",
-	"job",
-	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-		const retries = flags.retries ? parseInt(flags.retries, 10) : 0;
-		const errorMessage = flags.errorMessage || "Job failed via c8ctl";
-
-		if (Number.isNaN(retries) || retries < 0) {
-			throw new Error("--retries must be a non-negative integer");
-		}
-
-		const dr = ctx.dryRun({
-			command: "fail job",
-			method: "POST",
-			endpoint: `/jobs/${key}/failure`,
-			profile,
-			body: { retries, errorMessage },
-		});
-		if (dr) return dr;
-
-		await client.failJob({
-			jobKey: key,
-			retries,
-			errorMessage,
-		});
-		return { kind: "success", message: `Job ${key} failed` };
-	},
-);
+export const failJobCommand = defineServiceCommand("fail", "job", {
+	toInput: (flags, args) => ({
+		jobKey: args.key,
+		retries: intFlag(flags.retries),
+		errorMessage: flags.errorMessage,
+	}),
+	dryRun: { command: "fail job", request: failJobRequest },
+	service: failJob,
+	render: ({ jobKey }) => ({
+		kind: "success",
+		message: `Job ${jobKey} failed`,
+	}),
+});
 
 /**
  * Update job
  */
-export const updateJobCommand = defineCommand(
-	"update",
-	"job",
-	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
-		const key = args.key;
-
-		const retries =
-			flags.retries !== undefined ? parseInt(flags.retries, 10) : undefined;
-		const timeout =
-			flags.timeout !== undefined ? parseInt(flags.timeout, 10) : undefined;
-		const operationReference =
+export const updateJobCommand = defineServiceCommand("update", "job", {
+	toInput: (flags, args) => ({
+		jobKey: args.key,
+		retries:
+			flags.retries !== undefined ? parseInt(flags.retries, 10) : undefined,
+		timeout:
+			flags.timeout !== undefined ? parseInt(flags.timeout, 10) : undefined,
+		operationReference:
 			flags.operationReference !== undefined
 				? parseInt(flags.operationReference, 10)
-				: undefined;
-
-		if (retries !== undefined && (Number.isNaN(retries) || retries < 0)) {
-			throw new Error("--retries must be a non-negative integer");
-		}
-		if (timeout !== undefined && (Number.isNaN(timeout) || timeout < 1)) {
-			throw new Error("--timeout must be a positive integer (milliseconds)");
-		}
-		if (retries === undefined && timeout === undefined) {
-			throw new Error(
-				"At least one of --retries or --timeout must be provided",
-			);
-		}
-		if (
-			operationReference !== undefined &&
-			(Number.isNaN(operationReference) || operationReference < 0)
-		) {
-			throw new Error("--operationReference must be a non-negative integer");
-		}
-
-		const changeset: { retries?: number; timeout?: number } = {};
-		if (retries !== undefined) changeset.retries = retries;
-		if (timeout !== undefined) changeset.timeout = timeout;
-
-		const body: Record<string, unknown> = { changeset };
-		if (operationReference !== undefined)
-			body.operationReference = operationReference;
-
-		const dr = ctx.dryRun({
-			command: "update job",
-			method: "PATCH",
-			endpoint: `/jobs/${key}`,
-			profile,
-			body,
-		});
-		if (dr) return dr;
-
-		await client.updateJob({
-			jobKey: key,
-			changeset,
-			...(operationReference !== undefined && { operationReference }),
-		});
-		return { kind: "success", message: `Job ${key} updated` };
-	},
-);
+				: undefined,
+	}),
+	dryRun: { command: "update job", request: updateJobRequest },
+	service: updateJob,
+	render: ({ jobKey }) => ({
+		kind: "success",
+		message: `Job ${jobKey} updated`,
+	}),
+});

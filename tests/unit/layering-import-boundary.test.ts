@@ -9,15 +9,21 @@
  *
  *   composition root (src/*.ts)  →  commands  →  framework  →  core
  *                                       ↘──────────↓──────────↗
- *                                              utils (leaf)
+ *                                   services  →  utils (leaf)
  *
  * Concretely, a file in each layer may only import (runtime or
  * type-only) from the layers below it:
  *
  *   - core/      → core only
  *   - utils/     → core, utils            (leaf: never framework/commands)
- *   - framework/ → core, utils, framework (never commands)
- *   - commands/  → core, utils, framework, commands
+ *   - services/ → core, utils, services (the embedding contract: never
+ *                                          framework/commands, so hosts other
+ *                                          than the CLI can import it)
+ *   - framework/ → core, utils, services, framework (never commands)
+ *   - internal/  → core, utils, services (the `@camunda8/cli/internal`
+ *                                          entry for hosts; nothing in
+ *                                          src/ imports it)
+ *   - commands/  → core, utils, services, framework, commands
  *   - src/*.ts   → anything               (composition root: index.ts,
  *                                          command-dispatch.ts — an explicit
  *                                          allow-list, never a subdirectory)
@@ -38,7 +44,7 @@
  * Module encapsulation (issue #424)
  * ---------------------------------
  *
- * The barreled layers (`core`, `utils`, `framework`) each expose a single
+ * The barreled layers (`core`, `utils`, `services`, `framework`) each expose a single
  * public entry point, `<layer>/index.ts`. Two further rules keep that
  * encapsulation honest:
  *
@@ -84,17 +90,40 @@ const ROOT_FILES: ReadonlySet<string> = new Set([
 	"command-dispatch.ts",
 ]);
 
-type Layer = "core" | "utils" | "framework" | "commands" | "root";
+type Layer =
+	| "core"
+	| "utils"
+	| "services"
+	| "internal"
+	| "framework"
+	| "commands"
+	| "root";
 
 /** Each layer maps to the set of layers it is allowed to import from. */
 const ALLOWED: Record<Layer, ReadonlySet<Layer>> = {
 	core: new Set<Layer>(["core"]),
 	utils: new Set<Layer>(["core", "utils"]),
-	framework: new Set<Layer>(["core", "utils", "framework"]),
-	commands: new Set<Layer>(["core", "utils", "framework", "commands"]),
+	services: new Set<Layer>(["core", "utils", "services"]),
+	// The host entry: re-exports, never imported from inside src/.
+	internal: new Set<Layer>(["core", "utils", "services", "internal"]),
+	framework: new Set<Layer>(["core", "utils", "services", "framework"]),
+	commands: new Set<Layer>([
+		"core",
+		"utils",
+		"services",
+		"framework",
+		"commands",
+	]),
 	// The composition root (index.ts, command-dispatch.ts) wires every
 	// layer together and is intentionally unconstrained.
-	root: new Set<Layer>(["core", "utils", "framework", "commands", "root"]),
+	root: new Set<Layer>([
+		"core",
+		"utils",
+		"services",
+		"framework",
+		"commands",
+		"root",
+	]),
 };
 
 /**
@@ -114,6 +143,8 @@ function layerOf(absPath: string): Layer | "unknown" {
 	const segment = rel.slice(0, rel.indexOf("/"));
 	if (segment === "core") return "core";
 	if (segment === "utils") return "utils";
+	if (segment === "services") return "services";
+	if (segment === "internal") return "internal";
 	if (segment === "framework") return "framework";
 	if (segment === "commands") return "commands";
 	return "unknown";
@@ -152,6 +183,7 @@ function toRelative(absPath: string): string {
 const BARRELED_LAYERS: ReadonlySet<string> = new Set<string>([
 	"core",
 	"utils",
+	"services",
 	"framework",
 ]);
 

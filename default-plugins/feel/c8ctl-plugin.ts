@@ -14,6 +14,7 @@ import {
 	type EvaluationResult,
 	evaluate as feelinEvaluate,
 } from "feelin";
+import { isC8ctlError } from "../../src/core/c8ctl-error.ts";
 import type { Logger } from "../../src/core/logger.ts";
 import type {} from "../../src/core/runtime.ts";
 import type {
@@ -21,6 +22,11 @@ import type {
 	PluginCtx,
 	PluginMetadata,
 } from "../../src/framework/plugins/plugin-loader.ts";
+import {
+	evaluateExpression,
+	evaluateExpressionRequest,
+	normalizeExpression,
+} from "../../src/services/expressions.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -177,11 +183,6 @@ function parseArgs(args: string[]): ParsedArgs {
  * the user omits it. Whitespace before `=` would still be treated as a
  * static, so we trim first.
  */
-function normalizeExpression(expression: string): string {
-	const trimmed = expression.trimStart();
-	return trimmed.startsWith("=") ? trimmed : `= ${trimmed}`;
-}
-
 function parseVarsJson(
 	vars: string | undefined,
 ): Record<string, unknown> | undefined {
@@ -443,18 +444,18 @@ async function evaluateCluster({
 	}
 
 	try {
-		const response = await client.evaluateExpression({
-			expression: normalizeExpression(expression),
-			...(variables !== undefined ? { variables } : {}),
-			...(tenantId ? { tenantId } : {}),
-		});
-		return {
+		return await evaluateExpression({
+			target: { client },
+			tenantId,
 			expression,
-			result: response.result ?? null,
-			warnings: response.warnings.map((w) => ({ message: w.message })),
-		};
+			variables,
+		});
 	} catch (error) {
-		const classified = classifyClusterError(error);
+		// The cluster's answer (status, title, detail) is the error's problem;
+		// without one, the cluster was not reached.
+		const classified = classifyClusterError(
+			isC8ctlError(error) ? (error.problem ?? {}) : error,
+		);
 		const lines = [classified.title];
 		if (classified.hint) lines.push(`  Hint: ${classified.hint}`);
 		const wrapped = new Error(lines.join("\n"));
@@ -598,11 +599,10 @@ async function evaluateSubcommand(
 	if (c8ctl.dryRun) {
 		const normalizedExpression = normalizeExpression(expression);
 		if (parsed.engine === "cluster") {
-			const payload = {
-				expression: normalizedExpression,
-				...(variables !== undefined ? { variables } : {}),
-				...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}),
-			};
+			const payload = evaluateExpressionRequest(
+				{ expression, variables },
+				effectiveTenantId,
+			).body;
 			if (c8ctl.outputMode === "json") {
 				logger.json({
 					dryRun: true,

@@ -1,27 +1,23 @@
 /**
- * Form commands
+ * Form commands. `get form` looks up the form of a user task, the start
+ * form of a process definition, or tries both; each lookup is an
+ * service.
  */
 
+import type { FormResult } from "@camunda8/orchestration-cluster-api";
+import { C8ctlError, isC8ctlError } from "../core/index.ts";
 import {
-	type CamundaClient,
-	ProcessDefinitionKey,
-	UserTaskKey,
-} from "@camunda8/orchestration-cluster-api";
-import { isRecord } from "../core/index.ts";
-import {
+	type CommandContext,
 	type CommandResult,
-	type DryRunFn,
+	clusterInputOf,
 	defineCommand,
 } from "../framework/index.ts";
-
-/** Extract HTTP status code from an unknown error (SDK errors expose statusCode or status). */
-function getErrorStatus(error: unknown): number | undefined {
-	if (isRecord(error)) {
-		if (typeof error.statusCode === "number") return error.statusCode;
-		if (typeof error.status === "number") return error.status;
-	}
-	return undefined;
-}
+import {
+	getProcessDefinitionForm,
+	getProcessDefinitionFormRequest,
+	getUserTaskForm,
+	getUserTaskFormRequest,
+} from "../services/index.ts";
 
 /**
  * Get form by key, optionally scoped to user task or process definition
@@ -30,7 +26,6 @@ export const getFormCommand = defineCommand(
 	"get",
 	"form",
 	async (ctx, flags, args) => {
-		const { client, profile } = ctx;
 		const key = args.key;
 
 		const isUserTask = flags.userTask === true || flags.ut === true;
@@ -39,147 +34,122 @@ export const getFormCommand = defineCommand(
 
 		// If both flags specified, error
 		if (isUserTask && isProcessDefinition) {
-			throw new Error(
+			throw new C8ctlError(
+				"invalid-input",
 				"Cannot specify both --userTask|--ut and --processDefinition|--pd. Use one or the other, or omit both to search both types.",
+				{ field: "processDefinition" },
 			);
 		}
 
 		if (isUserTask) {
-			return handleUserTaskForm(key, profile, client, ctx.dryRun);
+			return handleUserTaskForm(key, ctx);
 		}
 		if (isProcessDefinition) {
-			return handleStartForm(key, profile, client, ctx.dryRun);
+			return handleStartForm(key, ctx);
 		}
-		return handleFormBoth(key, profile, client, ctx.dryRun);
+		return handleFormBoth(key, ctx);
 	},
 );
 
 async function handleUserTaskForm(
 	userTaskKey: string,
-	profile: string | undefined,
-	client: CamundaClient,
-	dryRun: DryRunFn,
+	ctx: CommandContext,
 ): Promise<CommandResult> {
-	const dr = dryRun({
+	const input = { userTaskKey };
+	const dr = ctx.dryRun({
 		command: "get form --userTask",
-		method: "GET",
-		endpoint: `/user-tasks/${userTaskKey}/form`,
-		profile,
+		profile: ctx.profile,
+		...getUserTaskFormRequest(input),
 	});
 	if (dr) return dr;
 
-	try {
-		const result = await client.getUserTaskForm(
-			{ userTaskKey: UserTaskKey.assumeExists(userTaskKey) },
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		if (result === null || result === undefined) {
-			return {
-				kind: "info",
-				message: "User task found but has no associated form",
-			};
-		}
-		return { kind: "get", data: result };
-	} catch (error: unknown) {
-		if (getErrorStatus(error) === 204) {
-			return {
-				kind: "info",
-				message: "User task found but has no associated form",
-			};
-		}
-		throw error;
+	const form = await getUserTaskForm({ ...input, ...clusterInputOf(ctx) }, {});
+	if (form === null) {
+		return {
+			kind: "info",
+			message: "User task found but has no associated form",
+		};
 	}
+	return { kind: "get", data: form };
 }
 
 async function handleStartForm(
 	processDefinitionKey: string,
-	profile: string | undefined,
-	client: CamundaClient,
-	dryRun: DryRunFn,
+	ctx: CommandContext,
 ): Promise<CommandResult> {
-	const dr = dryRun({
+	const input = { processDefinitionKey };
+	const dr = ctx.dryRun({
 		command: "get form --processDefinition",
-		method: "GET",
-		endpoint: `/process-definitions/${processDefinitionKey}/form`,
-		profile,
+		profile: ctx.profile,
+		...getProcessDefinitionFormRequest(input),
 	});
 	if (dr) return dr;
 
-	try {
-		const result = await client.getStartProcessForm(
-			{
-				processDefinitionKey:
-					ProcessDefinitionKey.assumeExists(processDefinitionKey),
-			},
-			{ consistency: { waitUpToMs: 0 } },
-		);
-		if (result === null || result === undefined) {
-			return {
-				kind: "info",
-				message: "Process definition found but has no associated start form",
-			};
-		}
-		return { kind: "get", data: result };
-	} catch (error: unknown) {
-		if (getErrorStatus(error) === 204) {
-			return {
-				kind: "info",
-				message: "Process definition found but has no associated start form",
-			};
-		}
-		throw error;
+	const form = await getProcessDefinitionForm(
+		{ ...input, ...clusterInputOf(ctx) },
+		{},
+	);
+	if (form === null) {
+		return {
+			kind: "info",
+			message: "Process definition found but has no associated start form",
+		};
 	}
+	return { kind: "get", data: form };
+}
+
+/** The error to report when only one of the two lookups failed. */
+function lookupError(error: unknown, type: string): unknown {
+	// A request failure keeps the SDK's error as its cause; an error that
+	// was not an `Error` (e.g. a bare problem detail) is reported by type.
+	const raw =
+		isC8ctlError(error) && error.cause !== undefined ? error.cause : error;
+	return raw instanceof Error ? error : new Error(`not found as ${type}`);
 }
 
 async function handleFormBoth(
 	key: string,
-	profile: string | undefined,
-	client: CamundaClient,
-	dryRun: DryRunFn,
+	ctx: CommandContext,
 ): Promise<CommandResult> {
-	const dr = dryRun({
+	const dr = ctx.dryRun({
 		command: "get form",
 		method: "GET",
 		endpoint: `/user-tasks/${key}/form (then /process-definitions/${key}/form)`,
-		profile,
+		profile: ctx.profile,
 	});
 	if (dr) return dr;
 
 	const results: {
 		type: string;
 		key: string;
-		form: Record<string, unknown>;
+		form: FormResult;
 	}[] = [];
 	const errors: { type: string; error: unknown }[] = [];
 
 	// Try user task form
 	try {
-		const result = await client.getUserTaskForm(
-			{ userTaskKey: UserTaskKey.assumeExists(key) },
-			{ consistency: { waitUpToMs: 0 } },
+		const form = await getUserTaskForm(
+			{ userTaskKey: key, ...clusterInputOf(ctx) },
+			{},
 		);
-		if (result !== null && result !== undefined) {
-			results.push({ type: "user task", key, form: result });
+		if (form !== null) {
+			results.push({ type: "user task", key, form });
 		}
 	} catch (error: unknown) {
-		if (getErrorStatus(error) !== 204) {
-			errors.push({ type: "user task", error });
-		}
+		errors.push({ type: "user task", error });
 	}
 
 	// Try process definition form
 	try {
-		const result = await client.getStartProcessForm(
-			{ processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
-			{ consistency: { waitUpToMs: 0 } },
+		const form = await getProcessDefinitionForm(
+			{ processDefinitionKey: key, ...clusterInputOf(ctx) },
+			{},
 		);
-		if (result !== null && result !== undefined) {
-			results.push({ type: "process definition", key, form: result });
+		if (form !== null) {
+			results.push({ type: "process definition", key, form });
 		}
 	} catch (error: unknown) {
-		if (getErrorStatus(error) !== 204) {
-			errors.push({ type: "process definition", error });
-		}
+		errors.push({ type: "process definition", error });
 	}
 
 	// Report results
@@ -191,9 +161,7 @@ async function handleFormBoth(
 			};
 		}
 		if (errors.length === 1) {
-			throw errors[0].error instanceof Error
-				? errors[0].error
-				: new Error(`not found as ${errors[0].type}`);
+			throw lookupError(errors[0].error, errors[0].type);
 		}
 		throw new Error("not found as user task or process definition");
 	}
