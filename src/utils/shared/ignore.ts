@@ -203,6 +203,7 @@ export function loadIgnoreRules(baseDir: string): Ignore {
  * Check whether a path should be ignored.
  *
  * `filePath` must be an absolute path.
+ * Directory entries must include a trailing path separator.
  * `baseDir` is the root directory the ignore rules are relative to.
  *
  * Returns `true` when the path matches an ignore rule.
@@ -212,10 +213,14 @@ export function isIgnored(
 	filePath: string,
 	baseDir: string,
 ): boolean {
+	const directoryEntry = filePath.endsWith("/") || filePath.endsWith(sep);
 	let rel = relative(baseDir, filePath);
 	// `ignore` expects forward-slash separators
 	if (sep !== "/") {
 		rel = rel.split(sep).join("/");
+	}
+	if (directoryEntry && rel !== "" && !rel.endsWith("/")) {
+		rel += "/";
 	}
 	// Paths outside baseDir can't be ignored.
 	// On Windows, when filePath is on a different drive than baseDir,

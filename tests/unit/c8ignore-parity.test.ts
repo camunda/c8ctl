@@ -405,6 +405,23 @@ describe(".c8ignore — isIgnored() functional contract for deploy/watch", () =>
 		});
 	}
 
+	test("re-included directory entries stay traversable through absolute paths", () => {
+		writeFileSync(
+			join(baseDir, ".c8ignore"),
+			"logs/*\n!logs/keep/\n",
+		);
+		const keepDir = join(baseDir, "logs", "keep");
+		mkdirSync(keepDir, { recursive: true });
+		writeFileSync(join(keepDir, "kept.bpmn"), "");
+
+		const ig = loadIgnoreRules(baseDir);
+		assert.strictEqual(isIgnored(ig, `${keepDir}/`, baseDir), false);
+		assert.strictEqual(
+			isIgnored(ig, join(keepDir, "kept.bpmn"), baseDir),
+			false,
+		);
+	});
+
 	test("paths outside the base directory are never ignored", () => {
 		const ig = loadIgnoreRules(baseDir);
 		assert.strictEqual(
