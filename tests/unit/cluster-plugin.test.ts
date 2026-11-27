@@ -3925,6 +3925,104 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	for (const failedStop of [
+		{ name: "nonzero exit", script: "#!/bin/sh\nexit 1\n" },
+		{
+			name: "spawn error",
+			script: "#!/c8ctl-test-missing-c8run-interpreter\nexit 0\n",
+		},
+	]) {
+		test(`rejects a surviving pidfile after a ${failedStop.name} and later stop success`, {
+			skip: process.platform === "win32",
+		}, async () => {
+			const survivor = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)"],
+				{ stdio: "ignore" },
+			);
+			const nextVersion = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)"],
+				{ stdio: "ignore" },
+			);
+
+			try {
+				await Promise.all(
+					[survivor, nextVersion].map(
+						(child) =>
+							new Promise<void>((resolveSpawn, rejectSpawn) => {
+								child.once("spawn", () => resolveSpawn());
+								child.once("error", rejectSpawn);
+							}),
+					),
+				);
+				assert.ok(survivor.pid, "first version process must have a PID");
+				assert.ok(nextVersion.pid, "second version process must have a PID");
+
+				const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+				const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
+				mkdirSync(firstVersionDir, { recursive: true });
+				mkdirSync(secondVersionDir, { recursive: true });
+				writeFileSync(
+					join(firstVersionDir, "camunda.process"),
+					String(survivor.pid),
+				);
+				writeFileSync(join(firstVersionDir, C8RUN_BINARY), failedStop.script, {
+					mode: 0o755,
+				});
+				writeFileSync(
+					join(secondVersionDir, "camunda.process"),
+					String(nextVersion.pid),
+				);
+				writeFileSync(
+					join(secondVersionDir, C8RUN_BINARY),
+					`#!/bin/sh\nkill -TERM ${nextVersion.pid}\nwhile kill -0 ${nextVersion.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
+					{ mode: 0o755 },
+				);
+				writeFileSync(join(tempDir, "cluster.active"), "running");
+				writeFileSync(join(tempDir, "cluster.version"), "8.10.1");
+
+				await assert.rejects(
+					() => plugin.stopC8Run({ cacheDir: tempDir, version: "8.10.1" }),
+					(error: unknown) => {
+						assert.ok(error instanceof Error);
+						assert.match(
+							error.message,
+							/Stop incomplete: .*pidfile.*process.*still running/,
+						);
+						if (failedStop.name === "spawn error") {
+							assert.match(error.message, /ENOENT/);
+						}
+						return true;
+					},
+				);
+				assert.ok(
+					await pollUntil(
+						async () => !plugin.isPidAlive(nextVersion.pid),
+						5000,
+						50,
+					),
+					"the later version stop should terminate its process",
+				);
+				assert.strictEqual(
+					plugin.isPidAlive(survivor.pid),
+					true,
+					"the first version's pidfile-only process must remain alive",
+				);
+			} finally {
+				for (const child of [survivor, nextVersion]) {
+					if (child.pid && plugin.isPidAlive(child.pid)) {
+						try {
+							process.kill(child.pid, "SIGKILL");
+						} catch {
+							// already gone
+						}
+					}
+				}
+			}
+		});
+	}
+
 	test("continues after a reused PID makes c8run stop a no-op", {
 		skip: process.platform === "win32",
 	}, async () => {
