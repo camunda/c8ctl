@@ -19,7 +19,7 @@ When a new SDK limitation is discovered during development, add it here followin
   - **Behavior:** `typed-env/package.json` declares `"sideEffects": "false"` as a string. esbuild requires a boolean or array and emits a warning during plugin bundling.
   - **Affected:** `npm run build` and the distribution build performed by `npm test`.
   - **Impact:** Commands exit successfully, but the warnings-fatal release gate remains blocked. The complete Node 22 migration verification recorded this warning twice.
-  - **Remediation:** Correct the upstream package metadata and consume a corrected dependency release. Do not suppress the warning or patch the dependency locally. Tracked in the [SDK package metadata issue](https://github.com/camunda/orchestration-cluster-api-js/issues/665). Neither package has a newer published release that resolves this warning.
+  - **Remediation:** Correct the upstream package metadata and consume a corrected dependency release. Do not suppress the warning or patch the dependency locally. Reported upstream in the [typed-env metadata issue](https://github.com/itslukej/typed-env/issues/2) and tracked downstream in the [orchestration-cluster-api-js issue](https://github.com/camunda/orchestration-cluster-api-js/issues/665). Neither package has a newer published release that resolves this warning.
 
 - [ ] **Process instance suspend/resume endpoints not available before Camunda 8.10**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0-alpha.43**

@@ -1901,6 +1901,7 @@ export function sweepStaleInstallDirs(cacheDir) {
 // ---------------------------------------------------------------------------
 
 const STARTUP_SUMMARY_MARKER = '- Operate:';
+const ANSI_SGR = /\u001b\[[0-9;]*m/g;
 
 /**
  * c8run's zerolog console lines (`9:57AM INF …`). The summary is printed
@@ -1912,11 +1913,12 @@ const C8RUN_LOG_LINE =
   /^\d{1,2}:\d{2}(?::\d{2})?(?:AM|PM)?\s+(?:DBG|INF|WRN|ERR|FTL|PNC|TRC)\s/;
 
 export function extractStartupSummary(rawOutput) {
-  const startIndex = rawOutput.indexOf(STARTUP_SUMMARY_MARKER);
+  const output = rawOutput.replace(ANSI_SGR, '');
+  const startIndex = output.indexOf(STARTUP_SUMMARY_MARKER);
   if (startIndex === -1) {
     return null;
   }
-  const lines = rawOutput.slice(startIndex).split('\n');
+  const lines = output.slice(startIndex).split('\n');
   const summaryLines = [];
   for (const line of lines) {
     if (C8RUN_LOG_LINE.test(line.trimStart())) break;
