@@ -33,6 +33,7 @@ import {
 	parseCamundaJson,
 	parseDeployResources,
 } from "../../src/utils/index.ts";
+import { c8WithEnv } from "../utils/cli.ts";
 import {
 	CLI_ERROR_SIGNATURE,
 	createProject,
@@ -1036,8 +1037,8 @@ describe('"no surprise": a path that a deployResources pattern can select but th
 				const root = project(
 					{ deployResources: [pattern, "!**/skip.bpmn"] },
 					{
-						"a/x/main.bpmn": BPMN("main"),
-						"a/main.bpmn": BPMN("main-a"),
+						"a/x/child.bpmn": BPMN("child"),
+						"a/root.bpmn": BPMN("root"),
 						"c/locked/z.bpmn": BPMN("z"),
 					},
 				);
@@ -1298,5 +1299,183 @@ describe("Spec: Camunda 8 version compatibility", () => {
 		assert.strictEqual(legacy.status, 0, legacy.stderr);
 
 		assert.deepStrictEqual(mock.deployments, [["main.bpmn"], ["legacy.bpmn"]]);
+	});
+});
+
+describe("deployment safety checks", () => {
+	test("rejects duplicate multipart filenames before submitting a deployResources selection", async () => {
+		mock = await startMockCluster();
+		const root = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{
+				"folder-a/main.bpmn": BPMN("first-process"),
+				"folder-b/main.bpmn": BPMN("second-process"),
+			},
+		);
+
+		const result = await deployTo(mock.baseUrl, [root]);
+
+		assert.strictEqual(result.status, 1, result.stderr);
+		assert.match(result.stderr, /same multipart filename/i);
+		assert.ok(
+			result.stderr.includes("folder-a") && result.stderr.includes("folder-b"),
+			`stderr should name both clashing files: ${result.stderr}`,
+		);
+		assert.deepStrictEqual(mock.deployments, []);
+	});
+
+	test("fails when the cluster reports fewer deployed resources than submitted files", async () => {
+		mock = await startMockCluster({ reportedDeploymentCount: 1 });
+		const root = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{
+				"folder-a/process-a.bpmn": BPMN("process-a"),
+				"folder-b/process-b.bpmn": BPMN("process-b"),
+			},
+		);
+
+		const result = await deployTo(mock.baseUrl, [root]);
+
+		assert.strictEqual(result.status, 1, result.stderr);
+		assert.match(
+			result.stderr,
+			/reported 1 deployed resource\(s\) for 2 submitted file\(s\)/,
+		);
+		assert.doesNotMatch(
+			`${result.stdout}\n${result.stderr}`,
+			/Deployment successful/,
+		);
+		assert.deepStrictEqual(mock.deployments, [
+			["process-a.bpmn", "process-b.bpmn"],
+		]);
+	});
+
+	test("fails when metadata omits a submitted file despite a matching response count", async () => {
+		mock = await startMockCluster({
+			reportedResourceNames: ["model.dmn", "model.dmn"],
+		});
+		const root = project(
+			{ deployResources: ["**/*.bpmn", "**/*.dmn"] },
+			{
+				"model.dmn": "<definitions/>",
+				"process.bpmn": BPMN("process"),
+			},
+		);
+
+		const result = await c8WithEnv(
+			{ CAMUNDA_BASE_URL: mock.baseUrl },
+			"deploy",
+			root,
+			"--yes",
+		);
+
+		assert.strictEqual(result.status, 1, result.stderr);
+		assert.match(result.stderr, /missing metadata.*process\.bpmn/i);
+		assert.doesNotMatch(
+			`${result.stdout}\n${result.stderr}`,
+			/Deployment successful/,
+		);
+		assert.deepStrictEqual(mock.deployments, [["model.dmn", "process.bpmn"]]);
+	});
+
+	test("accepts multiple deployment metadata items for one submitted file", async () => {
+		mock = await startMockCluster({ reportedDeploymentCount: 2 });
+		const root = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{ "main.bpmn": BPMN("first-process") },
+		);
+
+		const result = await deployTo(mock.baseUrl, [root]);
+
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(mock.deployments, [["main.bpmn"]]);
+	});
+
+	test("decodes quoted-pair escapes in the mock's default response names", {
+		skip:
+			process.platform === "win32"
+				? "Windows does not permit backslashes in file names"
+				: false,
+	}, async () => {
+		mock = await startMockCluster();
+		const root = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{ "folder/a\\\\\\\\b.bpmn": BPMN("process") },
+		);
+
+		const result = await c8WithEnv(
+			{ CAMUNDA_BASE_URL: mock.baseUrl },
+			"deploy",
+			root,
+			"--yes",
+		);
+
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(mock.deployments, [["a\\\\\\\\b.bpmn"]]);
+	});
+
+	test("preserves UTF-8 filenames in mock deployment responses", async () => {
+		mock = await startMockCluster();
+		const root = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{ "folder/café.bpmn": BPMN("process") },
+		);
+
+		const result = await c8WithEnv(
+			{ CAMUNDA_BASE_URL: mock.baseUrl },
+			"deploy",
+			root,
+			"--yes",
+		);
+
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(mock.deployments, [["café.bpmn"]]);
+	});
+
+	test("accepts cluster-decoded metadata names with four consecutive backslashes", {
+		skip:
+			process.platform === "win32"
+				? "Windows does not permit backslashes in file names"
+				: false,
+	}, async () => {
+		mock = await startMockCluster({ reportedResourceNames: ["a\\\\b.bpmn"] });
+		const root = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{ "folder/a\\\\\\\\b.bpmn": BPMN("process") },
+		);
+
+		const result = await c8WithEnv(
+			{ CAMUNDA_BASE_URL: mock.baseUrl },
+			"deploy",
+			root,
+			"--yes",
+		);
+
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(mock.deployments, [["a\\\\\\\\b.bpmn"]]);
+	});
+
+	test("maps cluster-decoded metadata names with four consecutive backslashes to local resources", {
+		skip:
+			process.platform === "win32"
+				? "Windows does not permit backslashes in file names"
+				: false,
+	}, async () => {
+		mock = await startMockCluster({ reportedResourceNames: ["a\\\\b.dmn"] });
+		const root = project(
+			{ deployResources: ["**/*.dmn"] },
+			{ "folder/a\\\\\\\\b.dmn": "<definitions/>" },
+		);
+
+		const result = await deployTo(mock.baseUrl, [root]);
+
+		assert.strictEqual(result.status, 0, result.stderr);
+		const decisionRequirementsRow = result.stdout
+			.split("\n")
+			.find((line) => line.includes("Decision Requirements"));
+		assert.ok(
+			decisionRequirementsRow?.includes("folder/a\\\\\\\\b.dmn"),
+			`decoded metadata should map to the submitted file path: ${result.stdout}`,
+		);
 	});
 });

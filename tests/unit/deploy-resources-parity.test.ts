@@ -11,8 +11,9 @@
  *   1. Resolver level — exact project-relative paths (the contract other
  *      tools must match).
  *   2. CLI level — `c8 deploy <project> --dry-run` submits the same set
- *      (by resource name) or fails with the same error class and deploys
- *      nothing. Cases without `deployResources` pin the default scan.
+ *      (by resource name) when filenames are unique, or rejects filename
+ *      collisions before emitting a preview. Cases without `deployResources`
+ *      pin the default scan.
  */
 
 import assert from "node:assert";
@@ -107,8 +108,19 @@ describe("deployResources parity fixtures: c8 deploy --dry-run submits the expec
 				assert.doesNotMatch(result.stdout, /"dryRun"/);
 				return;
 			}
+			const expectedNames = basenames(c.expected.selected);
+			if (new Set(expectedNames).size !== expectedNames.length) {
+				assert.notStrictEqual(
+					result.status,
+					0,
+					"duplicate multipart filenames must fail without a preview",
+				);
+				assert.match(result.stderr, /same multipart filename/i);
+				assert.doesNotMatch(result.stdout, /"dryRun"/);
+				return;
+			}
 			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-			assert.deepStrictEqual(result.names, basenames(c.expected.selected));
+			assert.deepStrictEqual(result.names, expectedNames);
 		});
 	}
 });

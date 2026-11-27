@@ -264,18 +264,26 @@ export interface MockCluster {
 	close: () => Promise<void>;
 }
 
+function decodeMultipartQuotedPairs(value: string): string {
+	return value.replace(/\\(["\\])/g, "$1");
+}
+
 /**
  * Start a mock cluster on an ephemeral loopback port. `/topology` reports
  * `gatewayVersion`; `/deployments` records the multipart file names and
- * answers with an empty successful deployment, or with an RFC 9457
+ * answers with one result per part by default, or with an RFC 9457
  * INVALID_ARGUMENT problem when `rejectDeployments` is set.
  */
 export async function startMockCluster({
 	gatewayVersion = "8.10.0",
 	rejectDeployments = false,
+	reportedDeploymentCount,
+	reportedResourceNames,
 }: {
 	gatewayVersion?: string;
 	rejectDeployments?: boolean;
+	reportedDeploymentCount?: number;
+	reportedResourceNames?: string[];
 } = {}): Promise<MockCluster> {
 	const deployments: string[][] = [];
 	const deploymentBodies: string[] = [];
@@ -311,9 +319,10 @@ export async function startMockCluster({
 			if (req.method === "POST" && url.endsWith("/deployments")) {
 				const body = Buffer.concat(chunks).toString("latin1");
 				deploymentBodies.push(body);
-				deployments.push(
-					[...body.matchAll(/filename="([^"]+)"/g)].map((m) => m[1]).sort(),
-				);
+				const fileNames = [...body.matchAll(/filename="([^"]+)"/g)]
+					.map((m) => Buffer.from(m[1], "latin1").toString("utf8"))
+					.sort();
+				deployments.push(fileNames);
 				if (rejectDeployments) {
 					send(400, {
 						type: "about:blank",
@@ -324,11 +333,80 @@ export async function startMockCluster({
 					});
 					return;
 				}
+				const responseNames =
+					reportedResourceNames ??
+					Array.from(
+						{ length: reportedDeploymentCount ?? fileNames.length },
+						(_, index) =>
+							decodeMultipartQuotedPairs(
+								fileNames[Math.min(index, fileNames.length - 1)] ?? "",
+							),
+					);
+				const responseDeployments = responseNames.map((resourceName) => {
+					const metadata = {
+						processDefinition: null,
+						decisionDefinition: null,
+						decisionRequirements: null,
+						form: null,
+						resource: null,
+					};
+					const extension = resourceName
+						.slice(resourceName.lastIndexOf("."))
+						.toLowerCase();
+					const key = "2251799813685249";
+					switch (extension) {
+						case ".bpmn":
+							return {
+								...metadata,
+								processDefinition: {
+									processDefinitionId: resourceName,
+									processDefinitionVersion: 1,
+									resourceName,
+									tenantId: "<default>",
+									processDefinitionKey: key,
+								},
+							};
+						case ".dmn":
+							return {
+								...metadata,
+								decisionRequirements: {
+									decisionRequirementsId: resourceName,
+									decisionRequirementsName: resourceName,
+									version: 1,
+									resourceName,
+									tenantId: "<default>",
+									decisionRequirementsKey: key,
+								},
+							};
+						case ".form":
+							return {
+								...metadata,
+								form: {
+									formId: resourceName,
+									version: 1,
+									resourceName,
+									tenantId: "<default>",
+									formKey: key,
+								},
+							};
+						default:
+							return {
+								...metadata,
+								resource: {
+									resourceId: resourceName,
+									resourceName,
+									version: 1,
+									tenantId: "<default>",
+									resourceKey: key,
+								},
+							};
+					}
+				});
 				const succeed = () =>
 					send(200, {
 						deploymentKey: "2251799813685249",
 						tenantId: "<default>",
-						deployments: [],
+						deployments: responseDeployments,
 					});
 				if (holdArmed) {
 					holdArmed = false;

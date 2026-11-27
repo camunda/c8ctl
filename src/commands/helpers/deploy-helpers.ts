@@ -504,6 +504,39 @@ function findDuplicateDefinitionIds(
 	return new Map([...idMap].filter(([, paths]) => paths.length > 1));
 }
 
+/** Match filename escaping used in Content-Disposition parameters by Node's FormData. */
+function escapeMultipartFilename(name: string): string {
+	return name.replace(/[\n\r"]/g, (character) => encodeURIComponent(character));
+}
+
+/** Decode quoted pairs the cluster's Content-Disposition parser removes. */
+function decodeContentDispositionQuotedPairs(name: string): string {
+	return name.replace(/\\(["\\])/g, "$1");
+}
+
+/** Normalize a local filename to the identity used by the cluster. */
+function getMultipartFilenameKey(name: string): string {
+	return decodeContentDispositionQuotedPairs(escapeMultipartFilename(name));
+}
+
+/**
+ * Find multipart filenames that would identify more than one local resource.
+ */
+function findDuplicateResourceNames(
+	resources: ResourceFile[],
+): Map<string, string[]> {
+	const pathsByName = resources.reduce((map, resource) => {
+		const multipartFilename = getMultipartFilenameKey(resource.name);
+		map.set(multipartFilename, [
+			...(map.get(multipartFilename) ?? []),
+			resource.path,
+		]);
+		return map;
+	}, new Map<string, string[]>());
+
+	return new Map([...pathsByName].filter(([, paths]) => paths.length > 1));
+}
+
 /**
  * How one deploy/watch input path is collected.
  *
@@ -707,7 +740,7 @@ interface CollectResult {
 
 /**
  * Collect deployable resources from the given paths, applying `.c8ignore`
- * rules. Throws on the two pre-API guard failures so callers (deploy
+ * rules. Throws on pre-API validation failures so callers (deploy
  * handler, watch, dry-run preview) all surface the same errors with the
  * same wording.
  *
@@ -843,6 +876,25 @@ export function collectResourcesForPaths(
 				? `No files with allowed extensions found. ${skippedFiles.length} file(s) were skipped (${[...skippedExtensions].sort().join(", ")}). Use --force to include all files, or --extensions to expand the allow-list.`
 				: "No deployable files found in the specified paths",
 		);
+	}
+
+	const duplicateNames = findDuplicateResourceNames(deduped);
+	if (duplicateNames.size > 0) {
+		const duplicateNamesMessage =
+			"Cannot deploy: Multiple files with the same multipart filename in one deployment";
+		getLogger().error(duplicateNamesMessage);
+		duplicateNames.forEach((duplicatePaths, name) => {
+			logMessage(
+				`  Multipart filename "${name}" used by: ${duplicatePaths.join(", ")}`,
+			);
+		});
+		logMessage(
+			"\nThe Orchestration Cluster API identifies multipart parts by filename.",
+		);
+		logMessage(
+			"Please deploy the clashing files separately or rename them so every filename is unique.",
+		);
+		throw new SilentError(duplicateNamesMessage);
 	}
 
 	return {
@@ -1014,18 +1066,17 @@ export async function deployResources(
 	// Create a mapping from definition ID to resource file for later reference
 	const definitionIdToResource = new Map<string, ResourceFile>();
 	const formNameToResource = new Map<string, ResourceFile>();
-	// Map basename → ResourceFile[]: multiple files can share a basename
-	// across directories (e.g. sub-a/model.dmn, sub-b/model.dmn). When
-	// the API returns a resourceName, we pop the first matching entry so
-	// each response record resolves to a distinct local file.
+	// Map multipart filename to the local resource bucket used for result
+	// lookup. Duplicate filenames are rejected during collection.
 	const resourcesByName = new Map<string, ResourceFile[]>();
 
 	resources.forEach((r) => {
-		const existing = resourcesByName.get(r.name);
+		const multipartFilename = getMultipartFilenameKey(r.name);
+		const existing = resourcesByName.get(multipartFilename);
 		if (existing) {
 			existing.push(r);
 		} else {
-			resourcesByName.set(r.name, [r]);
+			resourcesByName.set(multipartFilename, [r]);
 		}
 
 		const ext = extname(r.path);
@@ -1050,7 +1101,7 @@ export async function deployResources(
 		}
 	});
 
-	/** Pop the first resource with a matching basename, or return undefined. */
+	/** Pop the first resource with a matching cluster-visible name, or return undefined. */
 	function popResourceByName(name: string): ResourceFile | undefined {
 		const bucket = resourcesByName.get(name);
 		if (!bucket || bucket.length === 0) return undefined;
@@ -1126,6 +1177,32 @@ export async function deployResources(
 		return;
 	}
 	options.signal?.removeEventListener("abort", onAbort);
+
+	if (result.deployments.length < resources.length) {
+		throw new Error(
+			`Deployment response count mismatch: the cluster reported ${result.deployments.length} deployed resource(s) for ${resources.length} submitted file(s). Verify the cluster state before retrying.`,
+		);
+	}
+
+	const responseResourceNames = [
+		...result.processes.map((process) => process.resourceName),
+		...result.decisionRequirements.map(
+			(decisionRequirements) => decisionRequirements.resourceName,
+		),
+		...result.forms.map((form) => form.resourceName),
+		...result.resources.map((resource) => resource.resourceName),
+	].filter(
+		(name): name is string => typeof name === "string" && name.length > 0,
+	);
+	const deployedFilenames = new Set(responseResourceNames);
+	const missingResources = resources.filter((resource) => {
+		return !deployedFilenames.has(getMultipartFilenameKey(resource.name));
+	});
+	if (missingResources.length > 0) {
+		throw new Error(
+			`Deployment response is missing metadata for submitted file(s): ${missingResources.map((resource) => resource.path).join(", ")}. Verify the cluster state before retrying.`,
+		);
+	}
 
 	if (!options.quiet) {
 		logger.success("Deployment successful", result.deploymentKey.toString());

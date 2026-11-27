@@ -179,6 +179,20 @@ const DEPLOYMENT_RESULT = {
 			form: null,
 			resource: null,
 		},
+		{
+			processDefinition: null,
+			decisionDefinition: null,
+			decisionRequirements: {
+				decisionRequirementsId: "plot-destination",
+				decisionRequirementsName: "Plot destination",
+				version: 1,
+				resourceName: "plot-destination.dmn",
+				tenantId: "<default>",
+				decisionRequirementsKey: "2251799813686752",
+			},
+			form: null,
+			resource: null,
+		},
 	],
 };
 
@@ -810,12 +824,14 @@ globalThis.fetch = async (
 		// Capture the deployment request so tests can assert which profile
 		// credentials and tenant the deploy child used.
 		const deployCapture = process.env.C8CTL_SETUP_STUB_DEPLOY_CAPTURE;
-		if (deployCapture && input instanceof Request) {
+		const request = input instanceof Request ? input : undefined;
+		const body = request ? await request.clone().text() : "";
+		if (deployCapture && request) {
 			fs.writeFileSync(
 				deployCapture,
 				JSON.stringify({
-					authorization: input.headers.get("authorization"),
-					body: await input.text(),
+					authorization: request.headers.get("authorization"),
+					body,
 				}),
 			);
 		}
@@ -829,7 +845,24 @@ globalThis.fetch = async (
 				400,
 			);
 		}
-		return json(DEPLOYMENT_RESULT);
+		const resourceNames = [...body.matchAll(/filename="([^"]+)"/g)].map(
+			(match) => match[1],
+		);
+		const deployments = resourceNames.map(
+			(resourceName) =>
+				DEPLOYMENT_RESULT.deployments.find(
+					(deployment) =>
+						deployment.processDefinition?.resourceName === resourceName ||
+						deployment.decisionRequirements?.resourceName === resourceName,
+				) ?? {
+					processDefinition: null,
+					decisionDefinition: null,
+					decisionRequirements: null,
+					form: null,
+					resource: null,
+				},
+		);
+		return json({ ...DEPLOYMENT_RESULT, deployments });
 	}
 	if (url === "http://localhost:8080/v2/process-instances") {
 		// Capture the request body so tests can assert the start variables.
