@@ -431,7 +431,7 @@ describe("suspend/resume process-definition", () => {
 		);
 		assert.strictEqual(all.length, 2);
 		const byVersion = new Map(all.map((row) => [row.version, row.outcome]));
-		assert.strictEqual(byVersion.get(1), "ALREADY_ACTIVE");
+		assert.strictEqual(byVersion.get(1), "ALREADY_RESUMED");
 		assert.strictEqual(byVersion.get(2), "RESUMED");
 	});
 });
