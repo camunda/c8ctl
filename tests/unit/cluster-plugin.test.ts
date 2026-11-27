@@ -3795,10 +3795,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				`#!/bin/sh\nkill -TERM ${stoppedChild.pid}\nwhile kill -0 ${stoppedChild.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
 				{ mode: 0o755 },
 			);
-			writeFileSync(
-				join(survivorDir, "camunda.process"),
-				String(survivor.pid),
-			);
+			writeFileSync(join(survivorDir, "camunda.process"), String(survivor.pid));
 			writeFileSync(
 				join(survivorDir, C8RUN_BINARY),
 				`#!/bin/sh\ntouch "${secondStopMarker}"\nexit 0\n`,
@@ -3810,11 +3807,9 @@ describe("Cluster Plugin – stopC8Run", () => {
 
 			await assert.rejects(
 				() =>
-					plugin.stopC8Run(
-						{ cacheDir: tempDir, version: "8.10.1" },
-						false,
-						{ timeoutMs: 1000 },
-					),
+					plugin.stopC8Run({ cacheDir: tempDir, version: "8.10.1" }, false, {
+						timeoutMs: 1000,
+					}),
 				(error: unknown) => {
 					assert.ok(error instanceof Error);
 					assert.match(error.message, new RegExp(String(survivor.pid)));
@@ -3874,11 +3869,9 @@ describe("Cluster Plugin – stopC8Run", () => {
 
 			await assert.rejects(
 				() =>
-					plugin.stopC8Run(
-						{ cacheDir: tempDir, version },
-						false,
-						{ timeoutMs: 100 },
-					),
+					plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+						timeoutMs: 100,
+					}),
 				/Stop incomplete/,
 			);
 
@@ -3889,18 +3882,17 @@ describe("Cluster Plugin – stopC8Run", () => {
 				[{ version, pid: survivor.pid, signature: signature ?? null }],
 			);
 			assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
-			assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, version), true);
+			assert.strictEqual(
+				plugin.isVersionInstanceRunning(tempDir, version),
+				true,
+			);
 
 			assert.strictEqual(
 				await plugin.stopC8Run({ cacheDir: tempDir, version }),
 				version,
 			);
 			assert.ok(
-				await pollUntil(
-					async () => !plugin.isPidAlive(survivor.pid),
-					5000,
-					50,
-				),
+				await pollUntil(async () => !plugin.isPidAlive(survivor.pid), 5000, 50),
 				"the durable recovery record must let a later stop reap the survivor",
 			);
 			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
@@ -3951,11 +3943,9 @@ describe("Cluster Plugin – stopC8Run", () => {
 
 			await assert.rejects(
 				() =>
-					plugin.stopC8Run(
-						{ cacheDir: tempDir, version },
-						false,
-						{ timeoutMs: 100 },
-					),
+					plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+						timeoutMs: 100,
+					}),
 				/Stop incomplete/,
 			);
 
@@ -4097,9 +4087,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				plugin.writeRunningClusterRecord(tempDir, {
 					version,
 					pids: [],
-					pidfileSurvivors: [
-						{ version, pid: survivor.pid, signature: null },
-					],
+					pidfileSurvivors: [{ version, pid: survivor.pid, signature: null }],
 				});
 				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
 				assert.strictEqual(
@@ -4124,7 +4112,9 @@ describe("Cluster Plugin – stopC8Run", () => {
 					false,
 					"supported platforms must capture the survivor signature",
 				);
-				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), [survivor.pid]);
+				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), [
+					survivor.pid,
+				]);
 				assert.strictEqual(
 					await plugin.reapClusterProcesses(tempDir),
 					1,
