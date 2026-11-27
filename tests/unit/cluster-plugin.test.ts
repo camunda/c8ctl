@@ -4198,6 +4198,243 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	test("blocks retrying an unsigned pidfile survivor while its launcher remains available", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const originalPlatform = os.platform;
+		const originalPath = process.env.PATH;
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				survivor.once("spawn", () => resolveSpawn());
+				survivor.once("error", rejectSpawn);
+			});
+			assert.ok(survivor.pid, "pidfile-only process must have a PID");
+
+			const version = "8.10.1";
+			const mockBinDir = join(tempDir, "mock-bin");
+			const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+			const pidfile = join(installDir, "camunda.process");
+			const signatureAvailable = join(tempDir, "signature-available");
+			const stopStarted = join(tempDir, "stop-started");
+			mkdirSync(mockBinDir, { recursive: true });
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(
+				join(mockBinDir, "ps"),
+				`#!/bin/sh\nif [ -f "${signatureAvailable}" ]; then\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /replacement'\n  exit 0\nfi\nexit 1\n`,
+				{ mode: 0o755 },
+			);
+			os.platform = () => "darwin";
+			syncBuiltinESMExports();
+			process.env.PATH = originalPath
+				? `${mockBinDir}${delimiter}${originalPath}`
+				: mockBinDir;
+
+			writeFileSync(pidfile, String(survivor.pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${stopStarted}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), version);
+			assert.strictEqual(
+				plugin.processStartSignature(survivor.pid),
+				null,
+				"the fixture must leave the live process without a verifiable signature",
+			);
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+						timeoutMs: 25,
+					}),
+				/could not be safely reaped/,
+			);
+			assert.strictEqual(
+				existsSync(stopStarted),
+				false,
+				"c8run must not consume a pidfile without a verifiable process identity",
+			);
+			assert.deepStrictEqual(
+				plugin.readRunningClusterRecord(tempDir)?.pidfileSurvivors,
+				[
+					{
+						version,
+						pid: survivor.pid,
+						signature: null,
+						signalable: false,
+					},
+				],
+			);
+			assert.strictEqual(existsSync(pidfile), true);
+
+			writeFileSync(signatureAvailable, "");
+			assert.ok(
+				plugin.processStartSignature(survivor.pid),
+				"the retry fixture must make the replacement identity available",
+			);
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+						timeoutMs: 25,
+					}),
+				/could not be safely reaped/,
+			);
+
+			assert.strictEqual(
+				existsSync(stopStarted),
+				false,
+				"a retry must not pass the unsigned survivor pidfile to c8run",
+			);
+			assert.strictEqual(existsSync(pidfile), true);
+			assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+		} finally {
+			if (originalPath === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = originalPath;
+			}
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+			if (survivor.pid && plugin.isPidAlive(survivor.pid)) {
+				try {
+					process.kill(survivor.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("revalidates later-version pidfiles against the captured identity before launch", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const first = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const second = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const originalPlatform = os.platform;
+		const originalPath = process.env.PATH;
+
+		try {
+			await Promise.all(
+				[first, second].map(
+					(child) =>
+						new Promise<void>((resolveSpawn, rejectSpawn) => {
+							child.once("spawn", () => resolveSpawn());
+							child.once("error", rejectSpawn);
+						}),
+				),
+			);
+			assert.ok(first.pid, "first-version process must have a PID");
+			assert.ok(second.pid, "later-version process must have a PID");
+
+			const firstVersion = "8.10.1";
+			const secondVersion = "8.10.2";
+			const mockBinDir = join(tempDir, "mock-bin");
+			const firstInstallDir = join(
+				tempDir,
+				`c8run-${firstVersion}`,
+				`c8run-${firstVersion}`,
+			);
+			const secondInstallDir = join(
+				tempDir,
+				`c8run-${secondVersion}`,
+				`c8run-${secondVersion}`,
+			);
+			const firstPidfile = join(firstInstallDir, "camunda.process");
+			const secondPidfile = join(secondInstallDir, "camunda.process");
+			const reuseMarker = join(tempDir, "pid-reused");
+			const secondStopMarker = join(tempDir, "second-version-stopped");
+			mkdirSync(mockBinDir, { recursive: true });
+			mkdirSync(firstInstallDir, { recursive: true });
+			mkdirSync(secondInstallDir, { recursive: true });
+			writeFileSync(
+				join(mockBinDir, "ps"),
+				`#!/bin/sh\nif [ "$4" = "${second.pid}" ] && [ -f "${reuseMarker}" ]; then\n  printf '%s\\n' 'Tue Jan 2 00:00:00 2020 /replacement'\nelse\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /cluster'\nfi\n`,
+				{ mode: 0o755 },
+			);
+			os.platform = () => "darwin";
+			syncBuiltinESMExports();
+			process.env.PATH = originalPath
+				? `${mockBinDir}${delimiter}${originalPath}`
+				: mockBinDir;
+			const originalSecondSignature = plugin.processStartSignature(second.pid);
+			assert.ok(originalSecondSignature, "the initial PID identity must be captured");
+
+			writeFileSync(firstPidfile, String(first.pid));
+			writeFileSync(secondPidfile, String(second.pid));
+			writeFileSync(
+				join(firstInstallDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${reuseMarker}"\nrm -f "${firstPidfile}"\nkill -TERM ${first.pid}\nwhile kill -0 ${first.pid} 2>/dev/null; do sleep 0.05; done\nexit 1\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(
+				join(secondInstallDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${secondStopMarker}"\nkill -TERM ${second.pid}\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), firstVersion);
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run(
+						{ cacheDir: tempDir, version: firstVersion },
+						false,
+						{ timeoutMs: 100 },
+					),
+				/Stop command failed with code 1/,
+			);
+
+			assert.notStrictEqual(
+				plugin.processStartSignature(second.pid),
+				originalSecondSignature,
+				"the fixture must change the saved PID identity during the first stop",
+			);
+			assert.strictEqual(existsSync(secondStopMarker), false);
+			assert.strictEqual(
+				existsSync(secondPidfile),
+				false,
+				"a pidfile proven to refer to a replacement process must be retired",
+			);
+			assert.strictEqual(
+				plugin.isPidAlive(second.pid),
+				true,
+				"the replacement process must not be signalled by the later launcher",
+			);
+		} finally {
+			if (originalPath === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = originalPath;
+			}
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+			for (const child of [first, second]) {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			}
+		}
+	});
+
 	test("keeps a pidfile survivor unverified when a stale record tracks another PID", {
 		skip: process.platform === "win32",
 	}, async () => {
