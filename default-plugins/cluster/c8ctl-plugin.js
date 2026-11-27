@@ -26,7 +26,7 @@ import {
 } from 'node:fs';
 import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
-import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
+import { homedir, platform as osPlatform, arch as osArch, constants as osConstants } from 'node:os';
 import { join, dirname, basename, isAbsolute, relative, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { StringDecoder } from 'node:string_decoder';
@@ -1432,7 +1432,11 @@ async function downloadC8Run(config) {
   return { archivePath: targetFile, etag: result.etag };
 }
 
-async function extractArchive(archivePath, targetDir) {
+// How long an aborted extractor gets to exit before it is killed outright.
+const EXTRACTOR_KILL_GRACE_MS = 3000;
+
+/** Aborting `abortSignal` terminates the extractor; the promise settles once it has exited. */
+async function extractArchive(archivePath, targetDir, { abortSignal } = {}) {
   const logger = getLogger();
   logger.info(`Extracting to ${targetDir}...`);
 
@@ -1446,6 +1450,17 @@ async function extractArchive(archivePath, targetDir) {
 
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, { stdio: 'inherit' });
+    let killTimer;
+    const terminate = () => {
+      proc.kill('SIGTERM');
+      killTimer = setTimeout(() => proc.kill('SIGKILL'), EXTRACTOR_KILL_GRACE_MS);
+    };
+    if (abortSignal?.aborted) terminate();
+    else abortSignal?.addEventListener('abort', terminate, { once: true });
+    proc.on('close', () => {
+      clearTimeout(killTimer);
+      abortSignal?.removeEventListener('abort', terminate);
+    });
     proc.on('exit', (code, signal) => {
       if (code === 0) {
         logger.info('Extraction complete.');
@@ -1767,10 +1782,35 @@ async function installGABuild(config, archivePath, installDir) {
   const stagedDir = join(stagingRoot, `c8run-${config.version}`);
   // Dot-prefixed so neither dir is ever listed as an installed version ("c8run-*").
   const backupDir = join(config.cacheDir, `.replaced-c8run-${config.version}-${process.pid}`);
+  // Leftovers of runs that were killed outright (SIGKILL, power loss) cannot clean up after themselves.
+  sweepStaleInstallDirs(config.cacheDir);
   rmSync(stagingRoot, { recursive: true, force: true });
 
+  // `finally` does not run when a signal ends the process, so clean up here.
+  // The swap below is synchronous, so a signal can only land while extracting.
+  const extraction = new AbortController();
+  let extracting = Promise.resolve();
+  let interrupted = false;
+  const signalHandlers = INTERRUPT_SIGNALS.map((signal) => {
+    const handler = async () => {
+      interrupted = true;
+      extraction.abort();
+      // The extractor must be gone first, or it can recreate files after the cleanup.
+      await extracting.catch(() => {});
+      removeStagingRoot(stagingRoot);
+      process.exit(128 + osConstants.signals[signal]);
+    };
+    process.on(signal, handler);
+    return [signal, handler];
+  });
+
   try {
-    await extractArchive(archivePath, stagedDir);
+    extracting = extractArchive(archivePath, stagedDir, { abortSignal: extraction.signal });
+    // On an interrupt the handler owns the shutdown; do not let the abort error unwind into the caller first.
+    await extracting.catch((error) => {
+      if (interrupted) return new Promise(() => {});
+      throw error;
+    });
     const stagedBinary = findC8RunBinaryPath({ cacheDir: stagingRoot, version: config.version });
     if (!stagedBinary) {
       throw new Error(`The downloaded c8run ${config.version} archive does not contain a c8run launcher.`);
@@ -1809,7 +1849,50 @@ async function installGABuild(config, archivePath, installDir) {
     }
     if (replacing) rmSync(backupDir, { recursive: true, force: true });
   } finally {
+    for (const [signal, handler] of signalHandlers) process.off(signal, handler);
     rmSync(stagingRoot, { recursive: true, force: true });
+  }
+}
+
+const INTERRUPT_SIGNALS = ['SIGINT', 'SIGTERM'];
+
+function removeStagingRoot(stagingRoot) {
+  try {
+    rmSync(stagingRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  } catch {
+    // Best effort: the next install or delete/purge sweeps what is left.
+  }
+}
+
+const STALE_INSTALL_DIR = /^\.(staging|replaced)-(c8run-.+)-(\d+)$/;
+
+/**
+ * Clean up after `.staging-c8run-*` and `.replaced-c8run-*` dirs whose owning
+ * c8ctl (the trailing pid) is gone. They are dot-prefixed, so `cluster list`
+ * and `cluster delete` never see them. Dirs of a live pid belong to a
+ * concurrent install and are left alone.
+ *
+ * A staging dir is only ever a partial extraction, so it is deleted. A
+ * `.replaced` dir is the previous install, set aside just before the swap; if
+ * its owner died between the two renames it is the only copy left, so it is
+ * moved back when the install dir is missing and deleted only when redundant.
+ */
+export function sweepStaleInstallDirs(cacheDir) {
+  if (!existsSync(cacheDir)) return;
+  for (const entry of readdirSync(cacheDir, { withFileTypes: true })) {
+    const match = entry.isDirectory() && STALE_INSTALL_DIR.exec(entry.name);
+    if (!match || isPidAlive(Number(match[3]))) continue;
+    const dir = join(cacheDir, entry.name);
+    try {
+      const installDir = join(cacheDir, match[2]);
+      if (match[1] === 'replaced' && !existsSync(installDir)) {
+        renameSync(dir, installDir);
+      } else {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } catch {
+      // Best effort: housekeeping must not fail the command that triggered it.
+    }
   }
 }
 
@@ -4123,6 +4206,10 @@ export const commands = {
             : 'c8ctl cluster install stable';
       logger.error(`Please specify a version. Example: ${example}`);
       process.exit(1);
+    }
+
+    if (parsed.subcommand === 'delete' || parsed.subcommand === 'purge') {
+      sweepStaleInstallDirs(getCacheDir());
     }
 
     if (parsed.subcommand === 'delete') {

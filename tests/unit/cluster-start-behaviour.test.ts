@@ -26,7 +26,7 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
 	after,
 	afterEach,
@@ -35,7 +35,7 @@ import {
 	describe,
 	test,
 } from "node:test";
-import { c8WithEnv } from "../utils/cli.ts";
+import { c8SignalledWhen, c8WithEnv } from "../utils/cli.ts";
 import { listenOnLoopback, sendHalfThenDrop } from "../utils/http-server.ts";
 
 describe("CLI behavioural: cluster start failure", () => {
@@ -526,5 +526,101 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 
 		assert.strictEqual((await start(baseUrl)).status, 7);
 		assert.strictEqual(launched(), "ga");
+	});
+
+	for (const [signal, exitStatus] of [
+		["SIGINT", 130],
+		["SIGTERM", 143],
+	] as const) {
+		test(`${signal} during extraction removes the staging dir and keeps the existing build`, async () => {
+			// An extractor that never finishes, so the signal lands mid-extraction.
+			const fakeBin = join(cacheDir, "fake-bin");
+			mkdirSync(fakeBin);
+			for (const name of ["tar", "unzip"]) {
+				const extractor = join(fakeBin, name);
+				writeFileSync(
+					extractor,
+					`#!/bin/sh\ntouch "${join(fakeBin, "started")}"\nexec sleep 60\n`,
+				);
+				chmodSync(extractor, 0o755);
+			}
+
+			const result = await c8SignalledWhen(
+				{
+					signal,
+					when: () => existsSync(join(fakeBin, "started")),
+					env: {
+						C8RUN_CACHE_DIR: cacheDir,
+						C8CTL_OUTPUT_MODE: "text",
+						C8CTL_C8RUN_DOWNLOAD_URL: baseUrl,
+						C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
+						PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
+					},
+				},
+				"cluster",
+				"start",
+			);
+
+			assert.strictEqual(
+				result.status,
+				exitStatus,
+				result.stdout + result.stderr,
+			);
+			assert.ok(
+				existsSync(join(alphaBuildDir(), "c8run")),
+				"the alpha build must be kept",
+			);
+			assert.deepStrictEqual(
+				readdirSync(cacheDir).filter((name) => name.startsWith(".")),
+				[],
+				"an interrupted install must not leave staging dirs behind",
+			);
+		});
+	}
+
+	test("delete and purge remove staging and backup dirs of dead processes only", async () => {
+		const deadPid = 2147483646;
+		const dead = [
+			`.staging-c8run-8.11-${deadPid}`,
+			`.replaced-c8run-8.11-${deadPid}`,
+		];
+		const live = `.staging-c8run-8.11-${process.pid}`;
+		const seed = () => {
+			for (const name of [...dead, live]) {
+				mkdirSync(join(cacheDir, name, "c8run-8.11"), { recursive: true });
+			}
+		};
+		const leftovers = () =>
+			readdirSync(cacheDir)
+				.filter((name) => name.startsWith("."))
+				.sort();
+
+		seed();
+		assert.strictEqual((await cluster(baseUrl, "purge", "8.11")).status, 0);
+		assert.deepStrictEqual(leftovers(), [live]);
+
+		seed();
+		assert.strictEqual((await cluster(baseUrl, "delete", "8.11")).status, 0);
+		assert.deepStrictEqual(leftovers(), [live]);
+	});
+
+	test("a backup left by a dead process is restored when the install dir is missing", async () => {
+		const backup = join(cacheDir, ".replaced-c8run-8.11-2147483646");
+		mkdirSync(join(backup, "camunda-data"), { recursive: true });
+		writeFileSync(join(backup, "camunda-data", "state.db"), "deployments");
+		rmSync(join(cacheDir, "c8run-8.11"), { recursive: true });
+
+		const result = await cluster(baseUrl, "purge", "8.11");
+
+		assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+		assert.match(result.stdout, /deleted: camunda-data/);
+		assert.deepStrictEqual(
+			readdirSync(cacheDir).filter((name) => name.startsWith(".")),
+			[],
+		);
+		assert.ok(
+			existsSync(join(cacheDir, "c8run-8.11")),
+			"the build must be back",
+		);
 	});
 });

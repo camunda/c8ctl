@@ -178,6 +178,59 @@ export function c8WithClosedStdout(
 }
 
 /**
+ * Run the CLI, and once `when()` is true send it `signal`. Polling the
+ * condition rather than using a timer keeps the signal from landing before the
+ * CLI has reached the state under test. `timeout` is only a safety net (SIGKILL).
+ */
+export function c8SignalledWhen(
+	opts: C8Options & { signal: NodeJS.Signals; when: () => boolean },
+	...args: string[]
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+	const env: NodeJS.ProcessEnv = { ...buildChildEnv(), ...opts.env };
+	for (const [key, value] of Object.entries(opts.env ?? {})) {
+		if (value === undefined) delete env[key];
+	}
+	return new Promise((resolvePromise, reject) => {
+		const child = spawn(
+			"node",
+			[
+				"--experimental-strip-types",
+				"--import",
+				TS_STRIP_DIAGNOSTICS,
+				CLI,
+				...args,
+			],
+			{
+				env,
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: opts.timeout ?? DEFAULT_CLI_TIMEOUT,
+				killSignal: "SIGKILL",
+			},
+		);
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf-8");
+		child.stderr.setEncoding("utf-8");
+		child.stdout.on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		const poll = setInterval(() => {
+			if (!opts.when()) return;
+			clearInterval(poll);
+			child.kill(opts.signal);
+		}, 50);
+		child.on("error", reject);
+		child.on("close", (status) => {
+			clearInterval(poll);
+			resolvePromise({ status, stdout, stderr });
+		});
+	});
+}
+
+/**
  * Parse the JSON dry-run payload from CLI stdout.
  * Throws a descriptive error if stdout is not valid JSON.
  */
