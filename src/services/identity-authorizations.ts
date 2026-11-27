@@ -55,6 +55,12 @@ export interface SearchAuthorizationsInput {
 	ownerType?: string;
 	resourceType?: string;
 	resourceId?: string;
+	/**
+	 * Only the authorizations of the authenticated user or client, including
+	 * those granted through a group, role or mapping rule. Needs no admin
+	 * permission (Camunda 8.10+).
+	 */
+	own?: boolean;
 	/** Maximum number of authorizations. Default: all. */
 	limit?: number;
 }
@@ -67,21 +73,33 @@ export function searchAuthorizationsRequest(input: SearchAuthorizationsInput) {
 	if (input.resourceId) filter.resourceIds = [input.resourceId];
 	return {
 		method: "POST",
-		endpoint: "/authorizations/search",
+		endpoint: input.own
+			? "/authentication/me/authorizations/search"
+			: "/authorizations/search",
 		body: searchBodyOf(filter),
 	};
 }
 
+/**
+ * With `own`, `authorizationsEnabled` tells whether the cluster checks
+ * authorizations at all; when it is `false`, every request is allowed.
+ */
 export async function searchAuthorizations(
 	input: SearchAuthorizationsInput & ClusterInput,
 	ctx: C8ctlContext = {},
-): Promise<{ items: Authorization[] }> {
+): Promise<{ items: Authorization[]; authorizationsEnabled?: boolean }> {
 	const { client } = connect(input.target, ctx);
 	const { body } = searchAuthorizationsRequest(input);
+	let authorizationsEnabled: boolean | undefined;
 	const items = await callCluster(
 		(signal) =>
 			fetchAllPages(
-				(filter, options) => client.searchAuthorizations(filter, options),
+				async (filter, options) => {
+					if (!input.own) return client.searchAuthorizations(filter, options);
+					const page = await client.searchOwnAuthorizations(filter, options);
+					authorizationsEnabled = page.authorizationsEnabled;
+					return page;
+				},
 				body,
 				undefined,
 				input.limit,
@@ -89,7 +107,9 @@ export async function searchAuthorizations(
 			),
 		ctx,
 	);
-	return { items };
+	return authorizationsEnabled === undefined
+		? { items }
+		: { items, authorizationsEnabled };
 }
 
 export interface AuthorizationKeyInput {

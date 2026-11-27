@@ -175,6 +175,14 @@ c8 list authorizations
 c8 search auth --ownerId=john --resourceType=process-definition
 ```
 
+Use `--own` to search only your own authorizations: those of the authenticated user or client, including authorizations granted through a group, role, or mapping rule. It needs no admin permission and requires Camunda 8.10 or later.
+
+```bash
+c8 search auth --own --resourceType=CLUSTER_VARIABLE
+```
+
+If the cluster does not check authorizations, the command says so: every request is then allowed.
+
 ### Create an authorization
 
 ```bash

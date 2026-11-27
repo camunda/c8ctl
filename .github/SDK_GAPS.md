@@ -28,6 +28,20 @@ When a new SDK limitation is discovered during development, add it here followin
   - **Impact:** Running either command against an 8.8/8.9 cluster surfaces the gateway's 404 as a normal command error (no special-casing needed — the framework's error path already renders it clearly). The live CLI integration tests for these commands (`tests/integration/process-instances.test.ts`) are skipped on `CAMUNDA_VERSION` 8.8/8.9 via `suspendResumeSkip`, mirroring the existing `businessIdSkip` pattern in the same file.
   - **Remediation:** None needed — this is a platform version floor, not an SDK defect. Revisit only if a future SDK release needs adjusting for a change in the endpoint's shape.
 
+- [ ] **Cluster variables not available before Camunda 8.9; `kind`, `metadata` and own authorizations before 8.10**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.1**
+  - **Behavior:** The SDK exposes the `/cluster-variables` endpoints, the `kind` and `metadata` fields, and `searchOwnAuthorizations()` (`POST /authentication/me/authorizations/search`) for every server version. The REST API has no `/cluster-variables` endpoints on 8.8; `kind`, `metadata` and the own authorizations search are new in 8.10 (`stable/8.9` and `stable/8.10` specs in camunda/camunda).
+  - **Affected:** `c8ctl list|search|get|create|update|delete cluster-variable`, `--kind`, `--metadata`, `c8ctl search authorization --own`.
+  - **Impact:** Against an older cluster, the gateway's error is a normal command error. `tests/integration/cluster-variables.test.ts` skips on `CAMUNDA_VERSION` 8.8 (`clusterVariablesSkip`) and skips the 8.10 features on 8.8/8.9 (`camunda810Skip`).
+  - **Remediation:** None needed — this is a platform version floor, not an SDK defect.
+
+- [ ] **Cluster variable `value` typed as an object only**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.1**
+  - **Behavior:** `create*ClusterVariable()` and `update*ClusterVariable()` type `value` as `{ [key: string]: unknown }`. The REST API accepts any JSON value: Camunda 8.10.6 stores a string, a number or an array as well.
+  - **Affected:** `c8ctl create|update cluster-variable --value`.
+  - **Impact:** c8ctl accepts JSON objects only and rejects other values before the request.
+  - **Remediation:** Report upstream to camunda/orchestration-cluster-api-js; once the SDK accepts any JSON value, relax `requireValue()` in `src/services/cluster-variables.ts`.
+
 - [ ] **No config flag to disable the automatic `/v2` suffix on `CAMUNDA_REST_ADDRESS`**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0-alpha.43**
   - **Behavior:** `hydrateConfig()` always appends `/v2` to `CAMUNDA_REST_ADDRESS` unless the value already ends with `/v2` or `/v2/`; there is no override.

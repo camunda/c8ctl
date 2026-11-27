@@ -132,6 +132,51 @@ async function startFakeCluster(): Promise<FakeCluster> {
 				});
 				return;
 			}
+			if (
+				req.method === "POST" &&
+				url.split("?")[0].endsWith("/cluster-variables/search")
+			) {
+				send(200, {
+					items: [
+						{
+							name: "API_KEY",
+							scope: "GLOBAL",
+							tenantId: null,
+							kind: "SECRET_REFERENCE",
+							value: '{"key":"{{secrets.API_KEY}}"}',
+							metadata: { kind: "CREDENTIAL" },
+							isTruncated: false,
+						},
+					],
+					page: { totalItems: 1 },
+				});
+				return;
+			}
+			if (req.method === "PUT" && url.includes("/cluster-variables/")) {
+				send(200, {});
+				return;
+			}
+			if (
+				req.method === "POST" &&
+				url.endsWith("/authentication/me/authorizations/search")
+			) {
+				send(200, {
+					items: [
+						{
+							authorizationKey: "2251799813690200",
+							ownerId: "demo",
+							ownerType: "USER",
+							resourceType: "CLUSTER_VARIABLE",
+							resourceId: "*",
+							resourcePropertyName: null,
+							permissionTypes: ["READ", "UPDATE"],
+						},
+					],
+					authorizationsEnabled: true,
+					page: { totalItems: 1 },
+				});
+				return;
+			}
 			if (req.method === "POST" && url.endsWith("/deployments")) {
 				if (nextProblem) {
 					const problem = nextProblem;
@@ -341,6 +386,7 @@ describe("@camunda8/cli/internal", () => {
 			"completeJob",
 			"completeUserTask",
 			"createAuthorization",
+			"createClusterVariable",
 			"createGroup",
 			"createMappingRule",
 			"createProcessInstance",
@@ -348,6 +394,7 @@ describe("@camunda8/cli/internal", () => {
 			"createTenant",
 			"createUser",
 			"deleteAuthorization",
+			"deleteClusterVariable",
 			"deleteGroup",
 			"deleteMappingRule",
 			"deleteRole",
@@ -357,6 +404,7 @@ describe("@camunda8/cli/internal", () => {
 			"evaluateExpression",
 			"failJob",
 			"getAuthorization",
+			"getClusterVariable",
 			"getGroup",
 			"getIncident",
 			"getMappingRule",
@@ -372,6 +420,7 @@ describe("@camunda8/cli/internal", () => {
 			"getUserTaskForm",
 			"isC8ctlError",
 			"listAuthorizations",
+			"listClusterVariables",
 			"listGroups",
 			"listIncidents",
 			"listJobs",
@@ -393,6 +442,7 @@ describe("@camunda8/cli/internal", () => {
 			"resolveIncident",
 			"resumeProcessInstance",
 			"searchAuthorizations",
+			"searchClusterVariables",
 			"searchGroups",
 			"searchIncidents",
 			"searchJobs",
@@ -411,6 +461,7 @@ describe("@camunda8/cli/internal", () => {
 			"unassignMappingRule",
 			"unassignRole",
 			"unassignUser",
+			"updateClusterVariable",
 			"updateJob",
 		]);
 	});
@@ -936,6 +987,55 @@ describe("@camunda8/cli/internal", () => {
 		const body = JSON.parse(request.body);
 		assert.strictEqual(body.expression, "= a + 1");
 		assert.deepStrictEqual(body.variables, { a: 41 });
+	});
+
+	test("cluster variables and own authorizations serve a credential manager", async () => {
+		const dataDir = createDataDir(cluster.baseUrl);
+		const target = { profile: "embedded" };
+		const requestsBefore = cluster.requests.length;
+
+		const { items } = await api.searchClusterVariables(
+			{ target, metadata: { kind: "CREDENTIAL" } },
+			{ dataDir },
+		);
+		await api.updateClusterVariable(
+			{ target, name: "API_KEY", tenant: "acme", value: { key: "x" } },
+			{ dataDir },
+		);
+		const own = await api.searchAuthorizations(
+			{ target, own: true, resourceType: "CLUSTER_VARIABLE" },
+			{ dataDir },
+		);
+
+		assert.deepStrictEqual(
+			items.map((v) => v.name),
+			["API_KEY"],
+		);
+		const [search, update] = cluster.requests.slice(requestsBefore);
+		assert.deepStrictEqual(JSON.parse(search.body).filter, {
+			metadata: { kind: { $eq: "CREDENTIAL" } },
+		});
+		assert.ok(update.url.endsWith("/cluster-variables/tenants/acme/API_KEY"));
+		assert.strictEqual(own.authorizationsEnabled, true);
+		assert.deepStrictEqual(own.items[0]?.permissionTypes, ["READ", "UPDATE"]);
+
+		await assert.rejects(
+			api.createClusterVariable(
+				{
+					target,
+					name: "API_KEY",
+					value: {},
+					metadata: JSON.parse('{"k":[]}'),
+				},
+				{ dataDir },
+			),
+			(error: unknown) => {
+				assert.ok(api.isC8ctlError(error));
+				assert.strictEqual(error.code, "invalid-input");
+				assert.strictEqual(error.field, "metadata");
+				return true;
+			},
+		);
 	});
 
 	test("evaluateExpression reports a rejected expression as invalid input", async () => {

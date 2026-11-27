@@ -349,7 +349,7 @@ function generateSearchFlagsSection(): string {
 	// Collect unique search flags from list and search commands
 	const searchFlagMap = new Map<string, FlagDef>();
 	for (const verb of ["list", "search"] as const) {
-		const def = COMMAND_REGISTRY[verb];
+		const def: CommandDef = COMMAND_REGISTRY[verb];
 		if (def.resourceFlags) {
 			for (const resourceFlags of Object.values(def.resourceFlags)) {
 				for (const [name, flagDef] of Object.entries(resourceFlags)) {

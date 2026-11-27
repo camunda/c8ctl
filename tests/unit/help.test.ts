@@ -373,6 +373,9 @@ describe("Help Module", () => {
 			output.includes("wait-state (ws)"),
 			"search help should include the ws alias for wait-state",
 		);
+		assert.ok(output.includes("cluster-variable"));
+		assert.ok(output.includes("--fullValue"));
+		assert.ok(output.includes("--own"));
 	});
 
 	test("showCommandHelp shows deploy help", () => {
@@ -522,6 +525,9 @@ describe("Help Module", () => {
 		assert.ok(output.includes("job"));
 		assert.ok(output.includes("--retries"));
 		assert.ok(output.includes("--timeout"));
+		assert.ok(output.includes("cluster-variable <name>"));
+		assert.ok(output.includes("--value"));
+		assert.ok(output.includes("--metadata"));
 	});
 
 	test("showCommandHelp shows activate help", () => {
