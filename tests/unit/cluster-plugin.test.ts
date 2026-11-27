@@ -3838,7 +3838,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
-	test("recovers a pidfile-only survivor on retry after c8run removes its pidfile", {
+	test("keeps an unverified pidfile survivor non-signalable on retry", {
 		skip: process.platform === "win32",
 	}, async () => {
 		const survivor = spawn(
@@ -3867,6 +3867,11 @@ describe("Cluster Plugin – stopC8Run", () => {
 			writeFileSync(join(tempDir, "cluster.active"), "running");
 			writeFileSync(join(tempDir, "cluster.version"), version);
 			writeFileSync(join(tempDir, "cluster.port"), "9091");
+			assert.strictEqual(
+				plugin.readRunningClusterRecord(tempDir),
+				null,
+				"the pidfile has no durable ownership record before stop",
+			);
 			const signature = plugin.processStartSignature(survivor.pid);
 			assert.ok(
 				signature || !plugin.platformSupportsProcessSignature(),
@@ -3885,24 +3890,32 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
 			assert.deepStrictEqual(
 				plugin.readRunningClusterRecord(tempDir)?.pidfileSurvivors,
-				[{ version, pid: survivor.pid, signature: signature ?? null }],
+				[
+					{
+						version,
+						pid: survivor.pid,
+						signature: signature ?? null,
+						signalable: false,
+					},
+				],
 			);
+			assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
 			assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
 			assert.strictEqual(
 				plugin.isVersionInstanceRunning(tempDir, version),
 				true,
 			);
 
+			await assert.rejects(
+				() => plugin.stopC8Run({ cacheDir: tempDir, version }),
+				/Stop incomplete/,
+			);
 			assert.strictEqual(
-				await plugin.stopC8Run({ cacheDir: tempDir, version }),
-				version,
+				plugin.isPidAlive(survivor.pid),
+				true,
+				"a later stop must not signal a process that has no trusted ownership record",
 			);
-			assert.ok(
-				await pollUntil(async () => !plugin.isPidAlive(survivor.pid), 5000, 50),
-				"the durable recovery record must let a later stop reap the survivor",
-			);
-			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
-			assert.strictEqual(plugin.readClusterPort(tempDir), 8080);
+			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
 		} finally {
 			if (survivor.pid && plugin.isPidAlive(survivor.pid)) {
 				try {
@@ -3914,7 +3927,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
-	test("returns the live pidfile survivor version after reaping a stale-record retry", {
+	test("keeps a pidfile survivor unverified when a stale record tracks another PID", {
 		skip: process.platform === "win32",
 	}, async () => {
 		const staleProcess = spawn(
@@ -3975,21 +3988,29 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.strictEqual(
 				plugin.readRunningClusterRecord(tempDir)?.version,
 				"8.9",
-				"the live survivor should coexist with the stale record version",
+				"the live pidfile survivor should not replace the stale record version",
 			);
+			const record = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(record);
+			const trackedSurvivor = record.pidfileSurvivors.find(
+				(entry: { pid: number }) => entry.pid === survivor.pid,
+			);
+			assert.ok(trackedSurvivor);
+			assert.strictEqual(trackedSurvivor.signalable, false);
+			assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
 
-			const stoppedVersion = await plugin.stopC8Run({
-				cacheDir: tempDir,
-				version: "8.9",
-			});
-			assert.strictEqual(
-				stoppedVersion,
-				version,
-				"purge must target the version attributed to the reaped survivor",
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({
+						cacheDir: tempDir,
+						version: "8.9",
+					}),
+				/Stop incomplete/,
 			);
-			assert.ok(
-				await pollUntil(async () => !plugin.isPidAlive(survivor.pid), 5000, 50),
-				"the retry should reap the pidfile survivor",
+			assert.strictEqual(
+				plugin.isPidAlive(survivor.pid),
+				true,
+				"a stale record must not grant ownership of a different pidfile process",
 			);
 		} finally {
 			for (const child of [staleProcess, survivor]) {
@@ -4042,11 +4063,13 @@ describe("Cluster Plugin – stopC8Run", () => {
 						version: firstRecord.version,
 						pid: first.pid,
 						signature: firstRecord.signatures[first.pid] ?? null,
+						signalable: true,
 					},
 					{
 						version: secondRecord.version,
 						pid: second.pid,
 						signature: secondRecord.signatures[second.pid] ?? null,
+						signalable: true,
 					},
 				],
 			});
@@ -4131,7 +4154,14 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.deepStrictEqual(
 				record.pidfileSurvivors,
 				plugin.platformSupportsProcessSignature()
-					? [{ version, pid: survivor.pid, signature: null }]
+					? [
+							{
+								version,
+								pid: survivor.pid,
+								signature: null,
+								signalable: false,
+							},
+						]
 					: [],
 			);
 			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
@@ -4236,6 +4266,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 						version,
 						pid: survivor.pid,
 						signature: signature ? `${signature}-reused` : null,
+						signalable: false,
 					},
 				],
 			});
@@ -4247,6 +4278,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 						version,
 						pid: survivor.pid,
 						signature: signature ? `${signature}-reused` : null,
+						signalable: false,
 					},
 				],
 			);
@@ -4262,7 +4294,14 @@ describe("Cluster Plugin – stopC8Run", () => {
 				plugin.writeRunningClusterRecord(tempDir, {
 					version,
 					pids: [],
-					pidfileSurvivors: [{ version, pid: survivor.pid, signature: null }],
+					pidfileSurvivors: [
+						{
+							version,
+							pid: survivor.pid,
+							signature: null,
+							signalable: false,
+						},
+					],
 				});
 				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
 				assert.strictEqual(
@@ -4287,20 +4326,17 @@ describe("Cluster Plugin – stopC8Run", () => {
 					false,
 					"supported platforms must capture the survivor signature",
 				);
-				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), [
-					survivor.pid,
-				]);
+				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
 				assert.strictEqual(
 					await plugin.reapClusterProcesses(tempDir),
-					1,
-					"platforms without fingerprints use the liveness-only fallback",
+					0,
+					"an unverified pidfile survivor is never a reaper target",
 				);
-				assert.ok(
-					await pollUntil(
-						async () => !plugin.isPidAlive(survivor.pid),
-						5000,
-						50,
-					),
+				assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+				assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
+				await assert.rejects(
+					() => plugin.stopC8Run({ cacheDir: tempDir, version }),
+					/could not be safely reaped/,
 				);
 			}
 		} finally {
@@ -4385,7 +4421,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 					plugin.stopC8Run({ cacheDir: tempDir, version: "8.10.1" }, false, {
 						timeoutMs: 100,
 					}),
-				/Stop incomplete: .*pidfile.*process.*still running/,
+				/Stop incomplete: .*pidfile.*process.*could not be safely reaped/,
 			);
 			assert.ok(
 				await pollUntil(
@@ -4481,7 +4517,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 						assert.ok(error instanceof Error);
 						assert.match(
 							error.message,
-							/Stop incomplete: .*pidfile.*process.*still running/,
+							/Stop incomplete: .*pidfile.*process.*could not be safely reaped/,
 						);
 						if (failedStop.name === "spawn error") {
 							assert.match(error.message, /ENOENT/);
@@ -4504,6 +4540,150 @@ describe("Cluster Plugin – stopC8Run", () => {
 				);
 			} finally {
 				for (const child of [survivor, nextVersion]) {
+					if (child.pid && plugin.isPidAlive(child.pid)) {
+						try {
+							process.kill(child.pid, "SIGKILL");
+						} catch {
+							// already gone
+						}
+					}
+				}
+			}
+		});
+	}
+
+	for (const failedStop of [
+		{ name: "nonzero exit", script: "#!/bin/sh\nexit 1\n" },
+		{
+			name: "spawn error",
+			script: "#!/c8ctl-test-missing-c8run-interpreter\nexit 0\n",
+		},
+	]) {
+		test(`rescans pidfiles created after a ${failedStop.name}`, {
+			skip: process.platform === "win32",
+		}, async () => {
+			const original = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)"],
+				{ stdio: "ignore" },
+			);
+			const survivor = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)"],
+				{ stdio: "ignore" },
+			);
+			const nextVersion = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)"],
+				{ stdio: "ignore" },
+			);
+			const secondStopStarted = join(tempDir, "second-stop-started");
+			const releaseSecondStop = join(tempDir, "release-second-stop");
+			let stopError: unknown;
+			let stopPromise: Promise<void> | undefined;
+
+			try {
+				await Promise.all(
+					[original, survivor, nextVersion].map(
+						(child) =>
+							new Promise<void>((resolveSpawn, rejectSpawn) => {
+								child.once("spawn", () => resolveSpawn());
+								child.once("error", rejectSpawn);
+							}),
+					),
+				);
+				assert.ok(original.pid, "first version process must have a PID");
+				assert.ok(survivor.pid, "late pidfile process must have a PID");
+				assert.ok(nextVersion.pid, "second version process must have a PID");
+
+				const firstVersionDir = join(
+					tempDir,
+					"c8run-8.10.1",
+					"c8run-8.10.1",
+				);
+				const secondVersionDir = join(
+					tempDir,
+					"c8run-8.10.2",
+					"c8run-8.10.2",
+				);
+				const originalPidfile = join(firstVersionDir, "camunda.process");
+				const latePidfile = join(firstVersionDir, "late.process");
+				mkdirSync(firstVersionDir, { recursive: true });
+				mkdirSync(secondVersionDir, { recursive: true });
+				writeFileSync(originalPidfile, String(original.pid));
+				writeFileSync(
+					join(firstVersionDir, C8RUN_BINARY),
+					failedStop.script,
+					{ mode: 0o755 },
+				);
+				writeFileSync(
+					join(secondVersionDir, "camunda.process"),
+					String(nextVersion.pid),
+				);
+				writeFileSync(
+					join(secondVersionDir, C8RUN_BINARY),
+					`#!/bin/sh\ntouch "${secondStopStarted}"\nwhile [ ! -f "${releaseSecondStop}" ]; do sleep 0.01; done\nkill -TERM ${nextVersion.pid}\nwhile kill -0 ${nextVersion.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
+					{ mode: 0o755 },
+				);
+				writeFileSync(join(tempDir, "cluster.active"), "running");
+				writeFileSync(join(tempDir, "cluster.version"), "8.10.1");
+
+				stopPromise = plugin
+					.stopC8Run(
+						{ cacheDir: tempDir, version: "8.10.1" },
+						false,
+						{ timeoutMs: 1000 },
+					)
+					.then(
+						() => {},
+						(error: unknown) => {
+							stopError = error;
+						},
+					);
+				assert.ok(
+					await pollUntil(
+						async () => existsSync(secondStopStarted),
+						5000,
+						25,
+					),
+					"the later version stop must start after the first failure",
+				);
+				const originalExit = new Promise<void>((resolveExit) => {
+					original.once("exit", () => resolveExit());
+				});
+				original.kill("SIGTERM");
+				await originalExit;
+				writeFileSync(latePidfile, String(survivor.pid));
+				writeFileSync(releaseSecondStop, "continue");
+				await stopPromise;
+
+				assert.ok(
+					stopError instanceof Error,
+					"stop must fail when a live pidfile appears after the initial snapshot",
+				);
+				assert.match(stopError.message, /Stop incomplete/);
+				assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+				const recovered = plugin.readRunningClusterRecord(tempDir);
+				assert.ok(recovered);
+				const trackedSurvivor = recovered.pidfileSurvivors.find(
+					(entry: { pid: number }) => entry.pid === survivor.pid,
+				);
+				assert.ok(trackedSurvivor, "the late process must remain tracked");
+				assert.strictEqual(
+					trackedSurvivor.signalable,
+					false,
+					"a late pidfile must not confer reaper ownership",
+				);
+				assert.ok(
+					!plugin.liveRecordedPids(tempDir).includes(survivor.pid),
+					"the late process must not become a reaper target",
+				);
+			} finally {
+				if (!existsSync(releaseSecondStop)) {
+					writeFileSync(releaseSecondStop, "continue");
+				}
+				if (stopPromise) await stopPromise;
+				for (const child of [original, survivor, nextVersion]) {
 					if (child.pid && plugin.isPidAlive(child.pid)) {
 						try {
 							process.kill(child.pid, "SIGKILL");
