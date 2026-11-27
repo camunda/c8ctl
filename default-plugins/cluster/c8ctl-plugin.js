@@ -38,9 +38,17 @@ import { fileURLToPath } from 'node:url';
 
 // C8CTL_C8RUN_DOWNLOAD_URL overrides the download center base URL (e.g. for
 // mirrors or tests that must not depend on network access).
-const DOWNLOAD_BASE_URL = (
+export function stripTrailingSlashes(value) {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+const DOWNLOAD_BASE_URL = `${stripTrailingSlashes(
   process.env.C8CTL_C8RUN_DOWNLOAD_URL || 'https://downloads.camunda.cloud/release/camunda/c8run/'
-).replace(/\/*$/, '/');
+)}/`;
 
 const _pluginPackageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
@@ -2370,7 +2378,7 @@ function commandLineIncludesDirectory(commandLine, directory) {
     const normalized = value.replace(/\\/g, '/');
     return osPlatform() === 'win32' ? normalized.toLowerCase() : normalized;
   };
-  const expected = normalize(resolve(directory)).replace(/\/+$/, '');
+  const expected = stripTrailingSlashes(normalize(resolve(directory)));
   const actual = normalize(commandLine);
   let index = actual.indexOf(expected);
 
