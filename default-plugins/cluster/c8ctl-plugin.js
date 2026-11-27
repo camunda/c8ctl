@@ -2373,12 +2373,12 @@ function getProcessCommandLine(pid) {
   return null;
 }
 
-function commandLineIncludesDirectory(commandLine, directory) {
+function commandLineIncludesPath(commandLine, path) {
   const normalize = (value) => {
     const normalized = value.replace(/\\/g, '/');
     return osPlatform() === 'win32' ? normalized.toLowerCase() : normalized;
   };
-  const expected = stripTrailingSlashes(normalize(resolve(directory)));
+  const expected = stripTrailingSlashes(normalize(resolve(path)));
   const actual = normalize(commandLine);
   let index = actual.indexOf(expected);
 
@@ -2395,6 +2395,25 @@ function commandLineIncludesDirectory(commandLine, directory) {
   }
 
   return false;
+}
+
+function commandLineIncludesClusterLauncher(commandLine, entry, version) {
+  const processName = basename(entry.path, '.process');
+  const component =
+    processName === 'camunda' || processName.startsWith('camunda-')
+      ? 'camunda-zeebe'
+      : processName.startsWith('connectors')
+        ? 'connectors'
+        : processName;
+  const executable = component === 'camunda-zeebe' ? 'camunda' : component;
+  const installDirs = [dirname(entry.path), dirname(dirname(entry.path))];
+
+  return installDirs.some((installDir) =>
+    commandLineIncludesPath(
+      commandLine,
+      join(installDir, `${component}-${version}`, 'bin', executable),
+    ),
+  );
 }
 
 /**
@@ -2444,14 +2463,19 @@ function collectPidfileEntries(cacheDir, { version } = {}) {
 
   let versionDirs;
   if (version) {
-    versionDirs = [join(cacheDir, `c8run-${version}`)];
+    versionDirs = [
+      { version, path: join(cacheDir, `c8run-${version}`) },
+    ];
   } else {
     versionDirs = readdirSync(cacheDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name.startsWith('c8run-'))
-      .map((entry) => join(cacheDir, entry.name));
+      .map((entry) => ({
+        version: entry.name.slice('c8run-'.length),
+        path: join(cacheDir, entry.name),
+      }));
   }
 
-  for (const versionDir of versionDirs) {
+  for (const { version: pidfileVersion, path: versionDir } of versionDirs) {
     let entries;
     try {
       entries = readdirSync(versionDir, { withFileTypes: true });
@@ -2487,7 +2511,11 @@ function collectPidfileEntries(cacheDir, { version } = {}) {
           continue;
         }
         if (Number.isInteger(pid) && pid > 0) {
-          pidfiles.push({ path: join(dir, entry.name), pid });
+          pidfiles.push({
+            path: join(dir, entry.name),
+            pid,
+            version: pidfileVersion,
+          });
         }
       }
     }
@@ -2498,6 +2526,10 @@ function collectPidfileEntries(cacheDir, { version } = {}) {
 
 export function collectPidfilePids(cacheDir, options = {}) {
   return collectPidfileEntries(cacheDir, options).map(({ pid }) => pid);
+}
+
+function pidfileIdentityKey(version, pid) {
+  return `${version}\0${pid}`;
 }
 
 function retireStalePidfileEntry({ path, pid }) {
@@ -2521,9 +2553,10 @@ function livePidfileEntries(
   const liveEntries = [];
 
   for (const entry of collectPidfileEntries(cacheDir, { version })) {
-    const recordedSignature = knownSignatures.get(entry.pid);
+    const key = pidfileIdentityKey(entry.version, entry.pid);
+    const recordedSignature = knownSignatures.get(key);
     if (!isPidAlive(entry.pid)) {
-      if (retireStale && typeof recordedSignature === 'string') {
+      if (retireStale) {
         retireStalePidfileEntry(entry);
       }
       continue;
@@ -2534,13 +2567,13 @@ function livePidfileEntries(
       continue;
     }
 
-    if (!signatureChecks.has(entry.pid)) {
+    if (!signatureChecks.has(key)) {
       signatureChecks.set(
-        entry.pid,
+        key,
         recordedPidIsLive(entry.pid, recordedSignature),
       );
     }
-    if (signatureChecks.get(entry.pid)) {
+    if (signatureChecks.get(key)) {
       liveEntries.push(entry);
     } else if (retireStale) {
       retireStalePidfileEntry(entry);
@@ -2552,8 +2585,9 @@ function livePidfileEntries(
 
 function hasUnverifiablePidfileSurvivor(cacheDir, version, signatures) {
   for (const entry of collectPidfileEntries(cacheDir, { version })) {
-    const recordedSignature = signatures.get(entry.pid);
-    if (!signatures.has(entry.pid)) {
+    const key = pidfileIdentityKey(entry.version, entry.pid);
+    const recordedSignature = signatures.get(key);
+    if (!signatures.has(key)) {
       continue;
     }
     if (!isPidAlive(entry.pid)) {
@@ -2584,7 +2618,7 @@ function revalidatePidfileAttempt(
   version,
   pidfileAttempt,
   previousSignatures,
-  recordedSignatures,
+  record,
 ) {
   const entriesByPid = new Map();
   const stalePids = new Set();
@@ -2599,16 +2633,13 @@ function revalidatePidfileAttempt(
       continue;
     }
     if (!pidfileAttempt.has(entry.pid)) {
-      const recordedSignature = recordedSignatures.get(entry.pid) ?? null;
+      const recordedIdentity = pidfileRecordIdentity(record, version, entry.pid);
+      const recordedSignature = recordedIdentity.signature;
       const signature = recordedSignature ?? processStartSignature(entry.pid);
       pidfileAttempt.set(entry.pid, {
         signature,
         recordedSignature,
-        recordedOwnership: hasTrustedRecordOwnership(
-          entry.pid,
-          recordedSignature,
-          recordedSignatures,
-        ),
+        recordedOwnership: recordedIdentity.recordedOwnership,
       });
       previousSignatures.set(entry.pid, recordedSignature ?? signature);
     }
@@ -2626,7 +2657,7 @@ function revalidatePidfileAttempt(
       const expectedSignature =
         identity.recordedSignature ??
         identity.signature ??
-        recordedSignatures.get(pid);
+        pidfileRecordIdentity(record, version, pid).signature;
       if (typeof expectedSignature !== 'string') {
         hasUnverifiablePidfile = true;
         continue;
@@ -2670,7 +2701,7 @@ function hasUnverifiablePidfileOwnership(cacheDir, version, pidfileAttempt) {
     const commandLine = getProcessCommandLine(entry.pid);
     if (
       !commandLine ||
-      !commandLineIncludesDirectory(commandLine, dirname(entry.path))
+      !commandLineIncludesClusterLauncher(commandLine, entry, version)
     ) {
       return true;
     }
@@ -2857,29 +2888,66 @@ function liveUnverifiedPidfileSurvivors(cacheDir) {
 function recordedClusterPidSignatures(record) {
   const signatures = new Map();
   for (const pid of record.pids) {
-    signatures.set(pid, record.signatures?.[pid]);
+    signatures.set(pidfileIdentityKey(record.version, pid), {
+      version: record.version,
+      pid,
+      signature: record.signatures?.[pid],
+    });
   }
   for (const survivor of record.pidfileSurvivors ?? []) {
-    if (survivor.signalable && !signatures.has(survivor.pid)) {
-      signatures.set(survivor.pid, survivor.signature);
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
+    if (survivor.signalable && !signatures.has(key)) {
+      signatures.set(key, survivor);
     }
   }
   return signatures;
 }
 
-function hasTrustedRecordOwnership(pid, signature, signatures) {
-  return (
-    signatures.has(pid) &&
-    (!platformSupportsProcessSignature() || typeof signature === 'string')
-  );
+function pidfileRecordIdentity(record, version, pid) {
+  if (record?.version === version && record.pids.includes(pid)) {
+    const signature = record.signatures?.[pid] ?? null;
+    return {
+      signature,
+      recordedOwnership:
+        !platformSupportsProcessSignature() || typeof signature === 'string',
+    };
+  }
+
+  const survivors = record?.pidfileSurvivors ?? [];
+  const survivor =
+    survivors.find(
+      (entry) =>
+        entry.version === version && entry.pid === pid && entry.signalable,
+    ) ??
+    survivors.find((entry) => entry.version === version && entry.pid === pid);
+  if (!survivor) {
+    return { signature: null, recordedOwnership: false };
+  }
+
+  const signature = survivor.signature ?? null;
+  return {
+    signature,
+    recordedOwnership:
+      survivor.signalable === true &&
+      (!platformSupportsProcessSignature() || typeof signature === 'string'),
+  };
 }
 
 function pidfileValidationSignatures(record) {
-  const signatures = recordedClusterPidSignatures(record);
-  // Retain unverified survivor identities for pidfile checks, not for reaping.
+  const signatures = new Map();
+  if (!record) {
+    return signatures;
+  }
+  for (const pid of record.pids) {
+    signatures.set(
+      pidfileIdentityKey(record.version, pid),
+      record.signatures?.[pid],
+    );
+  }
   for (const survivor of record?.pidfileSurvivors ?? []) {
-    if (survivor.signature && !signatures.get(survivor.pid)) {
-      signatures.set(survivor.pid, survivor.signature);
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
+    if (survivor.signature && typeof signatures.get(key) !== 'string') {
+      signatures.set(key, survivor.signature);
     }
   }
   return signatures;
@@ -2890,15 +2958,16 @@ function nonSignalablePidfileSurvivorSignatures(record) {
     return new Map();
   }
 
-  const trustedSignatures = recordedClusterPidSignatures(record);
   const signatures = new Map();
   for (const survivor of record?.pidfileSurvivors ?? []) {
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
     if (
       !survivor.signalable &&
-      typeof trustedSignatures.get(survivor.pid) !== 'string' &&
-      !signatures.has(survivor.pid)
+      !pidfileRecordIdentity(record, survivor.version, survivor.pid)
+        .recordedOwnership &&
+      !signatures.has(key)
     ) {
-      signatures.set(survivor.pid, survivor.signature ?? null);
+      signatures.set(key, survivor.signature ?? null);
     }
   }
   return signatures;
@@ -2911,11 +2980,11 @@ function mergePidfileSurvivors(record, discoveredSurvivors) {
   const recordedPids = new Set(record?.pids ?? []);
 
   for (const survivor of sanitizePidfileSurvivors(discoveredSurvivors)) {
-    const key = `${survivor.version}\0${survivor.pid}`;
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
     if (seen.has(key)) {
       continue;
     }
-    if (recordedPids.has(survivor.pid)) {
+    if (record?.version === survivor.version && recordedPids.has(survivor.pid)) {
       if (
         !record?.signatures?.[survivor.pid] &&
         platformSupportsProcessSignature()
@@ -2971,9 +3040,13 @@ export function liveRecordedPids(cacheDir) {
   if (!record) {
     return [];
   }
-  return [...recordedClusterPidSignatures(record)]
-    .filter(([pid, signature]) => recordedPidIsLive(pid, signature))
-    .map(([pid]) => pid);
+  const livePids = new Set();
+  for (const { pid, signature } of recordedClusterPidSignatures(record).values()) {
+    if (recordedPidIsLive(pid, signature)) {
+      livePids.add(pid);
+    }
+  }
+  return [...livePids];
 }
 
 /**
@@ -3154,8 +3227,14 @@ async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {
  */
 export async function reapClusterProcesses(cacheDir) {
   const record = readRunningClusterRecord(cacheDir);
-  const signatures = record ? recordedClusterPidSignatures(record) : new Map();
-  const targets = new Set(liveRecordedPids(cacheDir));
+  const targets = new Map();
+  if (record) {
+    for (const { pid, signature } of recordedClusterPidSignatures(record).values()) {
+      if (recordedPidIsLive(pid, signature) && !targets.has(pid)) {
+        targets.set(pid, signature);
+      }
+    }
+  }
   // Guard against ever signalling the c8ctl process itself (or its parent) —
   // a cluster's Java process is never c8ctl, and tests stand in with own PIDs.
   targets.delete(process.pid);
@@ -3164,10 +3243,10 @@ export async function reapClusterProcesses(cacheDir) {
   }
 
   let reaped = 0;
-  for (const pid of targets) {
+  for (const [pid, signature] of targets) {
     // Carry the recorded start signature into termination so each signal is
     // gated on the ORIGINAL identity, not bare numeric liveness (#560).
-    if (await terminatePid(pid, { signature: signatures.get(pid) })) {
+    if (await terminatePid(pid, { signature })) {
       reaped += 1;
     }
   }
@@ -3226,20 +3305,18 @@ export function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
 function findPidfileSurvivors(attempts, cacheDir) {
   const candidates = [];
   const latestRecord = readRunningClusterRecord(cacheDir);
-  const trustedSignatures = latestRecord
-    ? recordedClusterPidSignatures(latestRecord)
-    : new Map();
   const knownSignatures = latestRecord
     ? pidfileValidationSignatures(latestRecord)
     : new Map();
-  for (const { processes } of attempts) {
+  for (const { version, processes } of attempts) {
     for (const [pid, identity] of processes) {
       const signature = identity.recordedSignature ?? identity.signature;
+      const key = pidfileIdentityKey(version, pid);
       if (
         typeof signature === 'string' &&
-        typeof knownSignatures.get(pid) !== 'string'
+        typeof knownSignatures.get(key) !== 'string'
       ) {
-        knownSignatures.set(pid, signature);
+        knownSignatures.set(key, signature);
       }
     }
   }
@@ -3262,13 +3339,15 @@ function findPidfileSurvivors(attempts, cacheDir) {
         continue;
       }
 
-      if (!currentSignatures.has(pid)) {
-        currentSignatures.set(pid, processStartSignature(pid));
+      const key = pidfileIdentityKey(version, pid);
+      if (!currentSignatures.has(key)) {
+        currentSignatures.set(key, processStartSignature(pid));
       }
-      const signature = currentSignatures.get(pid);
-      const recordedSignature = trustedSignatures.get(pid) ?? null;
+      const signature = currentSignatures.get(key);
+      const recordedIdentity = pidfileRecordIdentity(latestRecord, version, pid);
+      const recordedSignature = recordedIdentity.signature;
       const recordedOwnership =
-        trustedSignatures.has(pid) &&
+        recordedIdentity.recordedOwnership &&
         (!platformSupportsProcessSignature() ||
           Boolean(recordedSignature && (!signature || signature === recordedSignature)));
       candidates.push({
@@ -3280,13 +3359,13 @@ function findPidfileSurvivors(attempts, cacheDir) {
           recordedOwnership,
         },
       });
-      currentPidfileKeys.add(`${version}\0${pid}`);
+      currentPidfileKeys.add(key);
     }
   }
 
   for (const { version, processes } of attempts) {
     for (const [pid, identity] of processes) {
-      if (!currentPidfileKeys.has(`${version}\0${pid}`)) {
+      if (!currentPidfileKeys.has(pidfileIdentityKey(version, pid))) {
         candidates.push({ version, pid, identity });
       }
     }
@@ -3298,9 +3377,9 @@ function findPidfileSurvivors(attempts, cacheDir) {
       continue;
     }
 
-    const key = `${version}\0${pid}`;
+    const key = pidfileIdentityKey(version, pid);
     const currentSignature = currentPidfileKeys.has(key)
-      ? identity.signature
+      ? currentSignatures.get(key)
       : processStartSignature(pid);
     if (
       identity.recordedSignature &&
@@ -3384,9 +3463,6 @@ export async function stopC8Run(
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
   const record = readRunningClusterRecord(config.cacheDir);
-  const recordedSignatures = record
-    ? recordedClusterPidSignatures(record)
-    : new Map();
   const pidfileSignatures = record
     ? pidfileValidationSignatures(record)
     : new Map();
@@ -3491,16 +3567,13 @@ export async function stopC8Run(
       knownSignatures: pidfileSignatures,
     })) {
       const signature = processStartSignature(pid);
-      const recordedSignature = recordedSignatures.get(pid) ?? null;
+      const recordedIdentity = pidfileRecordIdentity(record, version, pid);
+      const recordedSignature = recordedIdentity.signature;
       if (signature || isPidAlive(pid)) {
         processes.set(pid, {
           signature,
           recordedSignature,
-          recordedOwnership: hasTrustedRecordOwnership(
-            pid,
-            recordedSignature,
-            recordedSignatures,
-          ),
+          recordedOwnership: recordedIdentity.recordedOwnership,
         });
       }
     }
@@ -3537,15 +3610,12 @@ export async function stopC8Run(
         continue;
       }
       const signature = processStartSignature(pid);
-      const recordedSignature = recordedSignatures.get(pid) ?? null;
+      const recordedIdentity = pidfileRecordIdentity(record, version, pid);
+      const recordedSignature = recordedIdentity.signature;
       pidfileAttempt.set(pid, {
         signature,
         recordedSignature,
-        recordedOwnership: hasTrustedRecordOwnership(
-          pid,
-          recordedSignature,
-          recordedSignatures,
-        ),
+        recordedOwnership: recordedIdentity.recordedOwnership,
       });
       previousSignatures.set(pid, recordedSignature ?? signature);
     }
@@ -3577,7 +3647,7 @@ export async function stopC8Run(
         version,
         pidfileAttempt,
         previousSignatures,
-        recordedSignatures,
+        record,
       )
     ) {
       continue;
@@ -3670,16 +3740,13 @@ export async function stopC8Run(
           if (!isPidAlive(pid) || pidfileAttempt.has(pid)) {
             continue;
           }
+          const recordedIdentity = pidfileRecordIdentity(record, version, pid);
           pidfileAttempt.set(pid, {
             signature: previousSignatures.has(pid)
               ? previousSignatures.get(pid)
               : processStartSignature(pid),
-            recordedSignature: recordedSignatures.get(pid) ?? null,
-            recordedOwnership: hasTrustedRecordOwnership(
-              pid,
-              recordedSignatures.get(pid),
-              recordedSignatures,
-            ),
+            recordedSignature: recordedIdentity.signature,
+            recordedOwnership: recordedIdentity.recordedOwnership,
           });
         }
 
@@ -3729,22 +3796,11 @@ export async function stopC8Run(
   const signaturesBeforeReaping = recordBeforeReaping
     ? recordedClusterPidSignatures(recordBeforeReaping)
     : new Map();
-  const reaperCandidates = [];
-  for (const pid of liveRecordedPids(config.cacheDir)) {
-    const signature = signaturesBeforeReaping.get(pid) ?? null;
-    if (recordBeforeReaping?.pids.includes(pid)) {
-      reaperCandidates.push({
-        version: recordBeforeReaping.version,
-        pid,
-        signature,
-      });
-    }
-    for (const survivor of recordBeforeReaping?.pidfileSurvivors ?? []) {
-      if (survivor.pid === pid) {
-        reaperCandidates.push({ version: survivor.version, pid, signature });
-      }
-    }
-  }
+  const reaperCandidates = recordBeforeReaping
+    ? [...signaturesBeforeReaping.values()].filter(({ pid, signature }) =>
+        recordedPidIsLive(pid, signature),
+      )
+    : [];
 
   // Reap any cluster processes still alive after the c8run stop attempt(s).
   // In the orphan case (#560) the version's install dir — and with it the
@@ -3854,7 +3910,10 @@ export async function stopC8Run(
       livePidfileSurvivors(persistedRecord)
         .filter(
           (survivor) =>
-            !persistedRecord?.pids.includes(survivor.pid) &&
+            !(
+              persistedRecord?.version === survivor.version &&
+              persistedRecord.pids.includes(survivor.pid)
+            ) &&
             remainingPids.includes(survivor.pid),
         )
         .map((survivor) => survivor.pid),
