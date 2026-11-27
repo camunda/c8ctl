@@ -1351,6 +1351,87 @@ describe("c8ctl setup", () => {
 		}
 	});
 
+	test("ignores EACCES and EPERM for child blueprint markers", async () => {
+		for (const errorCode of ["EACCES", "EPERM"]) {
+			const stub = stubbedExecution();
+			try {
+				stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+				const blueprintDirectory = join(stub.cwd, "rocket-launch");
+				mkdirSync(blueprintDirectory);
+				writeFileSync(
+					join(blueprintDirectory, ".c8ctl-blueprint.json"),
+					JSON.stringify({
+						id: "rocket-launch",
+						files: ["rocket-launch.bpmn"],
+					}),
+				);
+				writeFileSync(
+					join(blueprintDirectory, "rocket-launch.bpmn"),
+					"<definitions />\n",
+				);
+
+				const unreadableDirectory = join(stub.cwd, "locked");
+				mkdirSync(unreadableDirectory);
+				stub.options.env.C8CTL_SETUP_STUB_MARKER_PATH = join(
+					"locked",
+					".c8ctl-blueprint.json",
+				);
+				stub.options.env.C8CTL_SETUP_STUB_MARKER_ERROR = errorCode;
+
+				const removal = await c8WithOptions(
+					stub.options,
+					"setup",
+					"--remove",
+					"--yes",
+				);
+				const output = `${removal.stderr}\n${removal.stdout}`;
+				assert.strictEqual(removal.status, 0, output);
+				assert.match(output, /Removed Rocket Launch blueprint files/);
+				assert.doesNotMatch(output, /Could not inspect setup blueprint marker/);
+				assert.ok(existsSync(unreadableDirectory));
+				assert.ok(!existsSync(join(blueprintDirectory, "rocket-launch.bpmn")));
+				assert.ok(
+					!existsSync(join(blueprintDirectory, ".c8ctl-blueprint.json")),
+				);
+			} finally {
+				stub.cleanup();
+			}
+		}
+	});
+
+	test("reports EACCES and EPERM for the current-directory blueprint marker", async () => {
+		for (const errorCode of ["EACCES", "EPERM"]) {
+			const stub = stubbedExecution();
+			try {
+				stub.options.env.C8CTL_SETUP_STUB_MODELER = "absent";
+				const markerPath = join(stub.cwd, ".c8ctl-blueprint.json");
+				const marker = JSON.stringify({
+					id: "rocket-launch",
+					files: ["rocket-launch.bpmn"],
+				});
+				writeFileSync(markerPath, marker);
+				stub.options.env.C8CTL_SETUP_STUB_MARKER_PATH = ".c8ctl-blueprint.json";
+				stub.options.env.C8CTL_SETUP_STUB_MARKER_ERROR = errorCode;
+
+				const removal = await c8WithOptions(
+					stub.options,
+					"setup",
+					"--remove",
+					"--yes",
+				);
+				const output = `${removal.stderr}\n${removal.stdout}`;
+				assert.strictEqual(removal.status, 1, output);
+				assert.match(
+					output,
+					/Warning: Could not inspect setup blueprint marker/,
+				);
+				assert.strictEqual(readFileSync(markerPath, "utf-8"), marker);
+			} finally {
+				stub.cleanup();
+			}
+		}
+	});
+
 	test("continues cleanup when blueprint marker inspection fails", async () => {
 		const stub = stubbedExecution();
 		try {
