@@ -2778,7 +2778,7 @@ function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
   );
 }
 
-function findTimedOutPidfileSurvivors(attempts) {
+function findPidfileSurvivors(attempts) {
   const survivors = new Set();
   for (const attempt of attempts) {
     for (const [pid, identity] of attempt) {
@@ -2937,7 +2937,7 @@ export async function stopC8Run(
   let attempted = 0;
   let hadSuccessfulStop = false;
   let lastError;
-  const timedOutPidfileAttempts = [];
+  const pidfileAttempts = [];
 
   for (const version of versionsToTry) {
     // A pidfile can become stale between version discovery and execution. Keep
@@ -2952,6 +2952,14 @@ export async function stopC8Run(
     if (previousSignatures.size === 0) {
       continue;
     }
+    const pidfileAttempt = new Map();
+    for (const [pid, signature] of previousSignatures) {
+      pidfileAttempt.set(pid, {
+        signature,
+        recordedSignature: record?.signatures?.[pid] ?? null,
+      });
+    }
+    pidfileAttempts.push(pidfileAttempt);
 
     const versionConfig = { cacheDir: config.cacheDir, version };
     let binaryPath;
@@ -3021,23 +3029,21 @@ export async function stopC8Run(
           { timeoutMs },
         ))
       ) {
-        const timedOutPids = new Map();
         const candidatePids = new Set([
           ...previousSignatures.keys(),
           ...collectPidfilePids(config.cacheDir, { version }),
         ]);
         for (const pid of candidatePids) {
-          if (!isPidAlive(pid)) {
+          if (!isPidAlive(pid) || pidfileAttempt.has(pid)) {
             continue;
           }
-          timedOutPids.set(pid, {
+          pidfileAttempt.set(pid, {
             signature: previousSignatures.has(pid)
               ? previousSignatures.get(pid)
               : processStartSignature(pid),
             recordedSignature: record?.signatures?.[pid] ?? null,
           });
         }
-        timedOutPidfileAttempts.push(timedOutPids);
 
         const purgeHint = purge
           ? ` Once they exit, run: c8ctl cluster purge ${markerVersion || record?.version || version}.`
@@ -3099,7 +3105,7 @@ export async function stopC8Run(
         'PID record so "c8ctl cluster stop" can retry.',
     );
   }
-  const pidfileSurvivors = findTimedOutPidfileSurvivors(timedOutPidfileAttempts);
+  const pidfileSurvivors = findPidfileSurvivors(pidfileAttempts);
 
   // The port record describes the cluster that was just stopped. Only drop it
   // once NOTHING still tracks a live process — neither the durable PID record
