@@ -3966,6 +3966,26 @@ describe("Cluster Plugin – stopC8Run", () => {
 			),
 			true,
 		);
+		for (const classpathFlag of ["-cp", "-classpath"]) {
+			assert.strictEqual(
+				plugin.commandLineIncludesClusterLauncher(
+					`java ${classpathFlag} ${join(spacedComponentDir, "lib", "*")} io.camunda.application.StandaloneCamunda`,
+					{ path: join(spacedInstallDir, "camunda.process") },
+					version,
+				),
+				true,
+				`${classpathFlag} must recognize an unquoted flattened classpath containing spaces`,
+			);
+		}
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${join(spacedInstallDir, "*")} org.springframework.boot.loader.launch.PropertiesLauncher`,
+				{ path: join(spacedInstallDir, "connectors.process") },
+				version,
+			),
+			true,
+			"Connectors classpaths must also support spaces in flattened output",
+		);
 	});
 
 	test("ignores JVM properties after the classpath when checking ownership", () => {
@@ -4022,6 +4042,34 @@ describe("Cluster Plugin – stopC8Run", () => {
 			),
 			false,
 		);
+		const spacedInstallDir = join(
+			tempDir,
+			"cache with spaces",
+			`c8run-${version}`,
+			`c8run-${version}`,
+		);
+		const spacedComponentDir = join(
+			spacedInstallDir,
+			`camunda-zeebe-${version}`,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp /opt/unrelated/app.jar -Dloader.path=${join(spacedComponentDir, "lib")} ${mainClass}`,
+				{ path: join(spacedInstallDir, "camunda.process") },
+				version,
+			),
+			false,
+			"a path in a JVM property must not authorize ownership",
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp /opt/unrelated/app.jar -Dloader.path=${join(spacedInstallDir, "*")} ${mainClass}`,
+				{ path: join(spacedInstallDir, "connectors.process") },
+				version,
+			),
+			false,
+			"a Connectors launcher path in a JVM property must not authorize ownership",
+		);
 	});
 
 	test("stops Connectors and Camunda processes from launcher/classpath metadata", {
@@ -4036,7 +4084,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			{ id: "camunda-batch", component: "camunda", kind: "batch" },
 			{ id: "camunda-java", component: "camunda", kind: "camunda-classpath" },
 		] as const) {
-			const cacheDir = join(tempDir, fixture.id);
+			const cacheDir = join(tempDir, "cache with spaces", fixture.id);
 			const installDir = join(cacheDir, `c8run-${version}`, `c8run-${version}`);
 			const pidfile = join(installDir, `${fixture.component}.process`);
 			const stopMarker = join(cacheDir, "stop-called");
@@ -6458,10 +6506,51 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 	// the snapshot function used at that call site with a live child's pidfile
 	// and assert the cache-root record captures the live PID and its signature,
 	// so a regression that drops this snapshot cannot pass unnoticed.
-	test("recordRunningClusterPids snapshots the live PID and its signature from the install dir", () => {
+	test("recordRunningClusterPids does not trust a pidfile PID owned by another process", async () => {
 		const child = spawn(
 			process.execPath,
 			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "unrelated process must have a PID");
+
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(child.pid));
+
+			plugin.recordRunningClusterPids({ cacheDir: tempDir, version: "8.9" });
+
+			assert.ok(
+				!plugin.readRunningClusterRecord(tempDir).pids.includes(child.pid),
+				"a signature must not bless a live PID whose command line does not match the cluster",
+			);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("recordRunningClusterPids snapshots the live PID and its signature from the install dir", () => {
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		const launcherPath = join(
+			versionDir,
+			"camunda-zeebe-8.9.5",
+			"bin",
+			"camunda",
+		);
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)", launcherPath],
 			{ stdio: "ignore" },
 		);
 		return new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -6473,7 +6562,6 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 					throw new Error("spawned child has no PID");
 				}
 				const pid = child.pid;
-				const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
 				mkdirSync(versionDir, { recursive: true });
 				writeFileSync(join(versionDir, "camunda.process"), String(pid));
 
@@ -6605,14 +6693,73 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		}
 	});
 
+	test("reapClusterProcesses does not signal a PID when its signature cannot be verified", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const mockBinDir = join(tempDir, "mock-bin");
+		const originalPlatform = os.platform;
+		const originalPath = process.env.PATH;
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "recorded process must have a PID");
+			mkdirSync(mockBinDir, { recursive: true });
+			writeFileSync(join(mockBinDir, "ps"), "#!/bin/sh\nexit 1\n", {
+				mode: 0o755,
+			});
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [child.pid],
+				signatures: { [child.pid]: "ps:original-process" },
+			});
+			os.platform = () => "darwin";
+			syncBuiltinESMExports();
+			process.env.PATH = mockBinDir;
+
+			assert.strictEqual(await plugin.reapClusterProcesses(tempDir), 0);
+			assert.strictEqual(
+				plugin.isPidAlive(child.pid),
+				true,
+				"a live process must not be signalled when its recorded identity cannot be checked",
+			);
+		} finally {
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
 	// #560 — on a platform that can fingerprint processes, a recorded PID must
 	// never be persisted without a signature: otherwise a number reused after
 	// the process exits would fall back to numeric-only liveness and the reap
 	// path could signal an unrelated process.
 	test("recordRunningClusterPids records no PID without a signature on a fingerprinting platform", async () => {
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		const launcherPath = join(
+			versionDir,
+			"camunda-zeebe-8.9.5",
+			"bin",
+			"camunda",
+		);
 		const child = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			["-e", "setInterval(() => {}, 1e9)", launcherPath],
 			{ stdio: "ignore" },
 		);
 		try {
@@ -6624,7 +6771,6 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 				throw new Error("spawned child has no PID");
 			}
 			const pid = child.pid;
-			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
 			mkdirSync(versionDir, { recursive: true });
 			writeFileSync(join(versionDir, "camunda.process"), String(pid));
 
@@ -6666,9 +6812,16 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		if (!plugin.platformSupportsProcessSignature()) {
 			return; // liveness-only fallback platform: no signature branch to exercise
 		}
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		const launcherPath = join(
+			versionDir,
+			"camunda-zeebe-8.9.5",
+			"bin",
+			"camunda",
+		);
 		const child = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			["-e", "setInterval(() => {}, 1e9)", launcherPath],
 			{ stdio: "ignore" },
 		);
 		try {
@@ -6680,7 +6833,6 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 				throw new Error("spawned child has no PID");
 			}
 			const pid = child.pid;
-			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
 			mkdirSync(versionDir, { recursive: true });
 			writeFileSync(join(versionDir, "camunda.process"), String(pid));
 
@@ -6726,9 +6878,16 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		if (!plugin.platformSupportsProcessSignature()) {
 			return; // liveness-only fallback platform: no signature branch to exercise
 		}
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		const launcherPath = join(
+			versionDir,
+			"camunda-zeebe-8.9.5",
+			"bin",
+			"camunda",
+		);
 		const child = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			["-e", "setInterval(() => {}, 1e9)", launcherPath],
 			{ stdio: "ignore" },
 		);
 		try {
@@ -6740,7 +6899,6 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 				throw new Error("spawned child has no PID");
 			}
 			const pid = child.pid;
-			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
 			mkdirSync(versionDir, { recursive: true });
 			writeFileSync(join(versionDir, "camunda.process"), String(pid));
 

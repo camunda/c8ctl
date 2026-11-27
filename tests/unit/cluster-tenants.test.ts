@@ -387,15 +387,23 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 	});
 
 	test("a partial startup failure records surviving tenant connectors for later recovery", async () => {
+		const installDir = join(cacheDir, "c8run-8.10.1");
+		const launcherPath = join(
+			installDir,
+			"connectors-8.10.1",
+			"bin",
+			"connectors",
+		);
 		const child = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1000)"],
+			["-e", "setInterval(() => {}, 1000)", launcherPath],
 			{ stdio: "ignore" },
 		);
 		assert.ok(child.pid);
-		const pidfile = join(cacheDir, "c8run-8.10.1", "connectors-hr.process");
+		// The stand-in command line must identify a Connectors process.
+		const pidfile = join(installDir, "connectors-hr.process");
 		// The fake launcher creates a pidfile while starting, after the pre-start guard.
-		const binary = join(cacheDir, "c8run-8.10.1", "c8run");
+		const binary = join(installDir, "c8run");
 		const original = readFileSync(binary, "utf8");
 		writeFileSync(
 			binary,

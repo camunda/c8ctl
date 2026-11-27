@@ -2241,8 +2241,9 @@ export function isPidAlive(pid) {
  * A best-effort, platform-native "start signature" for a PID — enough to tell
  * the ORIGINAL process apart from an unrelated one that reused the same numeric
  * PID after the original exited. Returns a stable string, or null when the
- * platform/environment gives us nothing to fingerprint with (in which case
- * callers fall back to a liveness-only check). Never throws.
+ * platform/environment gives us nothing to fingerprint with. Callers decide
+ * whether a missing signature is acceptable; signal paths fail closed. Never
+ * throws.
  */
 /**
  * True on platforms where `processStartSignature()` can produce a real
@@ -2411,50 +2412,104 @@ function commandLineIncludesArgumentPath(commandLine, path) {
   ).test(normalizeProcessPath(commandLine));
 }
 
+function splitProcessCommandLine(commandLine) {
+  const args = [];
+  let argument = '';
+  let quote = null;
+  let hasArgument = false;
+
+  for (let index = 0; index < commandLine.length; index += 1) {
+    const character = commandLine[index];
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else if (character === '\\' && commandLine[index + 1] === quote) {
+        argument += quote;
+        index += 1;
+      } else {
+        argument += character;
+      }
+      continue;
+    }
+
+    if (
+      (character === '"' || character === "'") &&
+      (argument.length === 0 || commandLine[index - 1] === '=')
+    ) {
+      quote = character;
+      hasArgument = true;
+    } else if (/\s/.test(character)) {
+      if (hasArgument) {
+        args.push(argument);
+        argument = '';
+        hasArgument = false;
+      }
+    } else if (
+      character === '\\' &&
+      index + 1 < commandLine.length &&
+      /\s/.test(commandLine[index + 1])
+    ) {
+      argument += commandLine[index + 1];
+      index += 1;
+      hasArgument = true;
+    } else {
+      argument += character;
+      hasArgument = true;
+    }
+  }
+
+  if (hasArgument) {
+    args.push(argument);
+  }
+  return args;
+}
+
 function commandLineIncludesJavaClasspath(
   commandLine,
   classpathPath,
   mainClassPattern,
 ) {
-  if (Array.isArray(commandLine)) {
-    const mainClassIndex = commandLine.findIndex(
-      (argument) => mainClassPattern.test(argument),
-    );
-    if (mainClassIndex === -1) {
+  const args = Array.isArray(commandLine)
+    ? commandLine
+    : splitProcessCommandLine(commandLine);
+  const mainClassIndex = args.findIndex((argument) => {
+    if (argument.startsWith('-')) {
       return false;
     }
-
-    let classpath;
-    for (let index = 0; index + 1 < mainClassIndex; index += 1) {
-      if (commandLine[index] === '-cp' || commandLine[index] === '-classpath') {
-        classpath = commandLine[index + 1];
-      }
-    }
-    return Boolean(
-      classpath && commandLineIncludesPath(classpath, classpathPath),
-    );
+    return mainClassPattern.exec(argument)?.[0] === argument;
+  });
+  if (mainClassIndex === -1) {
+    return false;
   }
 
-  const mainClass = mainClassPattern.exec(commandLine);
-  const classpathOption =
-    /(?:^|\s)-(?:cp|classpath)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(
-      commandLine,
-    );
+  let classpathOptionIndex = -1;
+  for (let index = 0; index < mainClassIndex; index += 1) {
+    if (args[index] === '-cp' || args[index] === '-classpath') {
+      classpathOptionIndex = index;
+    }
+  }
   if (
-    !mainClass ||
-    !classpathOption ||
-    mainClass.index === undefined ||
-    classpathOption.index === undefined
+    classpathOptionIndex === -1 ||
+    classpathOptionIndex + 1 >= mainClassIndex
   ) {
     return false;
   }
 
-  const classpath = classpathOption[1] ?? classpathOption[2] ?? classpathOption[3];
-  const classpathEnd = classpathOption.index + classpathOption[0].length;
+  const classpathArgs = [];
+  for (
+    let index = classpathOptionIndex + 1;
+    index < mainClassIndex;
+    index += 1
+  ) {
+    if (args[index].startsWith('-')) {
+      break;
+    }
+    classpathArgs.push(args[index]);
+  }
+  // macOS/BSD ps flattens argv; rejoin unquoted path fragments, but stop at JVM options.
+  const classpath = classpathArgs.join(' ');
   return Boolean(
-    classpath &&
-      classpathEnd <= mainClass.index &&
-      commandLineIncludesPath(classpath, classpathPath),
+    classpath && commandLineIncludesPath(classpath, classpathPath),
   );
 }
 
@@ -2524,9 +2579,9 @@ export function commandLineIncludesClusterLauncher(commandLine, entry, version) 
  * signature-less PID (#568), so a signature-less entry there can only be a
  * stale/legacy/hand-edited `cluster.pids` and is rejected rather than risk
  * signalling a reused, unrelated process. When a signature WAS recorded but the
- * platform cannot reproduce one now (transient `ps` failure), the guard still
- * degrades to liveness only, never inventing a false negative that would strand
- * a real orphan.
+ * platform cannot reproduce one now (transient `ps` failure), the guard treats
+ * the PID as possibly live for status and completion checks. Signal paths use
+ * `recordedPidIsSignalable()` and fail closed when identity cannot be verified.
  */
 export function recordedPidIsLive(pid, signature) {
   if (!isPidAlive(pid)) {
@@ -2543,6 +2598,17 @@ export function recordedPidIsLive(pid, signature) {
   }
   const current = processStartSignature(pid);
   return current === null || current === signature;
+}
+
+function recordedPidIsSignalable(pid, signature) {
+  if (!isPidAlive(pid)) {
+    return false;
+  }
+  if (!signature) {
+    return !platformSupportsProcessSignature();
+  }
+  const current = processStartSignature(pid);
+  return current !== null && current === signature;
 }
 
 /**
@@ -3213,8 +3279,8 @@ function captureSignature(pid, { signatureOf, attempts, retryDelayMs }) {
  * Snapshot the live c8run PIDs for the just-started version into the durable
  * cache-root record, so the cluster stays trackable (status/stop) even if its
  * install dir is later replaced or removed (#560). Each PID is fingerprinted
- * with a start signature so a later stop/status can tell the recorded process
- * apart from an unrelated one that reused its PID.
+ * with a start signature and checked against its launcher command line so a
+ * later stop/status can distinguish it from an unrelated process or PID reuse.
  * A transient fingerprint failure on a live PID is retried
  * (`signatureAttempts`, exponential backoff from `signatureRetryDelayMs`)
  * rather than silently dropping the PID.
@@ -3232,35 +3298,46 @@ export function recordRunningClusterPids(
   const canFingerprint = platformSupportsProcessSignature();
   const pids = [];
   const signatures = {};
-  for (const pid of collectPidfilePids(config.cacheDir, { version: config.version })) {
+  const entriesByPid = new Map();
+  for (const entry of collectPidfileEntries(config.cacheDir, { version: config.version })) {
+    const entries = entriesByPid.get(entry.pid) ?? [];
+    entries.push(entry);
+    entriesByPid.set(entry.pid, entries);
+  }
+  for (const [pid, entries] of entriesByPid) {
     if (canFingerprint) {
-      // Capture identity with a SINGLE combined liveness+fingerprint operation.
-      // processStartSignature runs one `ps`/PowerShell query that already
-      // returns null for a dead PID, so — unlike a separate isPidAlive()
-      // pre-check followed by a later signature capture — there is no window in
-      // which the liveness probe and the fingerprint could observe two
-      // different processes and record a reused PID's identity as c8run's
-      // (#560). A null result means the PID is not a live, fingerprintable
-      // process, so it is omitted: persisting it without a signature would let
-      // a later reuse of the number fall back to numeric liveness and let the
-      // reap path signal an unrelated process.
-      //
-      // A null can also be a transient query failure/timeout on a live process;
-      // captureSignature() retries those, because a PID dropped here is never
-      // signalled by stop and would be left behind as an orphan.
+      // Capture before the ownership query. If the PID changes during that
+      // query, later signature validation rejects the stale identity instead
+      // of adopting the replacement process as c8run.
       const sig = captureSignature(pid, {
         signatureOf,
         attempts: signatureAttempts,
         retryDelayMs: signatureRetryDelayMs,
       });
-      if (sig) {
-        signatures[pid] = sig;
-        pids.push(pid);
-      } else if (isPidAlive(pid)) {
-        getLogger().warn(
-          `Could not fingerprint running cluster process ${pid}; it will not be tracked for "c8ctl cluster stop" and may need to be stopped manually.`,
-        );
+      if (!sig) {
+        if (isPidAlive(pid)) {
+          getLogger().warn(
+            `Could not fingerprint running cluster process ${pid}; it will not be tracked for "c8ctl cluster stop" and may need to be stopped manually.`,
+          );
+        }
+        continue;
       }
+
+      const commandLine = getProcessCommandLine(pid);
+      if (
+        !commandLine ||
+        !entries.some((entry) =>
+          commandLineIncludesClusterLauncher(commandLine, entry, entry.version),
+        )
+      ) {
+        getLogger().warn(
+          `Could not verify ownership of running cluster process ${pid}; it will not be tracked for orphan recovery. Stop it before removing its installation.`,
+        );
+        continue;
+      }
+
+      signatures[pid] = sig;
+      pids.push(pid);
     } else if (isPidAlive(pid)) {
       // This platform can't fingerprint any process, so no recorded PID can
       // carry a signature; keep the live PID so the cluster stays trackable
@@ -3306,11 +3383,9 @@ export function isVersionInstanceRunning(cacheDir, version) {
  */
 async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {}) {
   // Revalidate the recorded identity before EVERY signal, not just numeric
-  // liveness. If the original process exits and its PID is reused (e.g. during
-  // the SIGTERM grace window), the captured start signature no longer matches
-  // and we must NOT escalate to an unrelated process (#560). recordedPidIsLive
-  // degrades to a liveness-only check when no signature was captured.
-  if (!recordedPidIsLive(pid, signature)) {
+  // liveness. If the signature query fails, keep treating the PID as possibly
+  // live for status, but never signal it without confirming its identity.
+  if (!recordedPidIsSignalable(pid, signature)) {
     return false;
   }
   try {
@@ -3330,7 +3405,7 @@ async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {
   while (isPidAlive(pid) && Date.now() < deadline) {
     await sleep(pollMs);
   }
-  if (recordedPidIsLive(pid, signature)) {
+  if (recordedPidIsSignalable(pid, signature)) {
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
