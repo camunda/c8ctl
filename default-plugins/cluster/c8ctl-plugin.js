@@ -2337,10 +2337,11 @@ function getProcessCommandLine(pid) {
   try {
     if (platform === 'linux') {
       const commandLine = readFileSync(`/proc/${pid}/cmdline`, 'utf-8')
-        .split('\0')
-        .filter(Boolean)
-        .join(' ');
-      return commandLine || null;
+        .split('\0');
+      if (commandLine.at(-1) === '') {
+        commandLine.pop();
+      }
+      return commandLine.length ? commandLine : null;
     }
     if (platform === 'darwin' || platform.endsWith('bsd')) {
       const commandLine = execFileSync(
@@ -2371,12 +2372,8 @@ function getProcessCommandLine(pid) {
 }
 
 function commandLineIncludesPath(commandLine, path) {
-  const normalize = (value) => {
-    const normalized = value.replace(/\\/g, '/');
-    return osPlatform() === 'win32' ? normalized.toLowerCase() : normalized;
-  };
-  const expected = stripTrailingSlashes(normalize(resolve(path)));
-  const actual = normalize(commandLine);
+  const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
+  const actual = normalizeProcessPath(commandLine);
   let index = actual.indexOf(expected);
 
   while (index !== -1) {
@@ -2394,26 +2391,71 @@ function commandLineIncludesPath(commandLine, path) {
   return false;
 }
 
+function normalizeProcessPath(value) {
+  const normalized = value.replace(/\\/g, '/');
+  return osPlatform() === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function commandLineIncludesArgumentPath(commandLine, path) {
+  const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
+  if (Array.isArray(commandLine)) {
+    return commandLine.some(
+      (argument) =>
+        stripTrailingSlashes(normalizeProcessPath(argument)) === expected,
+    );
+  }
+
+  const escapedPath = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(
+    `(?:^|\\s)(?:"${escapedPath}"|'${escapedPath}'|${escapedPath})(?=\\s|$)`,
+  ).test(normalizeProcessPath(commandLine));
+}
+
 function commandLineIncludesJavaClasspath(
   commandLine,
   classpathPath,
   mainClassPattern,
 ) {
+  if (Array.isArray(commandLine)) {
+    const mainClassIndex = commandLine.findIndex(
+      (argument) => mainClassPattern.test(argument),
+    );
+    if (mainClassIndex === -1) {
+      return false;
+    }
+
+    let classpath;
+    for (let index = 0; index + 1 < mainClassIndex; index += 1) {
+      if (commandLine[index] === '-cp' || commandLine[index] === '-classpath') {
+        classpath = commandLine[index + 1];
+      }
+    }
+    return Boolean(
+      classpath && commandLineIncludesPath(classpath, classpathPath),
+    );
+  }
+
   const mainClass = mainClassPattern.exec(commandLine);
-  const classpathOption = /(?:^|\s)-(?:cp|classpath)\s+/.exec(commandLine);
+  const classpathOption =
+    /(?:^|\s)-(?:cp|classpath)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(
+      commandLine,
+    );
   if (
     !mainClass ||
     !classpathOption ||
     mainClass.index === undefined ||
-    classpathOption.index === undefined ||
-    classpathOption.index >= mainClass.index
+    classpathOption.index === undefined
   ) {
     return false;
   }
 
-  const classpathStart = classpathOption.index + classpathOption[0].length;
-  const classpath = commandLine.slice(classpathStart, mainClass.index);
-  return commandLineIncludesPath(classpath, classpathPath);
+  const classpath = classpathOption[1] ?? classpathOption[2] ?? classpathOption[3];
+  const classpathEnd = classpathOption.index + classpathOption[0].length;
+  return Boolean(
+    classpath &&
+      classpathEnd <= mainClass.index &&
+      commandLineIncludesPath(classpath, classpathPath),
+  );
 }
 
 function commandLineIncludesConnectorsClasspath(commandLine, installDir) {
@@ -2456,9 +2498,9 @@ export function commandLineIncludesClusterLauncher(commandLine, entry, version) 
       executable,
     );
     if (
-      commandLineIncludesPath(commandLine, componentBin) ||
+      commandLineIncludesArgumentPath(commandLine, componentBin) ||
       (component === 'camunda-zeebe' &&
-        commandLineIncludesPath(commandLine, `${componentBin}.bat`))
+        commandLineIncludesArgumentPath(commandLine, `${componentBin}.bat`))
     ) {
       return true;
     }
