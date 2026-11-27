@@ -35,7 +35,7 @@ import {
 	describe,
 	test,
 } from "node:test";
-import { c8WithEnv, c8WithOptions } from "../utils/cli.ts";
+import { c8SignalledWhen, c8WithEnv } from "../utils/cli.ts";
 import { listenOnLoopback, sendHalfThenDrop } from "../utils/http-server.ts";
 
 describe("CLI behavioural: cluster start failure", () => {
@@ -527,6 +527,7 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		assert.strictEqual((await start(baseUrl)).status, 7);
 		assert.strictEqual(launched(), "ga");
 	});
+
 	test("an interrupt during extraction removes the staging dir and keeps the existing build", async () => {
 		// An extractor that never finishes, so the signal lands mid-extraction.
 		const fakeBin = join(cacheDir, "fake-bin");
@@ -535,15 +536,15 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 			const extractor = join(fakeBin, name);
 			writeFileSync(
 				extractor,
-				`#!/bin/sh\ntouch "${join(fakeBin, "started")}"\nsleep 60\n`,
+				`#!/bin/sh\ntouch "${join(fakeBin, "started")}"\nexec sleep 60\n`,
 			);
 			chmodSync(extractor, 0o755);
 		}
 
-		// `timeout` makes the spawn helper SIGTERM the CLI.
-		const result = await c8WithOptions(
+		const result = await c8SignalledWhen(
 			{
-				timeout: 5_000,
+				signal: "SIGTERM",
+				when: () => existsSync(join(fakeBin, "started")),
 				env: {
 					C8RUN_CACHE_DIR: cacheDir,
 					C8CTL_OUTPUT_MODE: "text",
@@ -556,10 +557,7 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 			"start",
 		);
 
-		assert.ok(
-			existsSync(join(fakeBin, "started")),
-			`extraction never started:\n${result.stdout}${result.stderr}`,
-		);
+		assert.strictEqual(result.status, 143, result.stdout + result.stderr);
 		assert.ok(
 			existsSync(join(alphaBuildDir(), "c8run")),
 			"the alpha build must be kept",
@@ -595,5 +593,25 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		seed();
 		assert.strictEqual((await cluster(baseUrl, "delete", "8.11")).status, 0);
 		assert.deepStrictEqual(leftovers(), [live]);
+	});
+
+	test("a backup left by a dead process is restored when the install dir is missing", async () => {
+		const backup = join(cacheDir, ".replaced-c8run-8.11-2147483646");
+		mkdirSync(join(backup, "camunda-data"), { recursive: true });
+		writeFileSync(join(backup, "camunda-data", "state.db"), "deployments");
+		rmSync(join(cacheDir, "c8run-8.11"), { recursive: true });
+
+		const result = await cluster(baseUrl, "purge", "8.11");
+
+		assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+		assert.match(result.stdout, /deleted: camunda-data/);
+		assert.deepStrictEqual(
+			readdirSync(cacheDir).filter((name) => name.startsWith(".")),
+			[],
+		);
+		assert.ok(
+			existsSync(join(cacheDir, "c8run-8.11")),
+			"the build must be back",
+		);
 	});
 });
