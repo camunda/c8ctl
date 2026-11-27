@@ -43,6 +43,8 @@ const SETUP_STUB = pathToFileURL(
 const BRAND_BLUE = "\x1b[38;2;79;57;246m";
 const PROMPT_TEXT = "What should we set up for you?";
 const BLUEPRINT_PROMPT_TEXT = "Which starter blueprint should we install?";
+const SETUP_GUIDE_URL =
+	"https://docs.camunda.io/docs/apis-tools/c8ctl/getting-started/";
 
 function vscodeMcpConfigPath(home: string): string {
 	const appData =
@@ -411,6 +413,12 @@ describe("c8ctl setup", () => {
 			"setup",
 		);
 		assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+		const guideIndex = result.stdout.indexOf(`Setup guide: ${SETUP_GUIDE_URL}`);
+		const welcomeIndex = result.stdout.indexOf("Welcome to Camunda 8");
+		assert.ok(
+			guideIndex >= 0 && guideIndex < welcomeIndex,
+			"setup guide should print before the welcome banner",
+		);
 		assert.match(result.stdout, /Welcome to Camunda 8/);
 		// No plan preview: the step report is the only step listing.
 		assert.doesNotMatch(result.stdout, /Here's what c8ctl setup will do/);
@@ -543,6 +551,12 @@ describe("c8ctl setup", () => {
 			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
 			assert.doesNotMatch(result.stderr, /What should we set up/);
 			const out = stripVTControlCharacters(result.stdout + result.stderr);
+			const guideIndex = out.indexOf(`Setup guide: ${SETUP_GUIDE_URL}`);
+			const firstStepIndex = out.indexOf("Check prerequisites");
+			assert.ok(
+				guideIndex >= 0 && guideIndex < firstStepIndex,
+				"setup guide should print before the first setup step",
+			);
 			stepLine(out, "Check prerequisites", "SUCCESS");
 			stepLine(out, "Start the local cluster", "SUCCESS");
 			stepLine(out, "Install Desktop Modeler", "SUCCESS");
@@ -2721,6 +2735,13 @@ describe("c8ctl setup", () => {
 				},
 			);
 			assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+			const intro = stripVTControlCharacters(result.stderr);
+			const guideIndex = intro.indexOf(`Setup guide: ${SETUP_GUIDE_URL}`);
+			const promptIndex = intro.indexOf(PROMPT_TEXT);
+			assert.ok(
+				guideIndex >= 0 && guideIndex < promptIndex,
+				"setup guide should print before the first interactive prompt",
+			);
 			assert.ok(result.stderr.includes(PROMPT_TEXT), "prompt not rendered");
 			// Components are grouped: section headers precede their options.
 			const menu = stripVTControlCharacters(result.stderr);
