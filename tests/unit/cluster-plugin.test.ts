@@ -3,7 +3,7 @@
  */
 
 import assert from "node:assert";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
 	appendFileSync,
@@ -3851,6 +3851,126 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	test("stops Connectors classpath and Camunda batch processes from multi-PID files", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const version = "8.10.1";
+		const stalePid = 999_999_999;
+		assert.equal(plugin.isPidAlive(stalePid), false);
+
+		for (const component of ["connectors", "camunda"] as const) {
+			const cacheDir = join(tempDir, component);
+			const installDir = join(
+				cacheDir,
+				`c8run-${version}`,
+				`c8run-${version}`,
+			);
+			const pidfile = join(installDir, `${component}.process`);
+			const stopMarker = join(cacheDir, "stop-called");
+			mkdirSync(installDir, { recursive: true });
+
+			const commandLineArgs =
+				component === "connectors"
+					? [
+							"-XX:-UseBASE64Intrinsics",
+							"-cp",
+							`${join(installDir, "*")}${delimiter}${join(installDir, "custom_connectors", "*")}`,
+							"org.springframework.boot.loader.launch.PropertiesLauncher",
+							`--spring.config.additional-location=${join(installDir, "connectors-application.properties")}`,
+						]
+					: [
+							join(
+								installDir,
+								`camunda-zeebe-${version}`,
+								"bin",
+								"camunda.bat",
+							),
+						];
+			const child = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)", "--", ...commandLineArgs],
+				{ stdio: "ignore" },
+			);
+
+			try {
+				await new Promise<void>((resolveSpawn, rejectSpawn) => {
+					child.once("spawn", () => resolveSpawn());
+					child.once("error", rejectSpawn);
+				});
+				assert.ok(child.pid, `${component} must have a PID`);
+				const commandLineMarker =
+					component === "connectors"
+						? "org.springframework.boot.loader.launch.PropertiesLauncher"
+						: "camunda.bat";
+				assert.ok(
+					await pollUntil(
+						async () => {
+							const commandLine = execFileSync(
+								"ps",
+								["-o", "command=", "-p", String(child.pid)],
+								{ encoding: "utf-8" },
+							);
+							return (
+								child.exitCode === null &&
+								child.signalCode === null &&
+								commandLine.includes(commandLineMarker) &&
+								(!plugin.platformSupportsProcessSignature() ||
+									plugin.processStartSignature(child.pid) !== null)
+							);
+						},
+						5000,
+						50,
+					),
+					`${component} command line must be observable before stop`,
+				);
+				writeFileSync(pidfile, `${stalePid}\n${child.pid}`);
+				assert.deepStrictEqual(
+					plugin.collectPidfilePids(cacheDir),
+					[stalePid, child.pid],
+				);
+				writeFileSync(
+					join(installDir, C8RUN_BINARY),
+					`#!/bin/sh\ntouch "${stopMarker}"\nkill -TERM ${child.pid}\nwhile kill -0 ${child.pid} 2>/dev/null; do sleep 0.05; done\nrm -f "${pidfile}"\nexit 0\n`,
+					{ mode: 0o755 },
+				);
+				assert.strictEqual(
+					plugin.findC8RunBinaryPath({ cacheDir, version }),
+					join(installDir, C8RUN_BINARY),
+				);
+
+				assert.strictEqual(
+					await plugin.stopC8Run({ cacheDir, version }, false, {
+						timeoutMs: 5000,
+					}),
+					version,
+				);
+				assert.equal(
+					existsSync(stopMarker),
+					true,
+					`${component} launcher must be invoked`,
+				);
+				assert.ok(
+					await pollUntil(
+						async () =>
+							child.exitCode !== null || child.signalCode !== null,
+						5000,
+						50,
+					),
+					`${component} process must be stopped`,
+				);
+				assert.equal(existsSync(pidfile), false);
+			} finally {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			}
+		}
+	});
+
 	test("retires an unsigned pidfile after its process exits", async () => {
 		const version = "8.10.1";
 		const pid = 987_654_321;
@@ -5724,6 +5844,23 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 		writeFileSync(join(versionDir, "camunda.process"), String(process.pid));
 		const result = plugin.hasRunningClusterPidfiles(tempDir);
 		assert.strictEqual(result, true);
+	});
+
+	test("detects live descendants after a stale PID in a multi-PID file", () => {
+		const stalePid = 999_999_999;
+		assert.equal(plugin.isPidAlive(stalePid), false);
+		const versionDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
+		mkdirSync(versionDir, { recursive: true });
+		writeFileSync(
+			join(versionDir, "camunda.process"),
+			`${stalePid}\n${process.pid}\n${process.pid}`,
+		);
+
+		assert.deepStrictEqual(plugin.collectPidfilePids(tempDir), [
+			stalePid,
+			process.pid,
+		]);
+		assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
 	});
 
 	test("ignores a pidfile PID when its recorded signature proves reuse", {

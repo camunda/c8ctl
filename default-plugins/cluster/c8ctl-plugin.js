@@ -2397,6 +2397,26 @@ function commandLineIncludesPath(commandLine, path) {
   return false;
 }
 
+function commandLineIncludesConnectorsClasspath(commandLine, installDir) {
+  const mainClass = /(?:^|\s)(?:io\.camunda\.connector\.runtime\.app\.ConnectorRuntimeApplication|org\.springframework\.boot\.loader(?:\.launch)?\.PropertiesLauncher)(?=\s|$)/.exec(
+    commandLine,
+  );
+  const classpathOption = /(?:^|\s)-(?:cp|classpath)\s+/.exec(commandLine);
+  if (
+    !mainClass ||
+    !classpathOption ||
+    mainClass.index === undefined ||
+    classpathOption.index === undefined ||
+    classpathOption.index >= mainClass.index
+  ) {
+    return false;
+  }
+
+  const classpathStart = classpathOption.index + classpathOption[0].length;
+  const classpath = commandLine.slice(classpathStart, mainClass.index);
+  return commandLineIncludesPath(classpath, join(installDir, '*'));
+}
+
 function commandLineIncludesClusterLauncher(commandLine, entry, version) {
   const processName = basename(entry.path, '.process');
   const component =
@@ -2408,12 +2428,26 @@ function commandLineIncludesClusterLauncher(commandLine, entry, version) {
   const executable = component === 'camunda-zeebe' ? 'camunda' : component;
   const installDirs = [dirname(entry.path), dirname(dirname(entry.path))];
 
-  return installDirs.some((installDir) =>
-    commandLineIncludesPath(
-      commandLine,
-      join(installDir, `${component}-${version}`, 'bin', executable),
-    ),
-  );
+  return installDirs.some((installDir) => {
+    const componentBin = join(
+      installDir,
+      `${component}-${version}`,
+      'bin',
+      executable,
+    );
+    if (
+      commandLineIncludesPath(commandLine, componentBin) ||
+      (component === 'camunda-zeebe' &&
+        commandLineIncludesPath(commandLine, `${componentBin}.bat`))
+    ) {
+      return true;
+    }
+
+    return (
+      component === 'connectors' &&
+      commandLineIncludesConnectorsClasspath(commandLine, installDir)
+    );
+  });
 }
 
 /**
@@ -2452,9 +2486,20 @@ export function recordedPidIsLive(pid, signature) {
  * otherwise every `c8run-*` install dir is scanned. Each install dir and its
  * immediate subdirectories are scanned (max depth 1) rather than a full
  * recursive DFS — c8run installs can contain large extracted trees, logs, and
- * data that would make a deep walk slow. Returns parsed positive integers
+ * data that would make a deep walk slow. Returns each distinct parsed PID
  * (alive or not); the caller decides liveness.
  */
+function parsePidfilePids(contents) {
+  const pids = new Set();
+  for (const entry of contents.split(/[\r\n,;]/)) {
+    const pid = Number(entry.trim());
+    if (Number.isSafeInteger(pid) && pid > 0) {
+      pids.add(pid);
+    }
+  }
+  return [...pids];
+}
+
 function collectPidfileEntries(cacheDir, { version } = {}) {
   const pidfiles = [];
   if (!existsSync(cacheDir)) {
@@ -2503,14 +2548,14 @@ function collectPidfileEntries(cacheDir, { version } = {}) {
         if (!entry.isFile() || !entry.name.endsWith('.process')) {
           continue;
         }
-        let pid;
+        let contents;
         try {
-          pid = Number.parseInt(readFileSync(join(dir, entry.name), 'utf-8').trim(), 10);
+          contents = readFileSync(join(dir, entry.name), 'utf-8');
         } catch {
           // Pidfile may have been removed between listing and reading.
           continue;
         }
-        if (Number.isInteger(pid) && pid > 0) {
+        for (const pid of parsePidfilePids(contents)) {
           pidfiles.push({
             path: join(dir, entry.name),
             pid,
@@ -2540,8 +2585,27 @@ function retireStalePidfileEntry({ path, pid }) {
     if (error?.code === 'ENOENT') return;
     throw error;
   }
-  if (Number.parseInt(contents.trim(), 10) === pid) {
+
+  const pids = parsePidfilePids(contents);
+  if (!pids.includes(pid)) {
+    return;
+  }
+
+  // Keep the process-tree entries that are still live when pruning a stale PID.
+  const remainingPids = pids.filter(
+    (candidate) => candidate !== pid && isPidAlive(candidate),
+  );
+  if (remainingPids.length === 0) {
     rmSync(path, { force: true });
+    return;
+  }
+
+  try {
+    writeFileSync(path, remainingPids.join('\n'));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
   }
 }
 
