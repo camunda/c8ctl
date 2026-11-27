@@ -19,11 +19,14 @@ import { basename, dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	applyEdits,
+	createScanner,
 	findNodeAtLocation,
 	modify,
 	type ParseError,
+	type ParseOptions,
 	parse,
 	parseTree,
+	SyntaxKind,
 } from "jsonc-parser";
 import { isRecord } from "../../core/index.ts";
 import { executableIsOnPath } from "./skills-install-helpers.ts";
@@ -206,7 +209,7 @@ function isOrchestrationEntry(entry: unknown): boolean {
 	const [script, command, flag, profile] = entry.args;
 	return (
 		typeof entry.command === "string" &&
-		["node", "node.exe"].includes(basename(entry.command)) &&
+		entry.command.length > 0 &&
 		entry.args.length === 4 &&
 		typeof script === "string" &&
 		["index.js", "index.ts"].includes(basename(script)) &&
@@ -216,6 +219,105 @@ function isOrchestrationEntry(entry: unknown): boolean {
 		isRecord(entry.env) &&
 		typeof entry.env.C8CTL_DATA_DIR === "string"
 	);
+}
+
+function findCommaOffset(
+	content: string,
+	start: number,
+	end: number,
+): number | undefined {
+	const scanner = createScanner(content, true);
+	scanner.setPosition(start);
+	while (scanner.getPosition() < end) {
+		const token = scanner.scan();
+		const offset = scanner.getTokenOffset();
+		if (token === SyntaxKind.EOF || offset >= end) return undefined;
+		if (token === SyntaxKind.CommaToken) return offset;
+	}
+	return undefined;
+}
+
+function removeJsoncProperty({
+	content,
+	objectPath,
+	propertyName,
+	parseOptions,
+}: {
+	content: string;
+	objectPath: string[];
+	propertyName: string;
+	parseOptions: ParseOptions;
+}): string {
+	const errors: ParseError[] = [];
+	const root = parseTree(content, errors, parseOptions);
+	if (!root || errors.length > 0) {
+		throw new Error(
+			`Cannot safely remove MCP entry '${propertyName}' from an invalid configuration.`,
+		);
+	}
+	const object = findNodeAtLocation(root, objectPath);
+	if (object?.type !== "object" || !object.children) {
+		throw new Error(
+			`Cannot safely remove MCP entry '${propertyName}' from its configuration.`,
+		);
+	}
+	const property = object.children.find(
+		(candidate) =>
+			candidate.type === "property" &&
+			candidate.children?.[0]?.value === propertyName,
+	);
+	if (!property) {
+		throw new Error(
+			`Cannot safely remove MCP entry '${propertyName}' from its configuration.`,
+		);
+	}
+
+	const propertyIndex = object.children.indexOf(property);
+	const previous = object.children[propertyIndex - 1];
+	const next = object.children[propertyIndex + 1];
+	const propertyEnd = property.offset + property.length;
+	const deletionRanges: Array<{ offset: number; length: number }> = [
+		{ offset: property.offset, length: property.length },
+	];
+	if (next) {
+		const followingComma = findCommaOffset(content, propertyEnd, next.offset);
+		if (followingComma === undefined) {
+			throw new Error(
+				`Cannot safely remove MCP entry '${propertyName}' from its configuration.`,
+			);
+		}
+		deletionRanges.push({ offset: followingComma, length: 1 });
+	} else {
+		if (previous) {
+			const precedingComma = findCommaOffset(
+				content,
+				previous.offset + previous.length,
+				property.offset,
+			);
+			if (precedingComma === undefined) {
+				throw new Error(
+					`Cannot safely remove MCP entry '${propertyName}' from its configuration.`,
+				);
+			}
+			deletionRanges.push({ offset: precedingComma, length: 1 });
+		}
+		const trailingComma = findCommaOffset(
+			content,
+			propertyEnd,
+			object.offset + object.length - 1,
+		);
+		if (trailingComma !== undefined) {
+			deletionRanges.push({ offset: trailingComma, length: 1 });
+		}
+	}
+
+	let updated = content;
+	for (const { offset, length } of deletionRanges.sort(
+		(left, right) => right.offset - left.offset,
+	)) {
+		updated = updated.slice(0, offset) + updated.slice(offset + length);
+	}
+	return updated;
 }
 
 /**
@@ -420,22 +522,24 @@ export function planMcpConfigs({
 						current: isRecord(current) ? current : {},
 						expected: entry.config,
 					});
-				} else if (status === "installed" || status === "removed") {
+				} else if (status === "installed") {
 					content = applyEdits(
 						content,
-						modify(
-							content,
-							[harness.key, entry.name],
-							operation === "install" ? entry.config : undefined,
-							{
-								formattingOptions: {
-									insertSpaces: true,
-									tabSize: 2,
-									eol: content.includes("\r\n") ? "\r\n" : "\n",
-								},
+						modify(content, [harness.key, entry.name], entry.config, {
+							formattingOptions: {
+								insertSpaces: true,
+								tabSize: 2,
+								eol: content.includes("\r\n") ? "\r\n" : "\n",
 							},
-						),
+						}),
 					);
+				} else if (status === "removed") {
+					content = removeJsoncProperty({
+						content,
+						objectPath: [harness.key],
+						propertyName: entry.name,
+						parseOptions,
+					});
 				}
 				return {
 					server: entry.name,
