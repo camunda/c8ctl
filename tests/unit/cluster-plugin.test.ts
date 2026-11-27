@@ -3754,6 +3754,233 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	test("fails when another live version survives the first successful stop", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const stoppedChild = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await Promise.all(
+				[stoppedChild, survivor].map(
+					(child) =>
+						new Promise<void>((resolveSpawn, rejectSpawn) => {
+							child.once("spawn", () => resolveSpawn());
+							child.once("error", rejectSpawn);
+						}),
+				),
+			);
+			assert.ok(stoppedChild.pid, "requested version process must have a PID");
+			assert.ok(survivor.pid, "second version process must have a PID");
+
+			const requestedDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const survivorDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
+			mkdirSync(requestedDir, { recursive: true });
+			mkdirSync(survivorDir, { recursive: true });
+			const secondStopMarker = join(tempDir, "second-version-stopped");
+			writeFileSync(
+				join(requestedDir, "camunda.process"),
+				String(stoppedChild.pid),
+			);
+			writeFileSync(
+				join(requestedDir, C8RUN_BINARY),
+				`#!/bin/sh\nkill -TERM ${stoppedChild.pid}\nwhile kill -0 ${stoppedChild.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(
+				join(survivorDir, "camunda.process"),
+				String(survivor.pid),
+			);
+			writeFileSync(
+				join(survivorDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${secondStopMarker}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.10.1");
+			writeFileSync(join(tempDir, "cluster.port"), "9091");
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run(
+						{ cacheDir: tempDir, version: "8.10.1" },
+						false,
+						{ timeoutMs: 1000 },
+					),
+				(error: unknown) => {
+					assert.ok(error instanceof Error);
+					assert.match(error.message, new RegExp(String(survivor.pid)));
+					return true;
+				},
+			);
+			assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+			assert.strictEqual(existsSync(secondStopMarker), false);
+			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
+		} finally {
+			for (const child of [stoppedChild, survivor]) {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			}
+		}
+	});
+
+	test("recovers a pidfile-only survivor on retry after c8run removes its pidfile", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				survivor.once("spawn", () => resolveSpawn());
+				survivor.once("error", rejectSpawn);
+			});
+			assert.ok(survivor.pid, "pidfile-only process must have a PID");
+
+			const version = "8.10.1";
+			const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const pidfile = join(installDir, "camunda.process");
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(pidfile, String(survivor.pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\nrm -f "${pidfile}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), version);
+			writeFileSync(join(tempDir, "cluster.port"), "9091");
+			const signature = plugin.processStartSignature(survivor.pid);
+			assert.ok(
+				signature || !plugin.platformSupportsProcessSignature(),
+				"fingerprinting platforms must capture the survivor's identity",
+			);
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run(
+						{ cacheDir: tempDir, version },
+						false,
+						{ timeoutMs: 100 },
+					),
+				/Stop incomplete/,
+			);
+
+			assert.strictEqual(existsSync(pidfile), false);
+			assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+			assert.deepStrictEqual(
+				plugin.readRunningClusterRecord(tempDir)?.pidfileSurvivors,
+				[{ version, pid: survivor.pid, signature: signature ?? null }],
+			);
+			assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
+			assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, version), true);
+
+			assert.strictEqual(
+				await plugin.stopC8Run({ cacheDir: tempDir, version }),
+				version,
+			);
+			assert.ok(
+				await pollUntil(
+					async () => !plugin.isPidAlive(survivor.pid),
+					5000,
+					50,
+				),
+				"the durable recovery record must let a later stop reap the survivor",
+			);
+			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+			assert.strictEqual(plugin.readClusterPort(tempDir), 8080);
+		} finally {
+			if (survivor.pid && plugin.isPidAlive(survivor.pid)) {
+				try {
+					process.kill(survivor.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("adds pidfile survivor recovery without replacing an existing live record", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				survivor.once("spawn", () => resolveSpawn());
+				survivor.once("error", rejectSpawn);
+			});
+			assert.ok(survivor.pid, "pidfile-only process must have a PID");
+
+			const version = "8.10.1";
+			const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const pidfile = join(installDir, "camunda.process");
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(pidfile, String(survivor.pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\nrm -f "${pidfile}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), version);
+			writeFileSync(join(tempDir, "cluster.port"), "9091");
+			const existingRecord = await liveSelfRecord({ version: "8.9" });
+			existingRecord.pids.push(survivor.pid);
+			plugin.writeRunningClusterRecord(tempDir, existingRecord);
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run(
+						{ cacheDir: tempDir, version },
+						false,
+						{ timeoutMs: 100 },
+					),
+				/Stop incomplete/,
+			);
+
+			const record = plugin.readRunningClusterRecord(tempDir);
+			assert.strictEqual(record.version, existingRecord.version);
+			assert.deepStrictEqual(record.pids, existingRecord.pids);
+			assert.deepStrictEqual(record.signatures, existingRecord.signatures);
+			assert.deepStrictEqual(
+				record.pidfileSurvivors,
+				plugin.platformSupportsProcessSignature()
+					? [{ version, pid: survivor.pid, signature: null }]
+					: [],
+			);
+			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
+		} finally {
+			if (survivor.pid && plugin.isPidAlive(survivor.pid)) {
+				try {
+					process.kill(survivor.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
 	for (const requestedVersion of ["8.10.5", "8.10"]) {
 		test(`stops the live pidfile version when ${requestedVersion} is requested`, {
 			skip: process.platform === "win32",
@@ -3820,6 +4047,107 @@ describe("Cluster Plugin – stopC8Run", () => {
 			}
 		});
 	}
+
+	test("does not reap unverified or PID-reused pidfile survivor identities", async () => {
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				survivor.once("spawn", () => resolveSpawn());
+				survivor.once("error", rejectSpawn);
+			});
+			assert.ok(survivor.pid, "survivor process must have a PID");
+			const version = "8.9";
+			const signature = plugin.processStartSignature(survivor.pid);
+			plugin.writeRunningClusterRecord(tempDir, {
+				version,
+				pids: [],
+				pidfileSurvivors: [
+					{
+						version,
+						pid: survivor.pid,
+						signature: signature ? `${signature}-reused` : null,
+					},
+				],
+			});
+
+			assert.deepStrictEqual(
+				plugin.readRunningClusterRecord(tempDir)?.pidfileSurvivors,
+				[
+					{
+						version,
+						pid: survivor.pid,
+						signature: signature ? `${signature}-reused` : null,
+					},
+				],
+			);
+			if (signature && plugin.platformSupportsProcessSignature()) {
+				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+				assert.strictEqual(
+					await plugin.reapClusterProcesses(tempDir),
+					0,
+					"a PID with a mismatched signature must not be reaped",
+				);
+				assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+
+				plugin.writeRunningClusterRecord(tempDir, {
+					version,
+					pids: [],
+					pidfileSurvivors: [
+						{ version, pid: survivor.pid, signature: null },
+					],
+				});
+				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+				assert.strictEqual(
+					plugin.hasRunningClusterPidfiles(tempDir),
+					true,
+					"an unverified live PID must remain tracked without becoming a kill target",
+				);
+				assert.strictEqual(
+					plugin.isVersionInstanceRunning(tempDir, version),
+					true,
+				);
+				assert.strictEqual(await plugin.reapClusterProcesses(tempDir), 0);
+				assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+				await assert.rejects(
+					() => plugin.stopC8Run({ cacheDir: tempDir, version }),
+					/could not be safely reaped/,
+				);
+				assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
+			} else {
+				assert.strictEqual(
+					plugin.platformSupportsProcessSignature(),
+					false,
+					"supported platforms must capture the survivor signature",
+				);
+				assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), [survivor.pid]);
+				assert.strictEqual(
+					await plugin.reapClusterProcesses(tempDir),
+					1,
+					"platforms without fingerprints use the liveness-only fallback",
+				);
+				assert.ok(
+					await pollUntil(
+						async () => !plugin.isPidAlive(survivor.pid),
+						5000,
+						50,
+					),
+				);
+			}
+		} finally {
+			if (survivor.pid && plugin.isPidAlive(survivor.pid)) {
+				try {
+					process.kill(survivor.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
 
 	test("fails when a pidfile-only process survives later stop and reaper successes", {
 		skip: process.platform === "win32",
