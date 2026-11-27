@@ -74,11 +74,17 @@ globalThis.fetch = async () => {
 	const cluster = (health: string, ...args: string[]) =>
 		c8WithEnv(clusterEnv(health), "cluster", ...args);
 
+	const componentLaunchMetadata = (name: string) => {
+		const component = name === "camunda" ? "camunda-zeebe" : "connectors";
+		const executable = name === "camunda" ? "camunda" : "connectors";
+		return join(installDir, `${component}-8.10.1`, "bin", executable);
+	};
+
 	async function launcher(exitCode: number) {
 		for (const name of ["camunda", "connectors", "connectors-sales"]) {
 			const child = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1000)"],
+				["-e", "setInterval(() => {}, 1000)", componentLaunchMetadata(name)],
 				{
 					stdio: "ignore",
 				},
@@ -137,6 +143,7 @@ if (process.argv[2] === 'stop') {
 			join(installDir, "launcher.mjs"),
 			`import { spawn } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 if (process.argv[2] === 'start') {
   // Record our own PID first so the test can signal the launcher itself.
   appendFileSync('fixture.pids', process.pid + '\\n');
@@ -144,7 +151,10 @@ if (process.argv[2] === 'start') {
   // parent c8ctl is interrupted while we are still "starting". Record each
   // service PID for teardown; the .process pidfiles are the readiness signal.
   for (const name of ['camunda', 'connectors', 'connectors-sales']) {
-    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    const component = name === 'camunda' ? 'camunda-zeebe' : 'connectors';
+    const executable = name === 'camunda' ? 'camunda' : 'connectors';
+    const launchMetadata = join(process.cwd(), component + '-8.10.1', 'bin', executable);
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', launchMetadata], { stdio: 'ignore' });
     child.on('spawn', () => {
       writeFileSync(name + '.process', String(child.pid));
       appendFileSync('fixture.pids', child.pid + '\\n');
@@ -371,14 +381,17 @@ if (process.argv[2] === 'start') {
 		// hasRunningClusterPidfiles sees it even after the recorded PIDs exit.
 		const survivor = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1000)"],
+			["-e", "setInterval(() => {}, 1000)", componentLaunchMetadata("camunda")],
 			{ stdio: "ignore" },
 		);
 		children.push(survivor);
 		await once(survivor, "spawn");
 		assert.ok(survivor.pid);
 		const survivorPid = survivor.pid;
-		writeFileSync(join(installDir, "survivor.process"), String(survivorPid));
+		writeFileSync(
+			join(installDir, "camunda-survivor.process"),
+			String(survivorPid),
+		);
 
 		// c8run stop signals + reaps the three recorded processes (the launcher
 		// removes their pidfiles), but the pidfile-only survivor stays alive.

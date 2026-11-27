@@ -3238,6 +3238,12 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	}) {
 		const cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-stop-purge-"));
 		const installDir = join(cacheDir, "c8run-8.9", "c8run-8.9.1");
+		const componentMetadata = join(
+			installDir,
+			"camunda-zeebe-8.9",
+			"bin",
+			"camunda",
+		);
 		const dataDirs = [
 			join(installDir, "camunda-data"),
 			join(installDir, "camunda-zeebe-8.9.1", "data"),
@@ -3250,7 +3256,7 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 			"sh",
 			[
 				"-c",
-				`trap "sleep 1; exit 0" TERM; touch "${readyFile}"; : "${installDir}"; while :; do sleep 0.1; done`,
+				`trap "sleep 1; exit 0" TERM; touch "${readyFile}"; : "${componentMetadata}"; while :; do sleep 0.1; done`,
 			],
 			{ stdio: "ignore" },
 		);
@@ -3656,6 +3662,214 @@ describe("Cluster Plugin – stopC8Run", () => {
 			output.includes("No cluster is currently running"),
 			"Should warn no cluster running",
 		);
+	});
+
+	test("scopes saved process signatures to their installed version", {
+		skip:
+			process.platform === "win32" ||
+			!plugin.platformSupportsProcessSignature(),
+	}, async () => {
+		const staleVersion = "8.10.1";
+		const liveVersion = "8.10.5";
+		const installDir = join(
+			tempDir,
+			`c8run-${liveVersion}`,
+			`c8run-${liveVersion}`,
+		);
+		mkdirSync(installDir, { recursive: true });
+		const pidfile = join(installDir, "camunda.process");
+		const stoppedMarker = join(tempDir, "live-version-stopped");
+		const child = spawn(
+			process.execPath,
+			[
+				"-e",
+				"setInterval(() => {}, 1e9)",
+				join(installDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
+			],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "the live version process must have a PID");
+			const signature = plugin.processStartSignature(child.pid);
+			assert.ok(signature, "the live version process must have a signature");
+			writeFileSync(pidfile, String(child.pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${stoppedMarker}"\nkill -TERM ${child.pid}\nwhile kill -0 ${child.pid} 2>/dev/null; do sleep 0.05; done\nrm -f "${pidfile}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: staleVersion,
+				pids: [child.pid],
+				signatures: { [child.pid]: `${signature}-previous` },
+			});
+
+			const stoppedVersion = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version: staleVersion,
+			});
+
+			assert.ok(
+				await pollUntil(
+					async () => child.exitCode !== null || child.signalCode !== null,
+					5000,
+					50,
+				),
+				"the live version process should be stopped",
+			);
+			assert.equal(
+				existsSync(stoppedMarker),
+				true,
+				"the launcher for the version owning the pidfile must run",
+			);
+			assert.equal(stoppedVersion, liveVersion);
+			assert.equal(existsSync(pidfile), false);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("reaps a live survivor using its version-scoped signature", {
+		skip:
+			process.platform === "win32" ||
+			!plugin.platformSupportsProcessSignature(),
+	}, async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "the current process must have a PID");
+			const signature = plugin.processStartSignature(child.pid);
+			assert.ok(signature, "the current process must have a signature");
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.10.1",
+				pids: [child.pid],
+				signatures: { [child.pid]: `${signature}-previous` },
+				pidfileSurvivors: [
+					{
+						version: "8.10.5",
+						pid: child.pid,
+						signature,
+						signalable: true,
+					},
+				],
+			});
+
+			assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), [child.pid]);
+			const stoppedVersion = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version: "8.10.1",
+			});
+			assert.equal(stoppedVersion, "8.10.5");
+			assert.ok(
+				await pollUntil(
+					async () => child.exitCode !== null || child.signalCode !== null,
+					5000,
+					50,
+				),
+				"the live survivor should be reaped by its version-scoped signature",
+			);
+			assert.equal(plugin.readRunningClusterRecord(tempDir), null);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("does not treat a log reader as a cluster process", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const version = "8.10.1";
+		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+		const logDir = join(installDir, "log");
+		const logFile = join(logDir, "camunda.log");
+		const pidfile = join(installDir, "camunda.process");
+		const stopMarker = join(tempDir, "log-reader-stop-called");
+		mkdirSync(logDir, { recursive: true });
+		writeFileSync(logFile, "fixture log\n");
+
+		const child = spawn("tail", ["-f", logFile], { stdio: "ignore" });
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "the log reader must have a PID");
+			writeFileSync(pidfile, String(child.pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${stopMarker}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+						timeoutMs: 100,
+					}),
+				/cluster ownership could not be verified/,
+			);
+
+			assert.equal(
+				existsSync(stopMarker),
+				false,
+				"a log path under the install directory must not authorize c8run stop",
+			);
+			assert.equal(plugin.isPidAlive(child.pid), true);
+			assert.equal(existsSync(pidfile), true);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("retires an unsigned pidfile after its process exits", async () => {
+		const version = "8.10.1";
+		const pid = 987_654_321;
+		assert.equal(plugin.isPidAlive(pid), false);
+
+		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+		const pidfile = join(installDir, "camunda.process");
+		mkdirSync(installDir, { recursive: true });
+		writeFileSync(pidfile, String(pid));
+		plugin.writeRunningClusterRecord(tempDir, {
+			version,
+			pids: [],
+			pidfileSurvivors: [{ version, pid, signature: null, signalable: false }],
+		});
+
+		await plugin.stopC8Run({ cacheDir: tempDir, version });
+
+		assert.equal(existsSync(pidfile), false);
+		assert.equal(plugin.readRunningClusterRecord(tempDir), null);
 	});
 
 	test("returns early even when installed versions exist but no marker and no running pidfiles", async () => {
@@ -4323,7 +4537,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 				survivor.once("error", rejectSpawn);
 			});
 			assert.ok(survivor.pid, "pidfile-only process must have a PID");
-
 			const version = "8.10.1";
 			const mockBinDir = join(tempDir, "mock-bin");
 			const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
@@ -4740,6 +4953,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				survivor.once("error", rejectSpawn);
 			});
 			assert.ok(survivor.pid, "pidfile-only process must have a PID");
+			const signature = plugin.processStartSignature(survivor.pid);
 
 			const version = "8.10.1";
 			const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
@@ -4777,7 +4991,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 							{
 								version,
 								pid: survivor.pid,
-								signature: null,
+								signature,
 								signalable: false,
 							},
 						]
