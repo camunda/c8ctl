@@ -726,6 +726,77 @@ describe("Cluster Plugin – start spawn errors", () => {
 			"should include the launcher spawn error",
 		);
 	});
+
+	test("clears a stale PID record before spawning a replacement cluster", {
+		skip:
+			process.platform === "win32" ||
+			!plugin.platformSupportsProcessSignature(),
+	}, async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		const version = "8.8.0";
+		const installDir = join(tempDir, `c8run-${version}`);
+		const pidfile = join(installDir, "camunda.process");
+		const recordPath = join(tempDir, "cluster.pids");
+		const recordStateAtSpawn = join(tempDir, "record-state-at-spawn");
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const previousCacheDir = process.env.C8RUN_CACHE_DIR;
+		const originalError = console.error;
+		const originalLog = console.log;
+		process.env.C8RUN_CACHE_DIR = tempDir;
+		console.error = () => {};
+		console.log = () => {};
+		const restoreExit = mockProcessExit();
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "spawned child must have a PID");
+			const pid = child.pid;
+			const priorRecord = await liveSelfRecord({ version, pid });
+			const priorSignature = priorRecord.signatures[pid];
+
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(pidfile, String(pid));
+			plugin.writeRunningClusterRecord(tempDir, {
+				version,
+				pids: [pid],
+				signatures: { [pid]: `${priorSignature}-previous-owner` },
+			});
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\nif [ -f "${recordPath}" ]; then printf present > "${recordStateAtSpawn}"; else printf cleared > "${recordStateAtSpawn}"; fi\nexit 1\n`,
+				{ mode: 0o755 },
+			);
+
+			await plugin.commands.cluster(["start", version]).catch(() => {});
+
+			assert.strictEqual(
+				readFileSync(recordStateAtSpawn, "utf-8"),
+				"cleared",
+				"a replacement must not inherit a stale PID signature if startup is interrupted",
+			);
+		} finally {
+			restoreExit();
+			console.error = originalError;
+			console.log = originalLog;
+			if (previousCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
+			else process.env.C8RUN_CACHE_DIR = previousCacheDir;
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -3240,7 +3311,7 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 		const installDir = join(cacheDir, "c8run-8.9", "c8run-8.9.1");
 		const componentMetadata = join(
 			installDir,
-			"camunda-zeebe-8.9",
+			"camunda-zeebe-8.9.1",
 			"bin",
 			"camunda",
 		);
@@ -3851,26 +3922,60 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
-	test("stops Connectors classpath and Camunda batch processes from multi-PID files", {
+	test("recognizes Camunda JVM descendants only with the distribution classpath", () => {
+		const version = "8.10.1";
+		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+		const componentDir = join(installDir, `camunda-zeebe-${version}`);
+		const entry = { path: join(installDir, "camunda.process") };
+		const classpath = join(componentDir, "lib", "*");
+
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp "${classpath}" io.camunda.application.StandaloneCamunda`,
+				entry,
+				version,
+			),
+			true,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp "${classpath}" com.example.Worker`,
+				entry,
+				version,
+			),
+			false,
+		);
+	});
+
+	test("stops Connectors and Camunda processes from launcher/classpath metadata", {
 		skip: process.platform === "win32",
 	}, async () => {
 		const version = "8.10.1";
 		const stalePid = 999_999_999;
 		assert.equal(plugin.isPidAlive(stalePid), false);
 
-		for (const component of ["connectors", "camunda"] as const) {
-			const cacheDir = join(tempDir, component);
+		for (const fixture of [
+			{ id: "connectors", component: "connectors", kind: "connectors" },
+			{ id: "camunda-batch", component: "camunda", kind: "batch" },
+			{ id: "camunda-java", component: "camunda", kind: "camunda-classpath" },
+		] as const) {
+			const cacheDir = join(tempDir, fixture.id);
 			const installDir = join(
 				cacheDir,
 				`c8run-${version}`,
 				`c8run-${version}`,
 			);
-			const pidfile = join(installDir, `${component}.process`);
+			const pidfile = join(installDir, `${fixture.component}.process`);
 			const stopMarker = join(cacheDir, "stop-called");
 			mkdirSync(installDir, { recursive: true });
+			const componentDir = join(
+				installDir,
+				`camunda-zeebe-${version}`,
+			);
+			const camundaClasspath = join(componentDir, "lib", "*");
 
 			const commandLineArgs =
-				component === "connectors"
+				fixture.kind === "connectors"
 					? [
 							"-XX:-UseBASE64Intrinsics",
 							"-cp",
@@ -3878,14 +3983,22 @@ describe("Cluster Plugin – stopC8Run", () => {
 							"org.springframework.boot.loader.launch.PropertiesLauncher",
 							`--spring.config.additional-location=${join(installDir, "connectors-application.properties")}`,
 						]
-					: [
-							join(
-								installDir,
-								`camunda-zeebe-${version}`,
-								"bin",
-								"camunda.bat",
-							),
-						];
+					: fixture.kind === "batch"
+						? [join(componentDir, "bin", "camunda.bat")]
+						: [
+								"-cp",
+								camundaClasspath,
+								"io.camunda.application.StandaloneCamunda",
+							];
+			const commandLineMarker =
+				fixture.kind === "connectors"
+					? "org.springframework.boot.loader.launch.PropertiesLauncher"
+					: fixture.kind === "batch"
+						? "camunda.bat"
+						: "io.camunda.application.StandaloneCamunda";
+			if (fixture.kind === "camunda-classpath") {
+				mkdirSync(join(componentDir, "lib"), { recursive: true });
+			}
 			const child = spawn(
 				process.execPath,
 				["-e", "setInterval(() => {}, 1e9)", "--", ...commandLineArgs],
@@ -3897,11 +4010,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 					child.once("spawn", () => resolveSpawn());
 					child.once("error", rejectSpawn);
 				});
-				assert.ok(child.pid, `${component} must have a PID`);
-				const commandLineMarker =
-					component === "connectors"
-						? "org.springframework.boot.loader.launch.PropertiesLauncher"
-						: "camunda.bat";
+				assert.ok(child.pid, `${fixture.id} must have a PID`);
 				assert.ok(
 					await pollUntil(
 						async () => {
@@ -3921,7 +4030,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 						5000,
 						50,
 					),
-					`${component} command line must be observable before stop`,
+					`${fixture.id} command line must be observable before stop`,
 				);
 				writeFileSync(pidfile, `${stalePid}\n${child.pid}`);
 				assert.deepStrictEqual(
@@ -3947,7 +4056,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				assert.equal(
 					existsSync(stopMarker),
 					true,
-					`${component} launcher must be invoked`,
+					`${fixture.id} launcher must be invoked`,
 				);
 				assert.ok(
 					await pollUntil(
@@ -3956,7 +4065,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 						5000,
 						50,
 					),
-					`${component} process must be stopped`,
+					`${fixture.id} process must be stopped`,
 				);
 				assert.equal(existsSync(pidfile), false);
 			} finally {
@@ -5199,6 +5308,74 @@ describe("Cluster Plugin – stopC8Run", () => {
 			}
 		});
 	}
+
+	test("recovers a rolling install from its patch-version component launcher", {
+		skip:
+			process.platform === "win32" ||
+			!plugin.platformSupportsProcessSignature(),
+	}, async () => {
+		const version = "8.10";
+		const installedBuild = "8.10.10";
+		const installDir = join(
+			tempDir,
+			`c8run-${version}`,
+			`c8run-${installedBuild}`,
+		);
+		const componentLauncher = join(
+			installDir,
+			`camunda-zeebe-${installedBuild}`,
+			"bin",
+			"camunda",
+		);
+		const pidfile = join(installDir, "camunda.process");
+		const stopMarker = join(tempDir, "rolling-build-stopped");
+		mkdirSync(dirname(componentLauncher), { recursive: true });
+		writeFileSync(componentLauncher, "", { mode: 0o755 });
+
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)", componentLauncher],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "spawned child must have a PID");
+			const pid = child.pid;
+			await liveSelfRecord({ version, pid });
+
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(pidfile, String(pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${stopMarker}"\nkill -TERM ${pid}\nwhile kill -0 ${pid} 2>/dev/null; do sleep 0.05; done\nrm -f "${pidfile}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+
+			const stopped = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version,
+			});
+
+			assert.strictEqual(stopped, version);
+			assert.strictEqual(existsSync(stopMarker), true);
+			assert.ok(
+				await pollUntil(async () => !plugin.isPidAlive(pid), 5000, 50),
+				"the live process from the rolling install should exit after stop",
+			);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
 
 	test("does not reap unverified or PID-reused pidfile survivor identities", async () => {
 		const survivor = spawn(
