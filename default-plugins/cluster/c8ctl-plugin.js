@@ -2479,12 +2479,15 @@ function livePidfileEntries(
 function hasUnverifiablePidfileSurvivor(cacheDir, version, signatures) {
   for (const entry of collectPidfileEntries(cacheDir, { version })) {
     const recordedSignature = signatures.get(entry.pid);
-    if (typeof recordedSignature !== 'string') {
+    if (!signatures.has(entry.pid)) {
       continue;
     }
     if (!isPidAlive(entry.pid)) {
       retireStalePidfileEntry(entry);
       continue;
+    }
+    if (typeof recordedSignature !== 'string') {
+      return true;
     }
 
     const currentSignature = processStartSignature(entry.pid);
@@ -2500,6 +2503,82 @@ function hasUnverifiablePidfileSurvivor(cacheDir, version, signatures) {
     }
   }
   return false;
+}
+
+function revalidatePidfileAttempt(
+  cacheDir,
+  version,
+  pidfileAttempt,
+  previousSignatures,
+  recordedSignatures,
+) {
+  const entriesByPid = new Map();
+  const stalePids = new Set();
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    const entries = entriesByPid.get(entry.pid) ?? [];
+    entries.push(entry);
+    entriesByPid.set(entry.pid, entries);
+
+    if (!isPidAlive(entry.pid)) {
+      stalePids.add(entry.pid);
+      retireStalePidfileEntry(entry);
+      continue;
+    }
+    if (!pidfileAttempt.has(entry.pid)) {
+      const recordedSignature = recordedSignatures.get(entry.pid) ?? null;
+      const signature = recordedSignature ?? processStartSignature(entry.pid);
+      pidfileAttempt.set(entry.pid, {
+        signature,
+        recordedSignature,
+        recordedOwnership: recordedSignatures.has(entry.pid),
+      });
+      previousSignatures.set(entry.pid, recordedSignature ?? signature);
+    }
+  }
+
+  let hasUnverifiablePidfile = false;
+  const checkedSignatures = new Map();
+  if (platformSupportsProcessSignature()) {
+    for (const [pid, identity] of pidfileAttempt) {
+      if (stalePids.has(pid) || !isPidAlive(pid)) {
+        stalePids.add(pid);
+        continue;
+      }
+
+      const expectedSignature =
+        identity.recordedSignature ??
+        identity.signature ??
+        recordedSignatures.get(pid);
+      if (typeof expectedSignature !== 'string') {
+        hasUnverifiablePidfile = true;
+        continue;
+      }
+
+      if (!checkedSignatures.has(pid)) {
+        checkedSignatures.set(pid, processStartSignature(pid));
+      }
+      const currentSignature = checkedSignatures.get(pid);
+      if (currentSignature === null) {
+        if (isPidAlive(pid)) {
+          hasUnverifiablePidfile = true;
+        } else {
+          stalePids.add(pid);
+        }
+      } else if (currentSignature !== expectedSignature) {
+        stalePids.add(pid);
+      }
+    }
+  }
+
+  for (const pid of stalePids) {
+    for (const entry of entriesByPid.get(pid) ?? []) {
+      retireStalePidfileEntry(entry);
+    }
+    pidfileAttempt.delete(pid);
+    previousSignatures.delete(pid);
+  }
+
+  return hasUnverifiablePidfile;
 }
 
 function getPidRecordPath(cacheDir) {
@@ -2712,11 +2791,10 @@ function nonSignalablePidfileSurvivorSignatures(record) {
   for (const survivor of record?.pidfileSurvivors ?? []) {
     if (
       !survivor.signalable &&
-      typeof survivor.signature === 'string' &&
       typeof trustedSignatures.get(survivor.pid) !== 'string' &&
       !signatures.has(survivor.pid)
     ) {
-      signatures.set(survivor.pid, survivor.signature);
+      signatures.set(survivor.pid, survivor.signature ?? null);
     }
   }
   return signatures;
@@ -3378,6 +3456,27 @@ export async function stopC8Run(
         version,
         nonSignalableSurvivorSignatures,
       )
+    ) {
+      continue;
+    }
+    if (
+      revalidatePidfileAttempt(
+        config.cacheDir,
+        version,
+        pidfileAttempt,
+        previousSignatures,
+        recordedSignatures,
+      )
+    ) {
+      continue;
+    }
+    if (
+      previousSignatures.size === 0 ||
+      livePidfileEntries(config.cacheDir, {
+        version,
+        knownSignatures: pidfileSignatures,
+        retireStale: true,
+      }).length === 0
     ) {
       continue;
     }
