@@ -413,6 +413,9 @@ function readMarker(directory: string): BlueprintMarker | undefined {
 
 function readRemovalMarker(
 	directory: string,
+	{
+		ignoreInaccessibleMarker = false,
+	}: { ignoreInaccessibleMarker?: boolean } = {},
 ): { marker: BlueprintMarker; content: string } | undefined {
 	const rootInfo = lstatSync(directory, { throwIfNoEntry: false });
 	if (!rootInfo || rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
@@ -420,7 +423,20 @@ function readRemovalMarker(
 	}
 
 	const markerPath = join(directory, MARKER_FILE);
-	const markerInfo = lstatSync(markerPath, { throwIfNoEntry: false });
+	const markerInfo = (() => {
+		try {
+			return lstatSync(markerPath, { throwIfNoEntry: false });
+		} catch (error) {
+			if (
+				ignoreInaccessibleMarker &&
+				isRecord(error) &&
+				(error.code === "EACCES" || error.code === "EPERM")
+			) {
+				return undefined;
+			}
+			throw error;
+		}
+	})();
 	if (!markerInfo) return undefined;
 	if (markerInfo.isSymbolicLink() || !markerInfo.isFile()) {
 		throw new BlueprintScaffoldError(
@@ -499,7 +515,9 @@ export function planSetupBlueprintRemovals({
 		seen.add(directory);
 
 		try {
-			const result = readRemovalMarker(directory);
+			const result = readRemovalMarker(directory, {
+				ignoreInaccessibleMarker: directory !== root,
+			});
 			if (!result) continue;
 			const blueprint = SETUP_BLUEPRINTS.find(
 				(candidate) => candidate.id === result.marker.id,

@@ -48,6 +48,9 @@
  *                                   "install-skills", "list-skills",
  *                                   "remove-modeler", "probe-modeler",
  *                                   "list-blueprint-directories").
+ *   C8CTL_SETUP_STUB_MARKER_PATH=relative-path and
+ *   C8CTL_SETUP_STUB_MARKER_ERROR=EACCES|EPERM — fail lstat for this
+ *                                   blueprint marker path.
  *   C8RUN_CACHE_DIR=dir           — the fake `cluster purge`/`delete`
  *                                   children mirror the real plugin's
  *                                   effects, but only inside this dir.
@@ -89,7 +92,7 @@ import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 
 // ── Desktop Modeler looks installed ────────────────────────────────
@@ -120,6 +123,25 @@ Object.defineProperty(fs, "readdirSync", {
 			);
 		}
 		return Reflect.apply(originalReaddirSync, fs, args);
+	},
+});
+
+const originalLstatSync = fs.lstatSync;
+Object.defineProperty(fs, "lstatSync", {
+	value: (...args: unknown[]) => {
+		const markerPath = process.env.C8CTL_SETUP_STUB_MARKER_PATH;
+		const markerError = process.env.C8CTL_SETUP_STUB_MARKER_ERROR;
+		if (
+			markerPath &&
+			markerError &&
+			relative(process.cwd(), String(args[0])) === markerPath
+		) {
+			throw Object.assign(
+				new Error("stubbed blueprint marker inspection failure"),
+				{ code: markerError },
+			);
+		}
+		return Reflect.apply(originalLstatSync, fs, args);
 	},
 });
 
