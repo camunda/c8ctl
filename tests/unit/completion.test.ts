@@ -256,6 +256,22 @@ describe("Completion Module", () => {
 		restoreExit?.();
 	});
 
+	test("completion lists suspend and resume process definition flags", () => {
+		showCompletion("zsh");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(
+			output.includes(
+				"--includeProcessInstances[Also suspend or resume the running instances through a batch operation]",
+			),
+			"zsh completion should describe --includeProcessInstances for suspend/resume",
+		);
+		assert.ok(
+			output.includes("--processDefinitionId["),
+			"zsh completion should list --processDefinitionId",
+		);
+	});
+
 	test("generates bash completion script", () => {
 		showCompletion("bash");
 

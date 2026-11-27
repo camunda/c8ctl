@@ -808,6 +808,36 @@ const MIGRATE_PI_POSITIONALS = [
 	},
 ] as const satisfies readonly PositionalDef[];
 
+/**
+ * Optional: a key selects one definition version, `--processDefinitionId`
+ * selects by BPMN process ID instead. The handler enforces exactly one.
+ */
+const SUSPEND_RESUME_PD_POSITIONALS = [
+	{
+		name: "key",
+		validate: ProcessDefinitionKey.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
+const SUSPEND_RESUME_PD_FLAGS = {
+	processDefinitionId: {
+		type: "string",
+		description:
+			"Select by BPMN process ID instead of key (all versions unless --version is given)",
+		validate: ProcessDefinitionId.assumeExists,
+	},
+	tenantId: {
+		type: "string",
+		description: "Tenant ID (only with --processDefinitionId)",
+		validate: TenantId.assumeExists,
+	},
+	includeProcessInstances: {
+		type: "boolean",
+		description:
+			"Also suspend or resume the running instances through a batch operation",
+	},
+} as const satisfies Record<string, FlagDef>;
+
 const GET_INCIDENT_POSITIONALS = [
 	{
 		name: "key",
@@ -1219,32 +1249,65 @@ export const COMMAND_REGISTRY = {
 
 	suspend: {
 		description: "Suspend resource",
-		helpDescription: "Suspend a process instance (Camunda 8.10+)",
-		helpResource: "<resource> <key>",
+		helpDescription:
+			"Suspend a process instance (Camunda 8.10+) or process definition versions (Camunda 8.11+)",
+		helpResource: "<resource> [key]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show suspend command with all flags",
 		mutating: true,
 		requiresResource: true,
-		resources: ["pi"],
+		resources: ["pi", "pd"],
 		flags: {},
+		resourceFlags: {
+			"process-definition": SUSPEND_RESUME_PD_FLAGS,
+		},
 		resourcePositionals: {
 			"process-instance": GET_PI_POSITIONALS,
+			"process-definition": SUSPEND_RESUME_PD_POSITIONALS,
 		},
+		helpExamples: [
+			{
+				command: "c8ctl suspend pd 2251799813685249",
+				description: "Suspend one process definition version by key",
+			},
+			{
+				command:
+					"c8ctl suspend pd --processDefinitionId order-process --version 2 --includeProcessInstances",
+				description:
+					"Suspend a version by process ID and its running instances",
+			},
+		],
 	},
 
 	resume: {
 		description: "Resume resource",
-		helpDescription: "Resume a suspended process instance (Camunda 8.10+)",
-		helpResource: "<resource> <key>",
+		helpDescription:
+			"Resume a suspended process instance (Camunda 8.10+) or process definition versions (Camunda 8.11+)",
+		helpResource: "<resource> [key]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show resume command with all flags",
 		mutating: true,
 		requiresResource: true,
-		resources: ["pi"],
+		resources: ["pi", "pd"],
 		flags: {},
+		resourceFlags: {
+			"process-definition": SUSPEND_RESUME_PD_FLAGS,
+		},
 		resourcePositionals: {
 			"process-instance": GET_PI_POSITIONALS,
+			"process-definition": SUSPEND_RESUME_PD_POSITIONALS,
 		},
+		helpExamples: [
+			{
+				command: "c8ctl resume pd 2251799813685249",
+				description: "Resume one process definition version by key",
+			},
+			{
+				command:
+					"c8ctl resume pd --processDefinitionId order-process --version 2 --includeProcessInstances",
+				description: "Resume a version by process ID and its instances",
+			},
+		],
 	},
 
 	migrate: {

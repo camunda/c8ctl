@@ -9,6 +9,7 @@
  */
 
 import { styleText } from "node:util";
+import { TenantId } from "@camunda8/orchestration-cluster-api";
 import {
 	type EvalContext,
 	type EvaluationResult,
@@ -446,7 +447,7 @@ async function evaluateCluster({
 		const response = await client.evaluateExpression({
 			expression: normalizeExpression(expression),
 			...(variables !== undefined ? { variables } : {}),
-			...(tenantId ? { tenantId } : {}),
+			...(tenantId ? { tenantId: TenantId.assumeExists(tenantId) } : {}),
 		});
 		return {
 			expression,

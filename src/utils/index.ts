@@ -11,6 +11,7 @@ export * from "./command-local/open-helpers.ts";
 export * from "./command-local/process-instance-helpers.ts";
 export * from "./command-local/search-helpers.ts";
 export * from "./command-local/skills-install-helpers.ts";
+export * from "./command-local/suspension-rows.ts";
 export * from "./command-local/watch-constants.ts";
 export * from "./shared/camunda-json.ts";
 export * from "./shared/date-filter.ts";
