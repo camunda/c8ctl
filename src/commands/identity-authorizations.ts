@@ -82,6 +82,7 @@ export const searchIdentityAuthorizationsCommand = defineServiceCommand(
 			ownerType: flags.ownerType,
 			resourceType: flags.resourceType,
 			resourceId: flags.resourceId,
+			own: flags.own,
 			limit: scope.limit,
 		}),
 		dryRun: {
@@ -89,10 +90,13 @@ export const searchIdentityAuthorizationsCommand = defineServiceCommand(
 			request: searchAuthorizationsRequest,
 		},
 		service: searchAuthorizations,
-		render: ({ items }) => ({
+		render: ({ items, authorizationsEnabled }) => ({
 			kind: "list",
 			items: items.map(row),
-			emptyMessage: "No authorizations found",
+			emptyMessage:
+				authorizationsEnabled === false
+					? "Authorizations are disabled on this cluster: every request is allowed"
+					: "No authorizations found",
 		}),
 	},
 );
