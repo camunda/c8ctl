@@ -406,10 +406,7 @@ describe(".c8ignore — isIgnored() functional contract for deploy/watch", () =>
 	}
 
 	test("re-included directory entries stay traversable through absolute paths", () => {
-		writeFileSync(
-			join(baseDir, ".c8ignore"),
-			"logs/*\n!logs/keep/\n",
-		);
+		writeFileSync(join(baseDir, ".c8ignore"), "logs/*\n!logs/keep/\n");
 		const keepDir = join(baseDir, "logs", "keep");
 		mkdirSync(keepDir, { recursive: true });
 		writeFileSync(join(keepDir, "kept.bpmn"), "");

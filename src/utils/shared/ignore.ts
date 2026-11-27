@@ -90,9 +90,7 @@ export function parsePattern(raw: string): ParsedPattern | null {
 		globs = anchored
 			? [`${pattern}/**`]
 			: [`${pattern}/**`, `**/${pattern}/**`];
-		entryGlobs = anchored
-			? [`${pattern}/`]
-			: [`${pattern}/`, `**/${pattern}/`];
+		entryGlobs = anchored ? [`${pattern}/`] : [`${pattern}/`, `**/${pattern}/`];
 	} else if (pattern.endsWith("/**")) {
 		// Contents-only (`dir/**`): match everything inside the directory but
 		// not the directory entry itself.
@@ -108,12 +106,7 @@ export function parsePattern(raw: string): ParsedPattern | null {
 		// Unanchored entry: match as a file or directory at any depth.
 		// e.g. `*.log` or `target` → the entry and its contents at any depth.
 		globs = [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
-		entryGlobs = [
-			pattern,
-			`${pattern}/`,
-			`**/${pattern}`,
-			`**/${pattern}/`,
-		];
+		entryGlobs = [pattern, `${pattern}/`, `**/${pattern}`, `**/${pattern}/`];
 	}
 
 	return { negate, globs, entryGlobs };
