@@ -4730,8 +4730,9 @@ describe("Cluster Plugin – stopC8Run", () => {
 			mkdirSync(staleBinaryDir, { recursive: true });
 			mkdirSync(runningBinaryDir, { recursive: true });
 			const staleStopMarker = join(tempDir, "stale-version-stopped");
+			const stalePidfile = join(staleBinaryDir, "camunda.process");
 			writeFileSync(
-				join(staleBinaryDir, "camunda.process"),
+				stalePidfile,
 				String(unrelatedChild.pid),
 			);
 			writeFileSync(
@@ -4756,6 +4757,12 @@ describe("Cluster Plugin – stopC8Run", () => {
 				},
 			});
 
+			assert.strictEqual(
+				plugin.isVersionInstanceRunning(tempDir, "8.10"),
+				false,
+				"a reused PID must not make its stale version appear live",
+			);
+
 			const stopped = await plugin.stopC8Run(
 				{
 					cacheDir: tempDir,
@@ -4776,13 +4783,31 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.strictEqual(stopped, "8.10.5");
 			assert.strictEqual(
 				existsSync(staleStopMarker),
-				true,
-				"the reused-PID version should be tried before the live version",
+				false,
+				"a version with only a reused PID must not be stopped",
+			);
+			assert.strictEqual(
+				existsSync(stalePidfile),
+				false,
+				"the proven-stale pidfile should be retired",
 			);
 			assert.strictEqual(
 				plugin.isPidAlive(unrelatedChild.pid),
 				true,
 				"the unrelated process that reused the PID must not be killed",
+			);
+			assert.strictEqual(
+				plugin.hasRunningClusterPidfiles(tempDir),
+				false,
+				"a stale pidfile must not keep the stopped cluster marked as running",
+			);
+			assert.strictEqual(
+				await plugin.waitForClusterExit(tempDir, {
+					timeoutMs: 50,
+					intervalMs: 10,
+				}),
+				true,
+				"purge readiness must ignore the proven-stale PID",
 			);
 		} finally {
 			for (const child of [unrelatedChild, clusterChild]) {
@@ -4850,6 +4875,34 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 		const result = plugin.hasRunningClusterPidfiles(tempDir);
 		assert.strictEqual(result, true);
 	});
+
+	test(
+		"ignores a pidfile PID when its recorded signature proves reuse",
+		{ skip: !plugin.platformSupportsProcessSignature() },
+		async () => {
+			const signature = await pollUntilValue(
+				async () => plugin.processStartSignature(process.pid) || undefined,
+				SIGNATURE_DEADLINE_MS,
+				100,
+				"process start signature for reused PID fixture",
+			);
+			const versionDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(
+				join(versionDir, "camunda.process"),
+				String(process.pid),
+			);
+
+			assert.strictEqual(
+				plugin.hasLivePidfileProcesses(
+					tempDir,
+					"8.8",
+					new Map([[process.pid, `${signature}-previous`]]),
+				),
+				false,
+			);
+		},
+	);
 
 	test("ignores non-.process files", () => {
 		const versionDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");

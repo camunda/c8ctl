@@ -2045,6 +2045,14 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
 
+  const previousRecord = readRunningClusterRecord(config.cacheDir);
+  if (previousRecord) {
+    livePidfileEntries(config.cacheDir, {
+      knownSignatures: recordedClusterPidSignatures(previousRecord),
+      retireStale: true,
+    });
+  }
+
   logger.info('Starting Camunda 8 local cluster...');
 
   // Persist the chosen port BEFORE spawning c8run. If c8ctl is interrupted
@@ -2354,10 +2362,10 @@ export function recordedPidIsLive(pid, signature) {
  * data that would make a deep walk slow. Returns parsed positive integers
  * (alive or not); the caller decides liveness.
  */
-export function collectPidfilePids(cacheDir, { version } = {}) {
-  const pids = [];
+function collectPidfileEntries(cacheDir, { version } = {}) {
+  const pidfiles = [];
   if (!existsSync(cacheDir)) {
-    return pids;
+    return pidfiles;
   }
 
   let versionDirs;
@@ -2405,13 +2413,67 @@ export function collectPidfilePids(cacheDir, { version } = {}) {
           continue;
         }
         if (Number.isInteger(pid) && pid > 0) {
-          pids.push(pid);
+          pidfiles.push({ path: join(dir, entry.name), pid });
         }
       }
     }
   }
 
-  return pids;
+  return pidfiles;
+}
+
+export function collectPidfilePids(cacheDir, options = {}) {
+  return collectPidfileEntries(cacheDir, options).map(({ pid }) => pid);
+}
+
+function retireStalePidfileEntry({ path, pid }) {
+  let contents;
+  try {
+    contents = readFileSync(path, 'utf-8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  if (Number.parseInt(contents.trim(), 10) === pid) {
+    rmSync(path, { force: true });
+  }
+}
+
+function livePidfileEntries(
+  cacheDir,
+  { version, knownSignatures = new Map(), retireStale = false } = {},
+) {
+  const signatureChecks = new Map();
+  const liveEntries = [];
+
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    const recordedSignature = knownSignatures.get(entry.pid);
+    if (!isPidAlive(entry.pid)) {
+      if (retireStale && typeof recordedSignature === 'string') {
+        retireStalePidfileEntry(entry);
+      }
+      continue;
+    }
+
+    if (typeof recordedSignature !== 'string') {
+      liveEntries.push(entry);
+      continue;
+    }
+
+    if (!signatureChecks.has(entry.pid)) {
+      signatureChecks.set(
+        entry.pid,
+        recordedPidIsLive(entry.pid, recordedSignature),
+      );
+    }
+    if (signatureChecks.get(entry.pid)) {
+      liveEntries.push(entry);
+    } else if (retireStale) {
+      retireStalePidfileEntry(entry);
+    }
+  }
+
+  return liveEntries;
 }
 
 function getPidRecordPath(cacheDir) {
@@ -2649,6 +2711,12 @@ export function clearRunningClusterRecord(cacheDir) {
  */
 export function clearStaleRunningClusterRecord(cacheDir) {
   const record = readRunningClusterRecord(cacheDir);
+  if (record) {
+    livePidfileEntries(cacheDir, {
+      knownSignatures: recordedClusterPidSignatures(record),
+      retireStale: true,
+    });
+  }
   if (
     record &&
     liveRecordedPids(cacheDir).length === 0 &&
@@ -2770,10 +2838,15 @@ export function recordRunningClusterPids(
  * PID record attributing a live process to that version.
  */
 export function isVersionInstanceRunning(cacheDir, version) {
-  if (collectPidfilePids(cacheDir, { version }).some((pid) => isPidAlive(pid))) {
+  const record = readRunningClusterRecord(cacheDir);
+  const knownSignatures = record
+    ? recordedClusterPidSignatures(record)
+    : new Map();
+  if (
+    livePidfileEntries(cacheDir, { version, knownSignatures }).length > 0
+  ) {
     return true;
   }
-  const record = readRunningClusterRecord(cacheDir);
   return Boolean(
     record &&
       ((record.version === version &&
@@ -2867,8 +2940,13 @@ export function hasRunningClusterPidfiles(cacheDir) {
     return false;
   }
 
+  const record = readRunningClusterRecord(cacheDir);
+  const knownSignatures = record
+    ? recordedClusterPidSignatures(record)
+    : new Map();
+
   // Primary signal: c8run's own .process pidfiles inside the install dirs.
-  if (collectPidfilePids(cacheDir).some((pid) => isPidAlive(pid))) {
+  if (livePidfileEntries(cacheDir, { knownSignatures }).length > 0) {
     return true;
   }
 
@@ -2876,14 +2954,13 @@ export function hasRunningClusterPidfiles(cacheDir) {
   // running version's install dir (and with it the .process pidfiles) has been
   // replaced or deleted, which would otherwise make c8ctl report the live
   // cluster as stopped and leave its process orphaned (#560).
-  const record = readRunningClusterRecord(cacheDir);
   return (
     liveRecordedPids(cacheDir).length > 0 ||
     livePidfileSurvivors(record).length > 0
   );
 }
 
-function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
+export function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
   const currentPids = new Set(collectPidfilePids(cacheDir, { version }));
 
   for (const pid of previousSignatures.keys()) {
@@ -2897,11 +2974,7 @@ function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
     }
 
     const currentSignature = processStartSignature(pid);
-    if (
-      currentSignature === null ||
-      currentSignature === previousSignature ||
-      currentPids.has(pid)
-    ) {
+    if (currentSignature === null || currentSignature === previousSignature) {
       return true;
     }
   }
@@ -2927,7 +3000,11 @@ function findPidfileSurvivors(attempts, cacheDir) {
   const currentPidfileKeys = new Set();
   const currentSignatures = new Map();
   for (const version of currentVersions) {
-    for (const pid of collectPidfilePids(cacheDir, { version })) {
+    for (const { pid } of livePidfileEntries(cacheDir, {
+      version,
+      knownSignatures,
+      retireStale: true,
+    })) {
       if (!isPidAlive(pid)) {
         continue;
       }
@@ -3013,6 +3090,10 @@ async function waitForPidfileProcessesExit(
   previousSignatures,
   { timeoutMs = 60_000, intervalMs = 250 } = {},
 ) {
+  if (!hasLivePidfileProcesses(cacheDir, version, previousSignatures)) {
+    return true;
+  }
+
   const deadline = Date.now() + timeoutMs;
   // Keep the polling cheap; only fingerprint PIDs that remain live at timeout.
   while (
@@ -3049,6 +3130,15 @@ export async function stopC8Run(
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
+  const record = readRunningClusterRecord(config.cacheDir);
+  const recordedSignatures = record
+    ? recordedClusterPidSignatures(record)
+    : new Map();
+
+  livePidfileEntries(config.cacheDir, {
+    knownSignatures: recordedSignatures,
+    retireStale: true,
+  });
 
   const markerExists = existsSync(markerFile);
   const clusterAppearsRunning = hasRunningClusterPidfiles(config.cacheDir);
@@ -3102,14 +3192,13 @@ export async function stopC8Run(
         .sort()
     : [];
   const livePidfileVersions = installedVersions.filter((version) =>
-    collectPidfilePids(config.cacheDir, { version }).some((pid) => isPidAlive(pid)),
+    livePidfileEntries(config.cacheDir, {
+      version,
+      knownSignatures: recordedSignatures,
+    }).length > 0,
   );
 
   const versionsToTry = [];
-  const record = readRunningClusterRecord(config.cacheDir);
-  const recordedSignatures = record
-    ? recordedClusterPidSignatures(record)
-    : new Map();
   const markerVersion = existsSync(versionFile)
     ? readFileSync(versionFile, 'utf-8').trim()
     : '';
@@ -3138,7 +3227,10 @@ export async function stopC8Run(
 
   const pidfileAttempts = livePidfileVersions.map((version) => {
     const processes = new Map();
-    for (const pid of collectPidfilePids(config.cacheDir, { version })) {
+    for (const { pid } of livePidfileEntries(config.cacheDir, {
+      version,
+      knownSignatures: recordedSignatures,
+    })) {
       const signature = processStartSignature(pid);
       const recordedSignature = recordedSignatures.get(pid) ?? null;
       if (signature || isPidAlive(pid)) {
@@ -3174,7 +3266,10 @@ export async function stopC8Run(
         );
       }
     }
-    for (const pid of collectPidfilePids(config.cacheDir, { version })) {
+    for (const { pid } of livePidfileEntries(config.cacheDir, {
+      version,
+      knownSignatures: recordedSignatures,
+    })) {
       if (!isPidAlive(pid) || pidfileAttempt.has(pid)) {
         continue;
       }
@@ -3190,7 +3285,6 @@ export async function stopC8Run(
     if (previousSignatures.size === 0) {
       continue;
     }
-
     const versionConfig = { cacheDir: config.cacheDir, version };
     let binaryPath;
     try {
@@ -3372,6 +3466,12 @@ export async function stopC8Run(
     }
   }
   const persistedRecord = readRunningClusterRecord(config.cacheDir);
+  livePidfileEntries(config.cacheDir, {
+    knownSignatures: persistedRecord
+      ? recordedClusterPidSignatures(persistedRecord)
+      : recordedSignatures,
+    retireStale: true,
+  });
 
   // Markers are always cleared (a stale marker or version file would block
   // future starts). Keep the durable PID record while any tracked process or
