@@ -26,7 +26,7 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
 	after,
 	afterEach,
@@ -35,7 +35,7 @@ import {
 	describe,
 	test,
 } from "node:test";
-import { c8WithEnv } from "../utils/cli.ts";
+import { c8WithEnv, c8WithOptions } from "../utils/cli.ts";
 import { listenOnLoopback, sendHalfThenDrop } from "../utils/http-server.ts";
 
 describe("CLI behavioural: cluster start failure", () => {
@@ -526,5 +526,74 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 
 		assert.strictEqual((await start(baseUrl)).status, 7);
 		assert.strictEqual(launched(), "ga");
+	});
+	test("an interrupt during extraction removes the staging dir and keeps the existing build", async () => {
+		// An extractor that never finishes, so the signal lands mid-extraction.
+		const fakeBin = join(cacheDir, "fake-bin");
+		mkdirSync(fakeBin);
+		for (const name of ["tar", "unzip"]) {
+			const extractor = join(fakeBin, name);
+			writeFileSync(
+				extractor,
+				`#!/bin/sh\ntouch "${join(fakeBin, "started")}"\nsleep 60\n`,
+			);
+			chmodSync(extractor, 0o755);
+		}
+
+		// `timeout` makes the spawn helper SIGTERM the CLI.
+		const result = await c8WithOptions(
+			{
+				timeout: 5_000,
+				env: {
+					C8RUN_CACHE_DIR: cacheDir,
+					C8CTL_OUTPUT_MODE: "text",
+					C8CTL_C8RUN_DOWNLOAD_URL: baseUrl,
+					C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
+					PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
+				},
+			},
+			"cluster",
+			"start",
+		);
+
+		assert.ok(
+			existsSync(join(fakeBin, "started")),
+			`extraction never started:\n${result.stdout}${result.stderr}`,
+		);
+		assert.ok(
+			existsSync(join(alphaBuildDir(), "c8run")),
+			"the alpha build must be kept",
+		);
+		assert.deepStrictEqual(
+			readdirSync(cacheDir).filter((name) => name.startsWith(".")),
+			[],
+			"an interrupted install must not leave staging dirs behind",
+		);
+	});
+
+	test("delete and purge remove staging and backup dirs of dead processes only", async () => {
+		const deadPid = 2147483646;
+		const dead = [
+			`.staging-c8run-8.11-${deadPid}`,
+			`.replaced-c8run-8.11-${deadPid}`,
+		];
+		const live = `.staging-c8run-8.11-${process.pid}`;
+		const seed = () => {
+			for (const name of [...dead, live]) {
+				mkdirSync(join(cacheDir, name, "c8run-8.11"), { recursive: true });
+			}
+		};
+		const leftovers = () =>
+			readdirSync(cacheDir)
+				.filter((name) => name.startsWith("."))
+				.sort();
+
+		seed();
+		assert.strictEqual((await cluster(baseUrl, "purge", "8.11")).status, 0);
+		assert.deepStrictEqual(leftovers(), [live]);
+
+		seed();
+		assert.strictEqual((await cluster(baseUrl, "delete", "8.11")).status, 0);
+		assert.deepStrictEqual(leftovers(), [live]);
 	});
 });
