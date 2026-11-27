@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { type ParseError, parse as parseJsonc } from "jsonc-parser";
 import {
 	type McpConfigPlan,
 	writeMcpConfig,
@@ -80,6 +81,16 @@ function sandbox(t: TestContext) {
 
 function configAt(path: string): Record<string, unknown> {
 	const config: unknown = JSON.parse(readFileSync(path, "utf8"));
+	assert.ok(isRecord(config));
+	return config;
+}
+
+function jsoncConfigAt(path: string): Record<string, unknown> {
+	const errors: ParseError[] = [];
+	const config: unknown = parseJsonc(readFileSync(path, "utf8"), errors, {
+		allowTrailingComma: true,
+	});
+	assert.deepEqual(errors, []);
 	assert.ok(isRecord(config));
 	return config;
 }
@@ -389,52 +400,156 @@ test("mcp uninstall recognizes orchestration entries with nonstandard Node execu
 	assert.deepEqual(serversAt(s.paths.cursor, "cursor"), {});
 });
 
-test("VS Code uninstall preserves comments around removed managed entries", async (t) => {
-	for (const target of [
-		{ entryName: "camunda-docs", flags: ["--docs"] },
-		{ entryName: "camunda", flags: [] },
-	]) {
-		const s = sandbox(t);
-		const entry =
-			target.entryName === "camunda-docs"
-				? { type: "http", url: DOCS_URL }
-				: {
-						type: "stdio",
-						command: process.execPath,
-						args: [
-							"/opt/c8ctl/dist/index.js",
-							"mcp-proxy",
-							"--profile",
-							"work",
-						],
-						env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
-					};
-		const precedingEntry =
-			'"github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" }';
-		s.write(
-			"vscode",
-			`{
+test("VS Code uninstall handles first, middle, and sole JSONC properties", async (t) => {
+	const docsEntry = { type: "http", url: DOCS_URL };
+	const githubEntry = {
+		type: "http",
+		url: "https://api.githubcopilot.com/mcp/",
+	};
+	const otherEntry = { type: "http", url: "https://example.invalid/mcp" };
+	const docsProperty = `"camunda-docs": ${JSON.stringify(docsEntry)}`;
+	const githubProperty = `"github": ${JSON.stringify(githubEntry)}`;
+	const otherProperty = `"other": ${JSON.stringify(otherEntry)}`;
+	const fixtures = [
+		{
+			name: "first property",
+			content: `{
+  "preferences": {"theme": "dark"},
   "servers": {
-    ${precedingEntry}, // work account, do not remove
-    /* preserve this note */
-    "${target.entryName}": ${JSON.stringify(entry)},
+    /* preserve first-property comment */
+    ${docsProperty},
+    ${githubProperty}, // preserve GitHub comment
   }
-}
-`,
-		);
-
-		const removed = await s.run("mcp", "uninstall", "vscode", ...target.flags);
+}`,
+			comments: [
+				"/* preserve first-property comment */",
+				"// preserve GitHub comment",
+			],
+			unrelatedProperties: [githubProperty],
+			expectedServers: { github: githubEntry },
+		},
+		{
+			name: "middle property",
+			content: `{
+  "preferences": {"theme": "dark"},
+  "servers": {
+    ${githubProperty}, // preserve GitHub comment
+    /* preserve middle-property comment */
+    ${docsProperty}, // preserve removed-entry comment
+    ${otherProperty}, // preserve trailing-comma comment
+  }
+}`,
+			comments: [
+				"// preserve GitHub comment",
+				"/* preserve middle-property comment */",
+				"// preserve removed-entry comment",
+				"// preserve trailing-comma comment",
+			],
+			unrelatedProperties: [githubProperty, otherProperty],
+			expectedServers: { github: githubEntry, other: otherEntry },
+		},
+		{
+			name: "sole property",
+			content: `{
+  "preferences": {"theme": "dark"},
+  "servers": {
+    /* preserve sole-property comment */
+    ${docsProperty},
+  }
+}`,
+			comments: ["/* preserve sole-property comment */"],
+			unrelatedProperties: [],
+			expectedServers: {},
+		},
+	];
+	for (const fixture of fixtures) {
+		const s = sandbox(t);
+		s.write("vscode", fixture.content);
+		const removed = await s.run("mcp", "uninstall", "vscode", "--docs");
 		assert.equal(removed.status, 0, removed.stderr);
 
 		const content = readFileSync(s.paths.vscode, "utf8");
-		assert.ok(
-			content.includes(`${precedingEntry} // work account, do not remove`),
+		for (const comment of fixture.comments) {
+			assert.ok(content.includes(comment), `${fixture.name}: ${comment}`);
+		}
+		for (const property of fixture.unrelatedProperties) {
+			assert.ok(content.includes(property), `${fixture.name}: ${property}`);
+		}
+		assert.ok(!content.includes('"camunda-docs"'));
+		const config = jsoncConfigAt(s.paths.vscode);
+		assert.deepEqual(config.preferences, { theme: "dark" });
+		assert.deepEqual(config.servers, fixture.expectedServers);
+	}
+});
+
+test("VS Code uninstall removes both managed entries in either property order", async (t) => {
+	const githubEntry = {
+		type: "http",
+		url: "https://api.githubcopilot.com/mcp/",
+	};
+	const otherEntry = { type: "http", url: "https://example.invalid/mcp" };
+	const githubProperty = `"github": ${JSON.stringify(githubEntry)}`;
+	const otherProperty = `"other": ${JSON.stringify(otherEntry)}`;
+	const fixtures = [
+		{ name: "orchestration before docs", order: ["camunda", "camunda-docs"] },
+		{ name: "docs before orchestration", order: ["camunda-docs", "camunda"] },
+	];
+	for (const fixture of fixtures) {
+		const s = sandbox(t);
+		const orchestrationProperty = `"camunda": ${JSON.stringify({
+			type: "stdio",
+			command: process.execPath,
+			args: ["/opt/c8ctl/dist/index.js", "mcp-proxy", "--profile", "work"],
+			env: { C8CTL_DATA_DIR: s.env.C8CTL_DATA_DIR },
+		})}`;
+		const docsProperty = `"camunda-docs": ${JSON.stringify({
+			type: "http",
+			url: DOCS_URL,
+		})}`;
+		const managedProperties = fixture.order.map((name) =>
+			name === "camunda"
+				? `${orchestrationProperty}, // preserve orchestration comment`
+				: `${docsProperty}, /* preserve docs comment */`,
 		);
-		assert.ok(content.includes("/* preserve this note */"));
-		assert.ok(!content.includes(`"${target.entryName}"`));
-		const listed = await s.run("mcp", "list", "vscode");
-		assert.equal(listed.status, 0, listed.stderr);
-		assert.deepEqual(parseJson(listed), []);
+		s.write(
+			"vscode",
+			`{
+  "preferences": {"theme": "dark"},
+  "servers": {
+    ${managedProperties[0]}
+    ${githubProperty}, // preserve GitHub comment
+    ${managedProperties[1]}
+    ${otherProperty}, // preserve trailing-comma comment
+  }
+}`,
+		);
+
+		const removed = await s.run(
+			"mcp",
+			"uninstall",
+			"vscode",
+			"--docs",
+			"--orchestration",
+		);
+		assert.equal(removed.status, 0, removed.stderr);
+
+		const content = readFileSync(s.paths.vscode, "utf8");
+		for (const comment of [
+			"// preserve orchestration comment",
+			"/* preserve docs comment */",
+			"// preserve GitHub comment",
+			"// preserve trailing-comma comment",
+		]) {
+			assert.ok(content.includes(comment), `${fixture.name}: ${comment}`);
+		}
+		assert.ok(content.includes(githubProperty));
+		assert.ok(content.includes(otherProperty));
+		const config = jsoncConfigAt(s.paths.vscode);
+		assert.deepEqual(config.preferences, { theme: "dark" });
+		assert.deepEqual(config.servers, {
+			github: githubEntry,
+			other: otherEntry,
+		});
 	}
 });
 
