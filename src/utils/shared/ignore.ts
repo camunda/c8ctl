@@ -128,26 +128,25 @@ function buildIgnoreChecker(
 	const matches = matchesParsedPattern;
 
 	// gitignore rule: you cannot re-include a file if a parent directory of
-	// that file is excluded. Returns true when any ancestor of `rel` is
+	// that file is excluded. Returns true when any parent directory of `rel` is
 	// ignored by the first `upTo` patterns (last-match-wins for ancestors).
 	// Ancestors are directories, so they are queried with a trailing slash —
 	// otherwise directory-only patterns (`dir/`) would not match them.
-	const ancestorIgnored = (rel: string, upTo: number): boolean =>
-		rel
-			.split("/")
-			.slice(1)
-			.some((_, depth) => {
-				const ancestor = `${rel
-					.split("/")
-					.slice(0, depth + 1)
-					.join("/")}/`;
-				return patterns
-					.slice(0, upTo)
-					.reduce(
-						(ignored, p) => (matches(ancestor, p) ? !p.negate : ignored),
-						false,
-					);
-			});
+	const ancestorIgnored = (rel: string, upTo: number): boolean => {
+		const pathSegments = rel.split("/");
+		const directorySegments =
+			pathSegments.at(-1) === "" ? pathSegments.slice(0, -1) : pathSegments;
+
+		return directorySegments.slice(0, -1).some((_, depth) => {
+			const ancestor = `${directorySegments.slice(0, depth + 1).join("/")}/`;
+			return patterns
+				.slice(0, upTo)
+				.reduce(
+					(ignored, p) => (matches(ancestor, p) ? !p.negate : ignored),
+					false,
+				);
+		});
+	};
 
 	return (rel: string): boolean =>
 		patterns.reduce<boolean>((ignored, p, i) => {
@@ -155,8 +154,10 @@ function buildIgnoreChecker(
 			if (p.negate) {
 				// A negation can only un-ignore a path if no parent directory is
 				// currently excluded (gitignore rule: excluded dirs cannot be
-				// re-included via negation on their descendants).
-				return ancestorIgnored(rel, i) ? ignored : false;
+				// re-included via negation on their descendants). Include this
+				// negation when checking ancestors so folder negations also
+				// un-ignore their contents.
+				return ancestorIgnored(rel, i + 1) ? ignored : false;
 			}
 			return true;
 		}, false);

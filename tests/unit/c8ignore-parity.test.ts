@@ -152,6 +152,35 @@ const MATCHER_CASES: readonly MatcherCase[] = [
 		],
 	},
 	{
+		name: "negation re-includes a directory excluded by wildcard",
+		patterns: ["*/", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/kept.bpmn", false],
+			["other/", true],
+			["other/other.bpmn", true],
+		],
+	},
+	{
+		name: "negation re-includes an explicitly excluded directory",
+		patterns: ["keep/", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/kept.bpmn", false],
+			["other/other.bpmn", false],
+		],
+	},
+	{
+		name: "negation re-includes a directory matched by a child wildcard",
+		patterns: ["logs/*", "!logs/keep/"],
+		expect: [
+			["logs/", false],
+			["logs/keep/", false],
+			["logs/keep/k.bpmn", false],
+			["logs/other/other.bpmn", true],
+		],
+	},
+	{
 		name: "single-level wildcard directory (foo/*)",
 		patterns: ["foo/*"],
 		expect: [
