@@ -11,6 +11,23 @@ import { describe, test } from "node:test";
 import { c8, c8WithOptions, parseJson } from "../utils/cli.ts";
 import { asRecord, getUrl } from "../utils/guards.ts";
 
+describe("CLI behavioural: --version latest selector", () => {
+	test("create process-instance keeps --version=-1 (latest) as a number", async () => {
+		const result = await c8(
+			"create",
+			"pi",
+			"--dry-run",
+			"--processDefinitionId",
+			"order-process",
+			"--version=-1",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.strictEqual(body.processDefinitionVersion, -1);
+	});
+});
+
 const VERBS: Array<[verb: string, suffix: string]> = [
 	["suspend", "suspension"],
 	["resume", "resumption"],
