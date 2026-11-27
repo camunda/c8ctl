@@ -601,10 +601,9 @@ describe("Cluster Plugin – findC8RunBinaryPath", () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		const installDir = join(tempDir, "c8run-8.8");
 		mkdirSync(join(installDir, C8RUN_BINARY), { recursive: true });
-		mkdirSync(
-			join(installDir, "c8run-8.8.1", C8RUN_BINARY),
-			{ recursive: true },
-		);
+		mkdirSync(join(installDir, "c8run-8.8.1", C8RUN_BINARY), {
+			recursive: true,
+		});
 
 		assert.strictEqual(plugin.findC8RunBinaryPath(config), null);
 	});
@@ -3756,85 +3755,175 @@ describe("Cluster Plugin – stopC8Run", () => {
 	});
 
 	for (const requestedVersion of ["8.10.5", "8.10"]) {
-		test(
-			`stops the live pidfile version when ${requestedVersion} is requested`,
-			{ skip: process.platform === "win32" },
-			async () => {
-				const child = spawn(
-					process.execPath,
-					["-e", "setInterval(() => {}, 1e9)"],
-					{ stdio: "ignore" },
+		test(`stops the live pidfile version when ${requestedVersion} is requested`, {
+			skip: process.platform === "win32",
+		}, async () => {
+			const child = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)"],
+				{ stdio: "ignore" },
+			);
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+
+			try {
+				assert.ok(child.pid, "spawned child must have a PID");
+				const idleBinaryDir = join(tempDir, "c8run-8.10", "c8run-8.10.10");
+				const runningBinaryDir = join(tempDir, "c8run-8.10.5", "c8run-8.10.5");
+				mkdirSync(idleBinaryDir, { recursive: true });
+				mkdirSync(runningBinaryDir, { recursive: true });
+				const idleStopMarker = join(tempDir, "idle-version-stopped");
+				writeFileSync(
+					join(idleBinaryDir, C8RUN_BINARY),
+					`#!/bin/sh\ntouch "${idleStopMarker}"\nexit 0\n`,
+					{ mode: 0o755 },
 				);
-				await new Promise<void>((resolveSpawn, rejectSpawn) => {
-					child.once("spawn", () => resolveSpawn());
-					child.once("error", rejectSpawn);
+				writeFileSync(
+					join(runningBinaryDir, "camunda.process"),
+					String(child.pid),
+				);
+				writeFileSync(
+					join(runningBinaryDir, C8RUN_BINARY),
+					`#!/bin/sh\nkill -TERM ${child.pid}\nwhile kill -0 ${child.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
+					{ mode: 0o755 },
+				);
+
+				const stopped = await plugin.stopC8Run({
+					cacheDir: tempDir,
+					version: requestedVersion,
 				});
 
-				try {
-					assert.ok(child.pid, "spawned child must have a PID");
-					const idleBinaryDir = join(
-						tempDir,
-						"c8run-8.10",
-						"c8run-8.10.10",
-					);
-					const runningBinaryDir = join(
-						tempDir,
-						"c8run-8.10.5",
-						"c8run-8.10.5",
-					);
-					mkdirSync(idleBinaryDir, { recursive: true });
-					mkdirSync(runningBinaryDir, { recursive: true });
-					const idleStopMarker = join(tempDir, "idle-version-stopped");
-					writeFileSync(
-						join(idleBinaryDir, C8RUN_BINARY),
-						`#!/bin/sh\ntouch "${idleStopMarker}"\nexit 0\n`,
-						{ mode: 0o755 },
-					);
-					writeFileSync(
-						join(runningBinaryDir, "camunda.process"),
-						String(child.pid),
-					);
-					writeFileSync(
-						join(runningBinaryDir, C8RUN_BINARY),
-						`#!/bin/sh\nkill -TERM ${child.pid}\nwhile kill -0 ${child.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
-						{ mode: 0o755 },
-					);
-
-					const stopped = await plugin.stopC8Run({
-						cacheDir: tempDir,
-						version: requestedVersion,
-					});
-
-					assert.strictEqual(
-						stopped,
-						"8.10.5",
-						"the version with the live pidfile should be returned",
-					);
-					assert.ok(
-						await pollUntil(
-							async () => !plugin.isPidAlive(child.pid),
-							5000,
-							50,
-						),
-						"the live cluster process should exit after stop",
-					);
-					assert.strictEqual(
-						existsSync(idleStopMarker),
-						false,
-						"an idle version's no-op stop must not be run",
-					);
-				} finally {
-					if (child.pid && plugin.isPidAlive(child.pid)) {
-						try {
-							process.kill(child.pid, "SIGKILL");
-						} catch {
-							// already gone
-						}
+				assert.strictEqual(
+					stopped,
+					"8.10.5",
+					"the version with the live pidfile should be returned",
+				);
+				assert.ok(
+					await pollUntil(async () => !plugin.isPidAlive(child.pid), 5000, 50),
+					"the live cluster process should exit after stop",
+				);
+				assert.strictEqual(
+					existsSync(idleStopMarker),
+					false,
+					"an idle version's no-op stop must not be run",
+				);
+			} finally {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
 					}
 				}
-			},
-		);
+			}
+		});
 	}
+
+	test("fails when a pidfile-only process survives later stop and reaper successes", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const stoppedByNextVersion = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const orphan = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await Promise.all(
+				[survivor, stoppedByNextVersion, orphan].map(
+					(child) =>
+						new Promise<void>((resolveSpawn, rejectSpawn) => {
+							child.once("spawn", () => resolveSpawn());
+							child.once("error", rejectSpawn);
+						}),
+				),
+			);
+			assert.ok(survivor.pid, "pidfile-only process must have a PID");
+			assert.ok(
+				stoppedByNextVersion.pid,
+				"second-version process must have a PID",
+			);
+			assert.ok(orphan.pid, "orphan process must have a PID");
+
+			const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
+			mkdirSync(firstVersionDir, { recursive: true });
+			mkdirSync(secondVersionDir, { recursive: true });
+			writeFileSync(
+				join(firstVersionDir, "camunda.process"),
+				String(survivor.pid),
+			);
+			writeFileSync(
+				join(firstVersionDir, C8RUN_BINARY),
+				"#!/bin/sh\nexit 0\n",
+				{ mode: 0o755 },
+			);
+			writeFileSync(
+				join(secondVersionDir, "camunda.process"),
+				String(stoppedByNextVersion.pid),
+			);
+			writeFileSync(
+				join(secondVersionDir, C8RUN_BINARY),
+				`#!/bin/sh\nkill -TERM ${stoppedByNextVersion.pid}\nwhile kill -0 ${stoppedByNextVersion.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.10.1");
+			writeFileSync(join(tempDir, "cluster.port"), "9091");
+			plugin.writeRunningClusterRecord(
+				tempDir,
+				await liveSelfRecord({ version: "8.9", pid: orphan.pid }),
+			);
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({ cacheDir: tempDir, version: "8.10.1" }, false, {
+						timeoutMs: 100,
+					}),
+				/Stop incomplete: .*pidfile.*process.*still running/,
+			);
+			assert.ok(
+				await pollUntil(
+					async () => !plugin.isPidAlive(stoppedByNextVersion.pid),
+					5000,
+					50,
+				),
+				"the later version stop should still terminate its process",
+			);
+			assert.ok(
+				await pollUntil(async () => !plugin.isPidAlive(orphan.pid), 5000, 50),
+				"orphan cleanup should still terminate the recorded process",
+			);
+			assert.strictEqual(
+				plugin.isPidAlive(survivor.pid),
+				true,
+				"the pidfile-only process must remain alive",
+			);
+			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
+		} finally {
+			for (const child of [survivor, stoppedByNextVersion, orphan]) {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			}
+		}
+	});
 
 	test("continues after a reused PID makes c8run stop a no-op", {
 		skip: process.platform === "win32",
@@ -3862,20 +3951,11 @@ describe("Cluster Plugin – stopC8Run", () => {
 			);
 			assert.ok(unrelatedChild.pid, "unrelated child must have a PID");
 			assert.ok(clusterChild.pid, "cluster child must have a PID");
-			const currentSignature =
-				plugin.processStartSignature(unrelatedChild.pid);
+			const currentSignature = plugin.processStartSignature(unrelatedChild.pid);
 			assert.ok(currentSignature, "unrelated child should have a signature");
 
-			const staleBinaryDir = join(
-				tempDir,
-				"c8run-8.10",
-				"c8run-8.10.10",
-			);
-			const runningBinaryDir = join(
-				tempDir,
-				"c8run-8.10.5",
-				"c8run-8.10.5",
-			);
+			const staleBinaryDir = join(tempDir, "c8run-8.10", "c8run-8.10.10");
+			const runningBinaryDir = join(tempDir, "c8run-8.10.5", "c8run-8.10.5");
 			mkdirSync(staleBinaryDir, { recursive: true });
 			mkdirSync(runningBinaryDir, { recursive: true });
 			const staleStopMarker = join(tempDir, "stale-version-stopped");
@@ -3905,10 +3985,14 @@ describe("Cluster Plugin – stopC8Run", () => {
 				},
 			});
 
-			const stopped = await plugin.stopC8Run({
-				cacheDir: tempDir,
-				version: "8.10",
-			}, false, { timeoutMs: 300 });
+			const stopped = await plugin.stopC8Run(
+				{
+					cacheDir: tempDir,
+					version: "8.10",
+				},
+				false,
+				{ timeoutMs: 300 },
+			);
 
 			assert.ok(
 				await pollUntil(

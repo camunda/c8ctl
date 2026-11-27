@@ -2778,6 +2778,36 @@ function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
   );
 }
 
+function findTimedOutPidfileSurvivors(attempts) {
+  const survivors = new Set();
+  for (const attempt of attempts) {
+    for (const [pid, identity] of attempt) {
+      if (!isPidAlive(pid)) {
+        continue;
+      }
+
+      const currentSignature = processStartSignature(pid);
+      if (
+        identity.recordedSignature &&
+        currentSignature &&
+        currentSignature !== identity.recordedSignature
+      ) {
+        continue;
+      }
+      if (
+        !identity.recordedSignature &&
+        identity.signature &&
+        currentSignature &&
+        currentSignature !== identity.signature
+      ) {
+        continue;
+      }
+      survivors.add(pid);
+    }
+  }
+  return [...survivors];
+}
+
 async function waitForPidfileProcessesExit(
   cacheDir,
   version,
@@ -2907,6 +2937,7 @@ export async function stopC8Run(
   let attempted = 0;
   let hadSuccessfulStop = false;
   let lastError;
+  const timedOutPidfileAttempts = [];
 
   for (const version of versionsToTry) {
     // A pidfile can become stale between version discovery and execution. Keep
@@ -2990,6 +3021,24 @@ export async function stopC8Run(
           { timeoutMs },
         ))
       ) {
+        const timedOutPids = new Map();
+        const candidatePids = new Set([
+          ...previousSignatures.keys(),
+          ...collectPidfilePids(config.cacheDir, { version }),
+        ]);
+        for (const pid of candidatePids) {
+          if (!isPidAlive(pid)) {
+            continue;
+          }
+          timedOutPids.set(pid, {
+            signature: previousSignatures.has(pid)
+              ? previousSignatures.get(pid)
+              : processStartSignature(pid),
+            recordedSignature: record?.signatures?.[pid] ?? null,
+          });
+        }
+        timedOutPidfileAttempts.push(timedOutPids);
+
         const purgeHint = purge
           ? ` Once they exit, run: c8ctl cluster purge ${markerVersion || record?.version || version}.`
           : '';
@@ -3050,6 +3099,7 @@ export async function stopC8Run(
         'PID record so "c8ctl cluster stop" can retry.',
     );
   }
+  const pidfileSurvivors = findTimedOutPidfileSurvivors(timedOutPidfileAttempts);
 
   // The port record describes the cluster that was just stopped. Only drop it
   // once NOTHING still tracks a live process — neither the durable PID record
@@ -3058,7 +3108,10 @@ export async function stopC8Run(
   // whose record was already cleared), so gating on it would delete the port
   // while that survivor still serves — and a later `cluster status` would
   // advertise the default port for a custom-port cluster.
-  if (!hasRunningClusterPidfiles(config.cacheDir)) {
+  if (
+    pidfileSurvivors.length === 0 &&
+    !hasRunningClusterPidfiles(config.cacheDir)
+  ) {
     rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   }
 
@@ -3087,6 +3140,16 @@ export async function stopC8Run(
         remainingPids.length === 1 ? '' : 'es'
       } could not be confirmed stopped (PID${remainingPids.length === 1 ? '' : 's'}: ${remainingPids.join(', ')}). ` +
         'The durable PID record was kept — retry with "c8ctl cluster stop".',
+    );
+  }
+  if (pidfileSurvivors.length > 0) {
+    const processLabel = pidfileSurvivors.length === 1 ? 'process' : 'processes';
+    const pidLabel = pidfileSurvivors.length === 1 ? 'PID' : 'PIDs';
+    const lastErrorMessage =
+      lastError instanceof Error ? ` ${lastError.message}` : '';
+    throw new Error(
+      `Stop incomplete: ${pidfileSurvivors.length} c8run pidfile ${processLabel} still running (${pidLabel}: ${pidfileSurvivors.join(', ')}). ` +
+        `Retry with "c8ctl cluster stop".${lastErrorMessage}`,
     );
   }
 

@@ -64,17 +64,15 @@ globalThis.fetch = async () => {
 		rmSync(cacheDir, { recursive: true, force: true });
 	});
 
+	const clusterEnv = (health: string) => ({
+		C8RUN_CACHE_DIR: cacheDir,
+		C8CTL_OUTPUT_MODE: "text",
+		NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
+		TEST_HEALTH: health,
+	});
+
 	const cluster = (health: string, ...args: string[]) =>
-		c8WithEnv(
-			{
-				C8RUN_CACHE_DIR: cacheDir,
-				C8CTL_OUTPUT_MODE: "text",
-				NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
-				TEST_HEALTH: health,
-			},
-			"cluster",
-			...args,
-		);
+		c8WithEnv(clusterEnv(health), "cluster", ...args);
 
 	async function launcher(exitCode: number) {
 		for (const name of ["camunda", "connectors", "connectors-sales"]) {
@@ -366,10 +364,8 @@ if (process.argv[2] === 'start') {
 
 	test("a failed stop keeps the recorded port while pidfile-only survivors remain", async () => {
 		await launcher(0);
-		assert.equal(
-			(await cluster("UP", "start", "8.10.1", "--port=9091")).status,
-			0,
-		);
+		const start = await cluster("UP", "start", "8.10.1", "--port=9091");
+		assert.equal(start.status, 0, `${start.stderr}\n${start.stdout}`);
 		// A process c8run tracks ONLY through a .process pidfile — the durable
 		// PID record never captured it. Its liveness is real (a live child), so
 		// hasRunningClusterPidfiles sees it even after the recorded PIDs exit.
@@ -386,8 +382,16 @@ if (process.argv[2] === 'start') {
 
 		// c8run stop signals + reaps the three recorded processes (the launcher
 		// removes their pidfiles), but the pidfile-only survivor stays alive.
-		const stop = await cluster("DOWN", "stop");
-		assert.equal(stop.status, 0, stop.stderr);
+		const stop = await c8WithEnv(
+			{ ...clusterEnv("DOWN"), C8CTL_STOP_WAIT_TIMEOUT_MS: "300" },
+			"cluster",
+			"stop",
+		);
+		assert.equal(stop.status, 1, `${stop.stderr}\n${stop.stdout}`);
+		assert.match(
+			`${stop.stderr}\n${stop.stdout}`,
+			/Stop command reported success, but c8run 8\.10\.1 processes are still running/,
+		);
 		assert.ok(
 			await pollUntil(
 				async () =>
