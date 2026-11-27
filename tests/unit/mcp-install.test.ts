@@ -400,7 +400,7 @@ test("mcp uninstall recognizes orchestration entries with nonstandard Node execu
 	assert.deepEqual(serversAt(s.paths.cursor, "cursor"), {});
 });
 
-test("VS Code uninstall handles first, middle, and sole JSONC properties", async (t) => {
+test("VS Code uninstall handles first, middle, last, and sole JSONC properties", async (t) => {
 	const docsEntry = { type: "http", url: DOCS_URL };
 	const githubEntry = {
 		type: "http",
@@ -447,6 +447,32 @@ test("VS Code uninstall handles first, middle, and sole JSONC properties", async
 			],
 			unrelatedProperties: [githubProperty, otherProperty],
 			expectedServers: { github: githubEntry, other: otherEntry },
+		},
+		{
+			name: "last property without trailing comma",
+			content: `{
+  "preferences": {"theme": "dark"},
+  "servers": {
+    ${otherProperty}, // preserve preceding-entry comment
+    ${docsProperty}
+  }
+}`,
+			comments: ["// preserve preceding-entry comment"],
+			unrelatedProperties: [otherProperty],
+			expectedServers: { other: otherEntry },
+		},
+		{
+			name: "last property with trailing comma",
+			content: `{
+  "preferences": {"theme": "dark"},
+  "servers": {
+    ${otherProperty}, // preserve preceding-entry comment
+    ${docsProperty},
+  }
+}`,
+			comments: ["// preserve preceding-entry comment"],
+			unrelatedProperties: [otherProperty],
+			expectedServers: { other: otherEntry },
 		},
 		{
 			name: "sole property",
