@@ -2476,6 +2476,32 @@ function livePidfileEntries(
   return liveEntries;
 }
 
+function hasUnverifiablePidfileSurvivor(cacheDir, version, signatures) {
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    const recordedSignature = signatures.get(entry.pid);
+    if (typeof recordedSignature !== 'string') {
+      continue;
+    }
+    if (!isPidAlive(entry.pid)) {
+      retireStalePidfileEntry(entry);
+      continue;
+    }
+
+    const currentSignature = processStartSignature(entry.pid);
+    if (currentSignature === null) {
+      if (!isPidAlive(entry.pid)) {
+        retireStalePidfileEntry(entry);
+        continue;
+      }
+      return true;
+    }
+    if (currentSignature !== recordedSignature) {
+      retireStalePidfileEntry(entry);
+    }
+  }
+  return false;
+}
+
 function getPidRecordPath(cacheDir) {
   return join(cacheDir, PID_RECORD_FILE);
 }
@@ -2670,6 +2696,26 @@ function pidfileValidationSignatures(record) {
   // Retain unverified survivor identities for pidfile checks, not for reaping.
   for (const survivor of record?.pidfileSurvivors ?? []) {
     if (survivor.signature && !signatures.get(survivor.pid)) {
+      signatures.set(survivor.pid, survivor.signature);
+    }
+  }
+  return signatures;
+}
+
+function nonSignalablePidfileSurvivorSignatures(record) {
+  if (!platformSupportsProcessSignature()) {
+    return new Map();
+  }
+
+  const trustedSignatures = recordedClusterPidSignatures(record);
+  const signatures = new Map();
+  for (const survivor of record?.pidfileSurvivors ?? []) {
+    if (
+      !survivor.signalable &&
+      typeof survivor.signature === 'string' &&
+      typeof trustedSignatures.get(survivor.pid) !== 'string' &&
+      !signatures.has(survivor.pid)
+    ) {
       signatures.set(survivor.pid, survivor.signature);
     }
   }
@@ -3162,6 +3208,9 @@ export async function stopC8Run(
   const pidfileSignatures = record
     ? pidfileValidationSignatures(record)
     : new Map();
+  const nonSignalableSurvivorSignatures = record
+    ? nonSignalablePidfileSurvivorSignatures(record)
+    : new Map();
 
   livePidfileEntries(config.cacheDir, {
     knownSignatures: pidfileSignatures,
@@ -3318,6 +3367,18 @@ export async function stopC8Run(
     try {
       binaryPath = getC8RunBinaryPath(versionConfig);
     } catch {
+      continue;
+    }
+
+    // c8run stop consumes every pidfile for a version, so do not pass it a
+    // non-signalable survivor whose saved process identity cannot be checked.
+    if (
+      hasUnverifiablePidfileSurvivor(
+        config.cacheDir,
+        version,
+        nonSignalableSurvivorSignatures,
+      )
+    ) {
       continue;
     }
 

@@ -3928,6 +3928,115 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	test("does not pass an unverified survivor pidfile to c8run when its signature is unavailable", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const replacement = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const originalPlatform = os.platform;
+		const originalPath = process.env.PATH;
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				replacement.once("spawn", () => resolveSpawn());
+				replacement.once("error", rejectSpawn);
+			});
+			assert.ok(replacement.pid, "replacement process must have a PID");
+
+			const pid = replacement.pid;
+			const version = "8.10.1";
+			const mockBinDir = join(tempDir, "mock-bin");
+			const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const pidfile = join(installDir, "camunda.process");
+			const signatureAvailable = join(tempDir, "signature-available");
+			const stopStarted = join(tempDir, "stop-started");
+			mkdirSync(mockBinDir, { recursive: true });
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(
+				join(mockBinDir, "ps"),
+				`#!/bin/sh\nif [ -f "${signatureAvailable}" ]; then\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /cluster'\n  exit 0\nfi\nexit 1\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(signatureAvailable, "");
+			os.platform = () => "darwin";
+			syncBuiltinESMExports();
+			process.env.PATH = originalPath
+				? `${mockBinDir}${delimiter}${originalPath}`
+				: mockBinDir;
+
+			const currentSignature = plugin.processStartSignature(pid);
+			assert.ok(currentSignature, "the replacement process must be identifiable");
+			const previousSignature = `${currentSignature}-previous-process`;
+			rmSync(signatureAvailable);
+			writeFileSync(pidfile, String(pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${stopStarted}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), version);
+			writeFileSync(join(tempDir, "cluster.port"), "9091");
+			plugin.writeRunningClusterRecord(tempDir, {
+				version,
+				pids: [pid],
+				signatures: { [pid]: currentSignature },
+			});
+			assert.deepStrictEqual(
+				plugin.liveRecordedPids(tempDir),
+				[pid],
+				"trusted PID records retain their liveness fallback",
+			);
+			plugin.writeRunningClusterRecord(tempDir, {
+				version,
+				pids: [],
+				pidfileSurvivors: [
+					{ version, pid, signature: previousSignature, signalable: false },
+				],
+			});
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+						timeoutMs: 100,
+					}),
+				/Stop incomplete/,
+			);
+
+			assert.strictEqual(
+				existsSync(stopStarted),
+				false,
+				"c8run must not consume pidfiles while a survivor identity is unavailable",
+			);
+			assert.strictEqual(plugin.isPidAlive(pid), true);
+			assert.strictEqual(existsSync(pidfile), true);
+			assert.deepStrictEqual(
+				plugin.readRunningClusterRecord(tempDir)?.pidfileSurvivors,
+				[{ version, pid, signature: previousSignature, signalable: false }],
+				"the unresolved survivor and its original signature must be retained",
+			);
+			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
+		} finally {
+			if (originalPath === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = originalPath;
+			}
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+			if (replacement.pid && plugin.isPidAlive(replacement.pid)) {
+				try {
+					process.kill(replacement.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
 	test("does not signal a replacement process from a mismatched unverified pidfile", {
 		skip:
 			process.platform === "win32" ||
