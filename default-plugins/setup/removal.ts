@@ -59,9 +59,9 @@ export interface SetupClusterRemoval {
 	 */
 	readonly versions: readonly string[];
 	/**
-	 * The version found running at preview time while no install dir
-	 * remained — the confirmed stop-only target. The owner still tracks it
-	 * via its durable record, so teardown can attribute the stop to it.
+	 * The version found running at preview time. If its install dir is not
+	 * among `versions`, it is a confirmed stop-only target, even when other
+	 * installed versions remain.
 	 */
 	readonly runningVersion?: string;
 }
@@ -112,11 +112,9 @@ export async function inspectSetupRemovalInventory({
 	cwd?: string;
 	detectModeler?: () => Promise<SetupModelerRemoval | undefined>;
 	/**
-	 * The local cluster's running state, in the cluster plugin's own words
-	 * (its status command). Needed only when no install dirs remain: a
-	 * cluster whose install dir was deleted out from under it is otherwise
-	 * invisible here, yet still needs stopping — and the probe's version is
-	 * the confirmed stop target.
+	 * The local cluster's running state in the cluster plugin's own words.
+	 * Needed to find a running cluster whose install dir was removed, even
+	 * when other versions remain installed.
 	 */
 	detectClusterRunning?: () => Promise<SetupClusterRunningState>;
 } = {}): Promise<SetupRemovalInventory> {
@@ -198,23 +196,15 @@ export async function inspectSetupRemovalInventory({
 	// detector mirrors that plugin's install layout, so a cache the plugin
 	// sees is a cache teardown can hand back to its stop/purge/delete. Every
 	// install dir counts — including one whose binary went missing — so a
-	// partial install's runtime data is purged instead of left behind. A
-	// running cluster without any install dir is still found via the
-	// running probe, so confirmed removal stops it.
+	// partial install's runtime data is purged instead of left behind. The
+	// running probe also finds an orphaned cluster when other installs remain.
 	let cluster: SetupClusterRemoval | undefined;
 	let clusterInspectionFailure: SetupClusterInspectionFailure | undefined;
 	try {
 		const versions = camunda8RunInstallDirs();
-		let probe: SetupClusterRunningState | undefined;
-		if (versions.length === 0 && detectClusterRunning) {
-			try {
-				probe = await detectClusterRunning();
-			} catch (error) {
-				clusterInspectionFailure = {
-					message: error instanceof Error ? error.message : String(error),
-				};
-			}
-		}
+		const probe = detectClusterRunning
+			? await detectClusterRunning()
+			: undefined;
 		if (versions.length > 0 || probe?.running) {
 			cluster = {
 				versions,

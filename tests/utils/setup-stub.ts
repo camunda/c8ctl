@@ -44,6 +44,7 @@
  *                                   (e.g. "start-cluster", "stop-cluster",
  *                                   "purge-cluster", "delete-cluster",
  *                                   "probe-cluster-status",
+ *                                   "probe-cluster-status-after-first-probe",
  *                                   "install-skills", "list-skills",
  *                                   "remove-modeler", "probe-modeler",
  *                                   "list-blueprint-directories").
@@ -60,6 +61,8 @@
  *   C8CTL_SETUP_STUB_MODELER=homebrew — preview a Homebrew-managed app.
  *   C8CTL_SETUP_STUB_CLUSTER_WARN=1 — the fake `cluster start` prints a
  *                                   warning on stderr while succeeding.
+ *   C8CTL_SETUP_STUB_CLUSTER_DIES_BEFORE_DEPLOY=1 — the first local
+ *                                   health check passes; the next fails.
  *   C8CTL_SETUP_STUB_MODELER_WARN=1 — fake `modeler install` as a skip
  *                                   that prints an update warning among
  *                                   routine stderr.
@@ -235,6 +238,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * separate CLI processes of a test (setup run, then removal run).
  */
 let clusterRunning = clusterUpAtBoot;
+let clusterHealthChecks = 0;
+let clusterStatusProbes = 0;
 let mcpConflictInjected = false;
 
 function clusterMarkerPath(): string | null {
@@ -548,16 +553,21 @@ Object.defineProperty(childProcess, "spawn", {
 				return deleted;
 			};
 			if (argv.includes("status")) {
-				if (failStep === "probe-cluster-status") {
+				clusterStatusProbes += 1;
+				if (
+					failStep === "probe-cluster-status" ||
+					(failStep === "probe-cluster-status-after-first-probe" &&
+						clusterStatusProbes > 1)
+				) {
 					return fakeChild(1, {
 						stderr: "stubbed cluster status failure diagnostics\n",
 					});
 				}
 				const running = isClusterRunning();
-				// Install dirs give the precise version; the durable record's
-				// version survives them, like the real plugin's cluster.pids.
+				// The durable record keeps identifying an orphaned running
+				// cluster even when another install is present.
 				const version = running
-					? (runningVersion() ?? clusterMarkerVersion())
+					? (clusterMarkerVersion() ?? runningVersion())
 					: null;
 				return fakeChild(0, {
 					stdout: `${JSON.stringify({
@@ -598,7 +608,7 @@ Object.defineProperty(childProcess, "spawn", {
 						stderr: "No cluster is currently running.\n",
 					});
 				}
-				const stoppedVersion = runningVersion() ?? clusterMarkerVersion();
+				const stoppedVersion = clusterMarkerVersion() ?? runningVersion();
 				clusterRunning = false;
 				const stoppedMarker = clusterMarkerPath();
 				if (stoppedMarker) fs.rmSync(stoppedMarker, { force: true });
@@ -810,6 +820,13 @@ globalThis.fetch = async (
 
 	// Local cluster health — UP once the fake `cluster start` ran.
 	if (url.startsWith("http://localhost:9600/")) {
+		clusterHealthChecks += 1;
+		if (
+			process.env.C8CTL_SETUP_STUB_CLUSTER_DIES_BEFORE_DEPLOY === "1" &&
+			clusterHealthChecks > 1
+		) {
+			clusterRunning = false;
+		}
 		if (!clusterRunning) {
 			throw Object.assign(new Error("connect ECONNREFUSED"), {
 				code: "ECONNREFUSED",

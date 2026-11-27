@@ -525,8 +525,8 @@ async function runBlueprintDeploy(
 			[
 				`Could not reach the local cluster (${health.detail}).`,
 				"Start it with: c8ctl cluster start",
-				// Pin the same local profile the healthy path deploys to, so the
-				// recovery cannot land on a remote cluster from the session or env.
+				// Pin the same local profile and default tenant as the healthy path.
+				'Use tenant: c8ctl use tenant "<default>"',
 				`Then deploy the project with: c8ctl deploy "${deployDir}" --profile local`,
 			].join("\n"),
 		);
