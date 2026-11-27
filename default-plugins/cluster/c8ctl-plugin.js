@@ -2750,6 +2750,56 @@ export function hasRunningClusterPidfiles(cacheDir) {
   return liveRecordedPids(cacheDir).length > 0;
 }
 
+function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
+  const currentPids = new Set(collectPidfilePids(cacheDir, { version }));
+
+  for (const pid of previousSignatures.keys()) {
+    if (!isPidAlive(pid)) {
+      continue;
+    }
+
+    const previousSignature = previousSignatures.get(pid);
+    if (!previousSignature) {
+      return true;
+    }
+
+    const currentSignature = processStartSignature(pid);
+    if (
+      currentSignature === null ||
+      currentSignature === previousSignature ||
+      currentPids.has(pid)
+    ) {
+      return true;
+    }
+  }
+
+  return [...currentPids].some(
+    (pid) => !previousSignatures.has(pid) && isPidAlive(pid),
+  );
+}
+
+async function waitForPidfileProcessesExit(
+  cacheDir,
+  version,
+  previousSignatures,
+  { timeoutMs = 60_000, intervalMs = 250 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  // Keep the polling cheap; only fingerprint PIDs that remain live at timeout.
+  while (
+    [...new Set([
+      ...previousSignatures.keys(),
+      ...collectPidfilePids(cacheDir, { version }),
+    ])].some((pid) => isPidAlive(pid))
+  ) {
+    if (Date.now() >= deadline) {
+      return !hasLivePidfileProcesses(cacheDir, version, previousSignatures);
+    }
+    await sleep(intervalMs);
+  }
+  return true;
+}
+
 // `c8run stop` only signals the cluster processes; Java can keep running for a
 // while as it shuts down. Wait for them to exit so a follow-up purge does not
 // mistake a shutting-down cluster for a live one. The timeout is a safety net.
@@ -2762,7 +2812,11 @@ export async function waitForClusterExit(cacheDir, { timeoutMs = 60_000, interva
   return true;
 }
 
-export async function stopC8Run(config, debug = false) {
+export async function stopC8Run(
+  config,
+  debug = false,
+  { timeoutMs = 60_000, purge = false } = {},
+) {
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
@@ -2827,7 +2881,7 @@ export async function stopC8Run(config, debug = false) {
   const markerVersion = existsSync(versionFile)
     ? readFileSync(versionFile, 'utf-8').trim()
     : '';
-  let stoppedVersion = markerVersion || record?.version || null;
+  let stoppedVersion = null;
 
   const addLiveVersion = (version) => {
     if (
@@ -2848,10 +2902,6 @@ export async function stopC8Run(config, debug = false) {
     addLiveVersion(version);
   }
 
-  if (versionsToTry.length > 0) {
-    stoppedVersion = versionsToTry[0];
-  }
-
   logger.info('Stopping Camunda 8 local cluster...');
 
   let attempted = 0;
@@ -2859,9 +2909,16 @@ export async function stopC8Run(config, debug = false) {
   let lastError;
 
   for (const version of versionsToTry) {
-    // A pidfile can become stale between version discovery and execution.
-    // Do not count c8run's zero exit from an empty install as a successful stop.
-    if (!collectPidfilePids(config.cacheDir, { version }).some((pid) => isPidAlive(pid))) {
+    // A pidfile can become stale between version discovery and execution. Keep
+    // the process identity so an unrelated process that reused its PID cannot
+    // make an idle c8run stop look successful.
+    const previousSignatures = new Map();
+    for (const pid of collectPidfilePids(config.cacheDir, { version })) {
+      if (isPidAlive(pid)) {
+        previousSignatures.set(pid, processStartSignature(pid));
+      }
+    }
+    if (previousSignatures.size === 0) {
       continue;
     }
 
@@ -2925,7 +2982,24 @@ export async function stopC8Run(config, debug = false) {
     });
 
     if (exitCode === 0 || (exitCode === null && !exitSignal)) {
+      if (
+        !(await waitForPidfileProcessesExit(
+          config.cacheDir,
+          version,
+          previousSignatures,
+          { timeoutMs },
+        ))
+      ) {
+        const purgeHint = purge
+          ? ` Once they exit, run: c8ctl cluster purge ${markerVersion || record?.version || version}.`
+          : '';
+        lastError = new Error(
+          `Stop command reported success, but c8run ${version} processes are still running.${purgeHint}`,
+        );
+        continue;
+      }
       hadSuccessfulStop = true;
+      stoppedVersion = version;
       break;
     } else if (exitCode === null && exitSignal) {
       lastError = new Error(
@@ -2946,6 +3020,9 @@ export async function stopC8Run(config, debug = false) {
   // cache-root PID record lets us find and terminate the process directly.
   const reaped = await reapClusterProcesses(config.cacheDir);
   if (reaped > 0) {
+    if (!hadSuccessfulStop) {
+      stoppedVersion = markerVersion || record?.version || null;
+    }
     hadSuccessfulStop = true;
     logger.warn(
       `Terminated ${reaped} orphaned cluster process${reaped === 1 ? '' : 'es'} that c8run no longer tracked.`,
@@ -4313,7 +4390,13 @@ export const commands = {
       }
     } else if (parsed.subcommand === 'stop') {
       try {
-        const stoppedVersion = await stopC8Run(config, parsed.debug);
+        // Internal override lets tests bound stop confirmation and purge waits.
+        const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
+        const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
+        const stoppedVersion = await stopC8Run(config, parsed.debug, {
+          timeoutMs,
+          purge: parsed.purge,
+        });
         if (parsed.purge) {
           if (!stoppedVersion) {
             logger.warn('Cannot determine which version to purge (version marker is missing). ' +
@@ -4330,9 +4413,6 @@ export const commands = {
               `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
             );
           } else {
-            // C8CTL_STOP_WAIT_TIMEOUT_MS is an internal override so tests can bound the wait.
-            const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
-            const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
             if (!(await waitForClusterExit(theCacheDir, { timeoutMs }))) {
               throw new Error(
                 'Cluster processes are still shutting down, so runtime data was not purged. ' +
