@@ -528,46 +528,55 @@ describe("CLI behavioural: stable never launches a prerelease build", {
 		assert.strictEqual(launched(), "ga");
 	});
 
-	test("an interrupt during extraction removes the staging dir and keeps the existing build", async () => {
-		// An extractor that never finishes, so the signal lands mid-extraction.
-		const fakeBin = join(cacheDir, "fake-bin");
-		mkdirSync(fakeBin);
-		for (const name of ["tar", "unzip"]) {
-			const extractor = join(fakeBin, name);
-			writeFileSync(
-				extractor,
-				`#!/bin/sh\ntouch "${join(fakeBin, "started")}"\nexec sleep 60\n`,
-			);
-			chmodSync(extractor, 0o755);
-		}
+	for (const [signal, exitStatus] of [
+		["SIGINT", 130],
+		["SIGTERM", 143],
+	] as const) {
+		test(`${signal} during extraction removes the staging dir and keeps the existing build`, async () => {
+			// An extractor that never finishes, so the signal lands mid-extraction.
+			const fakeBin = join(cacheDir, "fake-bin");
+			mkdirSync(fakeBin);
+			for (const name of ["tar", "unzip"]) {
+				const extractor = join(fakeBin, name);
+				writeFileSync(
+					extractor,
+					`#!/bin/sh\ntouch "${join(fakeBin, "started")}"\nexec sleep 60\n`,
+				);
+				chmodSync(extractor, 0o755);
+			}
 
-		const result = await c8SignalledWhen(
-			{
-				signal: "SIGTERM",
-				when: () => existsSync(join(fakeBin, "started")),
-				env: {
-					C8RUN_CACHE_DIR: cacheDir,
-					C8CTL_OUTPUT_MODE: "text",
-					C8CTL_C8RUN_DOWNLOAD_URL: baseUrl,
-					C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
-					PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
+			const result = await c8SignalledWhen(
+				{
+					signal,
+					when: () => existsSync(join(fakeBin, "started")),
+					env: {
+						C8RUN_CACHE_DIR: cacheDir,
+						C8CTL_OUTPUT_MODE: "text",
+						C8CTL_C8RUN_DOWNLOAD_URL: baseUrl,
+						C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
+						PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
+					},
 				},
-			},
-			"cluster",
-			"start",
-		);
+				"cluster",
+				"start",
+			);
 
-		assert.strictEqual(result.status, 143, result.stdout + result.stderr);
-		assert.ok(
-			existsSync(join(alphaBuildDir(), "c8run")),
-			"the alpha build must be kept",
-		);
-		assert.deepStrictEqual(
-			readdirSync(cacheDir).filter((name) => name.startsWith(".")),
-			[],
-			"an interrupted install must not leave staging dirs behind",
-		);
-	});
+			assert.strictEqual(
+				result.status,
+				exitStatus,
+				result.stdout + result.stderr,
+			);
+			assert.ok(
+				existsSync(join(alphaBuildDir(), "c8run")),
+				"the alpha build must be kept",
+			);
+			assert.deepStrictEqual(
+				readdirSync(cacheDir).filter((name) => name.startsWith(".")),
+				[],
+				"an interrupted install must not leave staging dirs behind",
+			);
+		});
+	}
 
 	test("delete and purge remove staging and backup dirs of dead processes only", async () => {
 		const deadPid = 2147483646;
