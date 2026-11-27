@@ -1532,14 +1532,19 @@ export function findC8RunBinaryPath(config) {
 
   for (const versionDir of versionDirs) {
     const binaryPath = join(installDir, versionDir, platformInfo.executable);
-    if (existsSync(binaryPath)) {
+    if (existsSync(binaryPath) && statSync(binaryPath).isFile()) {
       return binaryPath;
     }
   }
 
   const directPath = join(installDir, platformInfo.executable);
-  if (existsSync(directPath)) {
+  if (existsSync(directPath) && statSync(directPath).isFile()) {
     return directPath;
+  }
+
+  const nestedPath = join(installDir, 'c8run', platformInfo.executable);
+  if (existsSync(nestedPath) && statSync(nestedPath).isFile()) {
+    return nestedPath;
   }
 
   return null;
@@ -2063,12 +2068,15 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
   });
 
   if (typeof proc.pid !== 'number') {
-    // spawn() reports this failure via an async 'error' event; without a
-    // listener it would crash the process while the hints are flushed below.
-    proc.on('error', (err) => logger.error(`Failed to spawn c8run: ${err.message}`));
+    // spawn() reports this failure via an async 'error' event. Wait for it so
+    // the actionable OS error is logged before the process exits.
+    const spawnError = await new Promise((resolve) => {
+      proc.once('error', resolve);
+    });
     if (!hasRunningClusterPidfiles(config.cacheDir)) {
       rmSync(portFile, { force: true });
     }
+    logger.error(`Failed to spawn c8run: ${spawnError.message}`);
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
     logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
@@ -2810,34 +2818,38 @@ export async function stopC8Run(config, debug = false) {
         .map((entry) => entry.name.slice('c8run-'.length))
         .sort()
     : [];
+  const livePidfileVersions = installedVersions.filter((version) =>
+    collectPidfilePids(config.cacheDir, { version }).some((pid) => isPidAlive(pid)),
+  );
 
   const versionsToTry = [];
-  let stoppedVersion = null;
+  const record = readRunningClusterRecord(config.cacheDir);
+  const markerVersion = existsSync(versionFile)
+    ? readFileSync(versionFile, 'utf-8').trim()
+    : '';
+  let stoppedVersion = markerVersion || record?.version || null;
 
-  if (existsSync(versionFile)) {
-    const markerVersion = readFileSync(versionFile, 'utf-8').trim();
-    if (markerVersion) {
-      stoppedVersion = markerVersion;
-      versionsToTry.push(markerVersion);
+  const addLiveVersion = (version) => {
+    if (
+      version &&
+      livePidfileVersions.includes(version) &&
+      !versionsToTry.includes(version)
+    ) {
+      versionsToTry.push(version);
     }
+  };
+
+  // Prefer the requested version, then the marker and durable record. If
+  // neither identifies the live process, use the version whose pidfile does.
+  addLiveVersion(config.version);
+  addLiveVersion(markerVersion);
+  addLiveVersion(record?.version);
+  for (const version of livePidfileVersions) {
+    addLiveVersion(version);
   }
 
-  // Fall back to the durable PID record's version when the marker is gone —
-  // this is the version whose install dir may have been removed (#560).
-  if (versionsToTry.length === 0) {
-    const record = readRunningClusterRecord(config.cacheDir);
-    if (record?.version) {
-      stoppedVersion = record.version;
-      versionsToTry.push(record.version);
-    }
-  }
-
-  if (versionsToTry.length === 0) {
-    if (installedVersions.length === 0) {
-      versionsToTry.push(config.version);
-    } else {
-      versionsToTry.push(...installedVersions);
-    }
+  if (versionsToTry.length > 0) {
+    stoppedVersion = versionsToTry[0];
   }
 
   logger.info('Stopping Camunda 8 local cluster...');
@@ -2847,6 +2859,12 @@ export async function stopC8Run(config, debug = false) {
   let lastError;
 
   for (const version of versionsToTry) {
+    // A pidfile can become stale between version discovery and execution.
+    // Do not count c8run's zero exit from an empty install as a successful stop.
+    if (!collectPidfilePids(config.cacheDir, { version }).some((pid) => isPidAlive(pid))) {
+      continue;
+    }
+
     const versionConfig = { cacheDir: config.cacheDir, version };
     let binaryPath;
     try {
