@@ -171,6 +171,25 @@ const MATCHER_CASES: readonly MatcherCase[] = [
 		],
 	},
 	{
+		name: "directory negation preserves independently excluded files",
+		patterns: ["keep/", "*.bpmn", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/private.bpmn", true],
+			["keep/readme.txt", false],
+		],
+	},
+	{
+		name: "directory negation preserves excluded child directories",
+		patterns: ["keep/", "keep/private/", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/private/", true],
+			["keep/private/secret.bpmn", true],
+			["keep/public/", false],
+		],
+	},
+	{
 		name: "negation re-includes a directory matched by a child wildcard",
 		patterns: ["logs/*", "!logs/keep/"],
 		expect: [
