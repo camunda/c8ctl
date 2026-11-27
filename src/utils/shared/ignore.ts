@@ -98,7 +98,7 @@ export function parsePattern(raw: string): ParsedPattern | null {
 		// not the directory entry itself.
 		const core = pattern.slice(0, -3);
 		globs = [`${core}/*`, `${core}/*/**`];
-		entryGlobs = [`${core}/*`, `${core}/*/`];
+		entryGlobs = [`${core}/*`, `${core}/*/`, `${core}/*/**`];
 	} else if (anchored) {
 		// Anchored entry: match the entry itself (file or directory) and its
 		// contents. e.g. `/src`, `src/build`.
@@ -170,14 +170,9 @@ function buildIgnoreChecker(
 	};
 
 	return (rel: string): boolean => {
-		const entryIgnored = patterns.reduce<boolean>((ignored, p, i) => {
+		const entryIgnored = patterns.reduce<boolean>((ignored, p) => {
 			if (!matchesEntry(rel, p)) return ignored;
-			if (p.negate) {
-				// A negation can only un-ignore a path if no parent directory is
-				// currently excluded.
-				return ancestorIgnored(rel, i) ? ignored : false;
-			}
-			return true;
+			return !p.negate;
 		}, false);
 
 		return entryIgnored || ancestorIgnored(rel, patterns.length);

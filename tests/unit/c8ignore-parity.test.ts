@@ -190,6 +190,35 @@ const MATCHER_CASES: readonly MatcherCase[] = [
 		],
 	},
 	{
+		name: "recursive directory negation re-includes matching files at any depth",
+		patterns: ["*.bpmn", "!keep/**"],
+		expect: [
+			["keep/", false],
+			["keep/public/a.bpmn", false],
+			["other/a.bpmn", true],
+		],
+	},
+	{
+		name: "recursive exclusion keeps matching descendants when a directory is negated",
+		patterns: ["foo/**", "!foo/bar/"],
+		expect: [
+			["foo/", false],
+			["foo/bar/", false],
+			["foo/bar/a.bpmn", true],
+			["foo/bar/nested/a.bpmn", true],
+			["foo/baz/a.bpmn", true],
+		],
+	},
+	{
+		name: "later parent negation consistently re-includes child directories",
+		patterns: ["parent/", "parent/child/", "!parent/child/", "!parent/"],
+		expect: [
+			["parent/", false],
+			["parent/child/", false],
+			["parent/child/file.bpmn", false],
+		],
+	},
+	{
 		name: "negation re-includes a directory matched by a child wildcard",
 		patterns: ["logs/*", "!logs/keep/"],
 		expect: [
