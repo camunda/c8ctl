@@ -586,6 +586,28 @@ describe("Cluster Plugin – findC8RunBinaryPath", () => {
 		assert.ok(result !== null, "should find binary");
 		assert.ok(result?.includes("c8run"), "path should reference binary name");
 	});
+
+	test("returns the launcher in an unversioned c8run subdirectory", () => {
+		const config = { cacheDir: tempDir, version: "8.8" };
+		const installDir = join(tempDir, "c8run-8.8");
+		const binaryPath = join(installDir, "c8run", C8RUN_BINARY);
+		mkdirSync(join(installDir, "c8run"), { recursive: true });
+		writeFileSync(binaryPath, "");
+
+		assert.strictEqual(plugin.findC8RunBinaryPath(config), binaryPath);
+	});
+
+	test("does not accept a directory as the c8run launcher", () => {
+		const config = { cacheDir: tempDir, version: "8.8" };
+		const installDir = join(tempDir, "c8run-8.8");
+		mkdirSync(join(installDir, C8RUN_BINARY), { recursive: true });
+		mkdirSync(
+			join(installDir, "c8run-8.8.1", C8RUN_BINARY),
+			{ recursive: true },
+		);
+
+		assert.strictEqual(plugin.findC8RunBinaryPath(config), null);
+	});
 });
 
 describe("Cluster Plugin – isC8RunInstalled", () => {
@@ -641,6 +663,48 @@ describe("Cluster Plugin – getC8RunBinaryPath", () => {
 		assert.ok(
 			typeof result === "string" && result.length > 0,
 			"should return a non-empty path",
+		);
+	});
+});
+
+describe("Cluster Plugin – start spawn errors", () => {
+	test("prints the c8run spawn error when the launcher cannot be executed", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		const installDir = join(tempDir, "c8run-8.8.0");
+		mkdirSync(installDir, { recursive: true });
+		writeFileSync(join(installDir, C8RUN_BINARY), "not executable", {
+			mode: 0o644,
+		});
+
+		const previousCacheDir = process.env.C8RUN_CACHE_DIR;
+		const originalError = console.error;
+		const originalLog = console.log;
+		const captured: string[] = [];
+		process.env.C8RUN_CACHE_DIR = tempDir;
+		console.error = (...args: unknown[]) => {
+			captured.push(args.map(String).join(" "));
+		};
+		console.log = (...args: unknown[]) => {
+			captured.push(args.map(String).join(" "));
+		};
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin.commands.cluster(["start", "8.8.0"]).catch(() => {});
+		} finally {
+			restoreExit();
+			console.error = originalError;
+			console.log = originalLog;
+			if (previousCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
+			else process.env.C8RUN_CACHE_DIR = previousCacheDir;
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+
+		assert.ok(
+			captured.some((line) => line.includes("Failed to spawn c8run:")),
+			"should include the launcher spawn error",
 		);
 	});
 });
@@ -3673,6 +3737,68 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.strictEqual(plugin.readClusterPort(tempDir), 8080);
 			assert.strictEqual(existsSync(join(tempDir, "cluster.port")), false);
 			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("stops the live pidfile version instead of the first installed version", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		await new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		});
+
+		try {
+			assert.ok(child.pid, "spawned child must have a PID");
+			const idleBinaryDir = join(tempDir, "c8run-8.10", "c8run-8.10.10");
+			const runningBinaryDir = join(
+				tempDir,
+				"c8run-8.10.5",
+				"c8run-8.10.5",
+			);
+			mkdirSync(idleBinaryDir, { recursive: true });
+			mkdirSync(runningBinaryDir, { recursive: true });
+			const idleStopMarker = join(tempDir, "idle-version-stopped");
+			writeFileSync(
+				join(idleBinaryDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${idleStopMarker}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(
+				join(runningBinaryDir, "camunda.process"),
+				String(child.pid),
+			);
+			writeFileSync(
+				join(runningBinaryDir, C8RUN_BINARY),
+				`#!/bin/sh\nkill -TERM ${child.pid}\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+
+			const stopped = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version: "8.10.5",
+			});
+
+			await pollUntil(async () => !plugin.isPidAlive(child.pid), 5000, 50);
+			assert.strictEqual(stopped, "8.10.5");
+			assert.strictEqual(
+				existsSync(idleStopMarker),
+				false,
+				"the idle version's no-op stop must not be run",
+			);
 		} finally {
 			if (child.pid && plugin.isPidAlive(child.pid)) {
 				try {
