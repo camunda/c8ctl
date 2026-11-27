@@ -25,6 +25,19 @@ import { pollUntil, pollUntilValue } from "../utils/polling.ts";
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
 
+describe("Cluster Plugin – stripTrailingSlashes", () => {
+	test("removes trailing separators without altering long internal separator runs", () => {
+		const internalSeparatorRun = `${"/".repeat(50_000)}child`;
+
+		assert.strictEqual(
+			plugin.stripTrailingSlashes(internalSeparatorRun),
+			internalSeparatorRun,
+		);
+		assert.strictEqual(plugin.stripTrailingSlashes("path///"), "path");
+		assert.strictEqual(plugin.stripTrailingSlashes("////"), "");
+	});
+});
+
 /** Platform-correct binary name: c8run.exe on Windows, c8run elsewhere. */
 const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
 
