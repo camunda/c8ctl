@@ -2418,6 +2418,49 @@ function getPidRecordPath(cacheDir) {
   return join(cacheDir, PID_RECORD_FILE);
 }
 
+function sanitizePidfileSurvivors(survivors) {
+  if (!Array.isArray(survivors)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const clean = [];
+  for (const survivor of survivors) {
+    if (!survivor || typeof survivor !== 'object' || Array.isArray(survivor)) {
+      continue;
+    }
+    const { version, pid, signature } = survivor;
+    if (
+      typeof version !== 'string' ||
+      !version ||
+      !Number.isInteger(pid) ||
+      pid <= 0 ||
+      (signature !== null &&
+        signature !== undefined &&
+        (typeof signature !== 'string' || !signature))
+    ) {
+      continue;
+    }
+    try {
+      validateVersionSpec(version);
+    } catch {
+      continue;
+    }
+
+    const key = `${version}\0${pid}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    clean.push({
+      version,
+      pid,
+      signature: typeof signature === 'string' ? signature : null,
+    });
+  }
+  return clean;
+}
+
 /**
  * Read the durable running-cluster PID record (see PID_RECORD_FILE). Returns
  * `{ version, pids }` or null when absent/unparseable. This record lives at
@@ -2469,11 +2512,21 @@ export function readRunningClusterRecord(cacheDir) {
   } catch {
     return null;
   }
-  return { version, pids, signatures, ...(parsed.startupFailed === true ? { startupFailed: true } : {}) };
+  const pidfileSurvivors = sanitizePidfileSurvivors(parsed.pidfileSurvivors);
+  return {
+    version,
+    pids,
+    signatures,
+    pidfileSurvivors,
+    ...(parsed.startupFailed === true ? { startupFailed: true } : {}),
+  };
 }
 
 /** Persist the durable running-cluster PID record. */
-export function writeRunningClusterRecord(cacheDir, { version, pids, signatures, startupFailed }) {
+export function writeRunningClusterRecord(
+  cacheDir,
+  { version, pids, signatures, pidfileSurvivors, startupFailed },
+) {
   mkdirSync(cacheDir, { recursive: true });
   const cleanPids = Array.isArray(pids)
     ? [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]
@@ -2487,6 +2540,7 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures,
       }
     }
   }
+  const cleanPidfileSurvivors = sanitizePidfileSurvivors(pidfileSurvivors);
   // `cluster.pids` is the ONLY recovery handle once an install dir disappears,
   // so the write must be crash-safe: serialise to a sibling temp file and
   // atomically rename it into place. An interruption then leaves either the
@@ -2498,6 +2552,7 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures,
     version: version ?? null,
     pids: cleanPids,
     signatures: cleanSignatures,
+    pidfileSurvivors: cleanPidfileSurvivors,
     ...(startupFailed === true ? { startupFailed: true } : {}),
   });
   try {
@@ -2511,6 +2566,73 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures,
     }
     throw error;
   }
+}
+
+function pidfileSurvivorIsLive(survivor) {
+  if (!survivor.signature && platformSupportsProcessSignature()) {
+    // Keep an unverified survivor visible so stop/purge cannot claim success,
+    // but never signal it: a pidfile without a captured identity may be stale.
+    return isPidAlive(survivor.pid);
+  }
+  return recordedPidIsLive(survivor.pid, survivor.signature);
+}
+
+function livePidfileSurvivors(record) {
+  return (record?.pidfileSurvivors ?? []).filter(pidfileSurvivorIsLive);
+}
+
+function liveUnverifiedPidfileSurvivors(cacheDir) {
+  if (!platformSupportsProcessSignature()) {
+    return [];
+  }
+  return livePidfileSurvivors(readRunningClusterRecord(cacheDir))
+    .filter((survivor) => !survivor.signature)
+    .map((survivor) => survivor.pid);
+}
+
+function recordedClusterPidSignatures(record) {
+  const signatures = new Map();
+  for (const pid of record.pids) {
+    signatures.set(pid, record.signatures?.[pid]);
+  }
+  for (const survivor of record.pidfileSurvivors ?? []) {
+    if (!signatures.has(survivor.pid)) {
+      signatures.set(survivor.pid, survivor.signature);
+    }
+  }
+  return signatures;
+}
+
+function mergePidfileSurvivors(record, discoveredSurvivors) {
+  const priorSurvivors = record?.pidfileSurvivors ?? [];
+  const merged = priorSurvivors.filter(pidfileSurvivorIsLive);
+  const seen = new Set(
+    merged.map((survivor) => `${survivor.version}\0${survivor.pid}`),
+  );
+  const priorKeys = new Set(
+    priorSurvivors.map((survivor) => `${survivor.version}\0${survivor.pid}`),
+  );
+  const recordedPids = new Set(record?.pids ?? []);
+
+  for (const survivor of sanitizePidfileSurvivors(discoveredSurvivors)) {
+    const key = `${survivor.version}\0${survivor.pid}`;
+    if (seen.has(key) || priorKeys.has(key)) {
+      continue;
+    }
+    if (recordedPids.has(survivor.pid)) {
+      if (
+        !record?.signatures?.[survivor.pid] &&
+        platformSupportsProcessSignature()
+      ) {
+        seen.add(key);
+        merged.push({ ...survivor, signature: null });
+      }
+      continue;
+    }
+    seen.add(key);
+    merged.push(survivor);
+  }
+  return merged;
 }
 
 /** Remove the durable running-cluster PID record if present. */
@@ -2531,7 +2653,12 @@ export function clearRunningClusterRecord(cacheDir) {
  * record is absent or still has at least one live recorded PID.
  */
 export function clearStaleRunningClusterRecord(cacheDir) {
-  if (readRunningClusterRecord(cacheDir) && liveRecordedPids(cacheDir).length === 0) {
+  const record = readRunningClusterRecord(cacheDir);
+  if (
+    record &&
+    liveRecordedPids(cacheDir).length === 0 &&
+    livePidfileSurvivors(record).length === 0
+  ) {
     clearRunningClusterRecord(cacheDir);
   }
 }
@@ -2542,7 +2669,9 @@ export function liveRecordedPids(cacheDir) {
   if (!record) {
     return [];
   }
-  return record.pids.filter((pid) => recordedPidIsLive(pid, record.signatures?.[pid]));
+  return [...recordedClusterPidSignatures(record)]
+    .filter(([pid, signature]) => recordedPidIsLive(pid, signature))
+    .map(([pid]) => pid);
 }
 
 /**
@@ -2652,8 +2781,13 @@ export function isVersionInstanceRunning(cacheDir, version) {
   const record = readRunningClusterRecord(cacheDir);
   return Boolean(
     record &&
-      record.version === version &&
-      record.pids.some((pid) => recordedPidIsLive(pid, record.signatures?.[pid])),
+      ((record.version === version &&
+        record.pids.some((pid) =>
+          recordedPidIsLive(pid, record.signatures?.[pid]),
+        )) ||
+        livePidfileSurvivors(record).some(
+          (survivor) => survivor.version === version,
+        )),
   );
 }
 
@@ -2713,7 +2847,7 @@ async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {
  */
 export async function reapClusterProcesses(cacheDir) {
   const record = readRunningClusterRecord(cacheDir);
-  const signatures = record?.signatures ?? {};
+  const signatures = record ? recordedClusterPidSignatures(record) : new Map();
   const targets = new Set(liveRecordedPids(cacheDir));
   // Guard against ever signalling the c8ctl process itself (or its parent) —
   // a cluster's Java process is never c8ctl, and tests stand in with own PIDs.
@@ -2726,7 +2860,7 @@ export async function reapClusterProcesses(cacheDir) {
   for (const pid of targets) {
     // Carry the recorded start signature into termination so each signal is
     // gated on the ORIGINAL identity, not bare numeric liveness (#560).
-    if (await terminatePid(pid, { signature: signatures[pid] })) {
+    if (await terminatePid(pid, { signature: signatures.get(pid) })) {
       reaped += 1;
     }
   }
@@ -2747,7 +2881,11 @@ export function hasRunningClusterPidfiles(cacheDir) {
   // running version's install dir (and with it the .process pidfiles) has been
   // replaced or deleted, which would otherwise make c8ctl report the live
   // cluster as stopped and leave its process orphaned (#560).
-  return liveRecordedPids(cacheDir).length > 0;
+  const record = readRunningClusterRecord(cacheDir);
+  return (
+    liveRecordedPids(cacheDir).length > 0 ||
+    livePidfileSurvivors(record).length > 0
+  );
 }
 
 function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
@@ -2779,9 +2917,9 @@ function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
 }
 
 function findPidfileSurvivors(attempts) {
-  const survivors = new Set();
-  for (const attempt of attempts) {
-    for (const [pid, identity] of attempt) {
+  const survivors = [];
+  for (const { version, processes } of attempts) {
+    for (const [pid, identity] of processes) {
       if (!isPidAlive(pid)) {
         continue;
       }
@@ -2802,10 +2940,14 @@ function findPidfileSurvivors(attempts) {
       ) {
         continue;
       }
-      survivors.add(pid);
+      survivors.push({
+        version,
+        pid,
+        signature: identity.recordedSignature || identity.signature || null,
+      });
     }
   }
-  return [...survivors];
+  return survivors;
 }
 
 async function waitForPidfileProcessesExit(
@@ -2908,6 +3050,9 @@ export async function stopC8Run(
 
   const versionsToTry = [];
   const record = readRunningClusterRecord(config.cacheDir);
+  const recordedSignatures = record
+    ? recordedClusterPidSignatures(record)
+    : new Map();
   const markerVersion = existsSync(versionFile)
     ? readFileSync(versionFile, 'utf-8').trim()
     : '';
@@ -2934,32 +3079,57 @@ export async function stopC8Run(
 
   logger.info('Stopping Camunda 8 local cluster...');
 
+  const pidfileAttempts = livePidfileVersions.map((version) => {
+    const processes = new Map();
+    for (const pid of collectPidfilePids(config.cacheDir, { version })) {
+      const signature = processStartSignature(pid);
+      if (signature || isPidAlive(pid)) {
+        processes.set(pid, {
+          signature,
+          recordedSignature: recordedSignatures.get(pid) ?? null,
+        });
+      }
+    }
+    return { version, processes };
+  });
+  const pidfileAttemptsByVersion = new Map(
+    pidfileAttempts.map(({ version, processes }) => [version, processes]),
+  );
+
   let attempted = 0;
   let hadSuccessfulStop = false;
   let lastError;
-  const pidfileAttempts = [];
 
   for (const version of versionsToTry) {
     // A pidfile can become stale between version discovery and execution. Keep
     // the process identity so an unrelated process that reused its PID cannot
     // make an idle c8run stop look successful.
+    const pidfileAttempt =
+      pidfileAttemptsByVersion.get(version) ?? new Map();
     const previousSignatures = new Map();
-    for (const pid of collectPidfilePids(config.cacheDir, { version })) {
+    for (const [pid, identity] of pidfileAttempt) {
       if (isPidAlive(pid)) {
-        previousSignatures.set(pid, processStartSignature(pid));
+        previousSignatures.set(
+          pid,
+          identity.recordedSignature ?? identity.signature,
+        );
       }
+    }
+    for (const pid of collectPidfilePids(config.cacheDir, { version })) {
+      if (!isPidAlive(pid) || pidfileAttempt.has(pid)) {
+        continue;
+      }
+      const signature = processStartSignature(pid);
+      const recordedSignature = recordedSignatures.get(pid) ?? null;
+      pidfileAttempt.set(pid, {
+        signature,
+        recordedSignature,
+      });
+      previousSignatures.set(pid, recordedSignature ?? signature);
     }
     if (previousSignatures.size === 0) {
       continue;
     }
-    const pidfileAttempt = new Map();
-    for (const [pid, signature] of previousSignatures) {
-      pidfileAttempt.set(pid, {
-        signature,
-        recordedSignature: record?.signatures?.[pid] ?? null,
-      });
-    }
-    pidfileAttempts.push(pidfileAttempt);
 
     const versionConfig = { cacheDir: config.cacheDir, version };
     let binaryPath;
@@ -3041,7 +3211,7 @@ export async function stopC8Run(
             signature: previousSignatures.has(pid)
               ? previousSignatures.get(pid)
               : processStartSignature(pid),
-            recordedSignature: record?.signatures?.[pid] ?? null,
+            recordedSignature: recordedSignatures.get(pid) ?? null,
           });
         }
 
@@ -3084,12 +3254,30 @@ export async function stopC8Run(
     );
   }
 
+  const pidfileSurvivors = findPidfileSurvivors(pidfileAttempts);
+  const latestRecord = readRunningClusterRecord(config.cacheDir);
+  const recoveredPidfileSurvivors = mergePidfileSurvivors(
+    latestRecord,
+    pidfileSurvivors,
+  );
+  if (latestRecord || recoveredPidfileSurvivors.length > 0) {
+    const version =
+      latestRecord?.version ?? recoveredPidfileSurvivors[0]?.version;
+    if (version) {
+      writeRunningClusterRecord(config.cacheDir, {
+        version,
+        pids: latestRecord?.pids ?? [],
+        signatures: latestRecord?.signatures ?? {},
+        pidfileSurvivors: recoveredPidfileSurvivors,
+        startupFailed: latestRecord?.startupFailed,
+      });
+    }
+  }
+  const persistedRecord = readRunningClusterRecord(config.cacheDir);
+
   // Markers are always cleared (a stale marker or version file would block
-  // future starts), but the durable PID record is the ONLY handle to an orphan.
-  // If reaping could not confirm every recorded process dead — e.g. signalling
-  // returned EPERM, or the kill did not land — keep the record so a later
-  // "c8ctl cluster stop" can retry. Only clear it once every recorded PID is
-  // confirmed gone (#560).
+  // future starts). Keep the durable PID record while any tracked process or
+  // unverified pidfile survivor may still be alive so a later stop can retry.
   if (existsSync(markerFile)) {
     rmSync(markerFile);
   }
@@ -3097,15 +3285,22 @@ export async function stopC8Run(
     rmSync(versionFile);
   }
   const remainingPids = liveRecordedPids(config.cacheDir);
-  if (remainingPids.length === 0) {
+  const unverifiedPidfilePids = liveUnverifiedPidfileSurvivors(config.cacheDir);
+  if (remainingPids.length === 0 && unverifiedPidfilePids.length === 0) {
     clearRunningClusterRecord(config.cacheDir);
   } else {
-    logger.warn(
-      'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
-        'PID record so "c8ctl cluster stop" can retry.',
-    );
+    if (remainingPids.length > 0) {
+      logger.warn(
+        'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
+          'PID record so "c8ctl cluster stop" can retry.',
+      );
+    } else {
+      logger.warn(
+        'Some live c8run pidfile processes have no verifiable start signature; keeping their ' +
+          'version-attributed recovery record without signalling them.',
+      );
+    }
   }
-  const pidfileSurvivors = findPidfileSurvivors(pidfileAttempts);
 
   // The port record describes the cluster that was just stopped. Only drop it
   // once NOTHING still tracks a live process — neither the durable PID record
@@ -3126,21 +3321,60 @@ export async function stopC8Run(
     // still alive (e.g. reaping hit EPERM), the incomplete-stop diagnostic
     // below carries the actionable PID/retry guidance and must win over this
     // generic "no binary" message even though the install dir is gone (#560).
-    if (remainingPids.length === 0) {
+    if (
+      remainingPids.length === 0 &&
+      unverifiedPidfilePids.length === 0
+    ) {
       throw new Error(
         'Could not find an installed c8run binary to execute stop.',
       );
     }
-  } else if (!hadSuccessfulStop && lastError && remainingPids.length === 0) {
+  } else if (
+    !hadSuccessfulStop &&
+    lastError &&
+    remainingPids.length === 0 &&
+    unverifiedPidfilePids.length === 0
+  ) {
     throw lastError;
   }
 
+  const remainingPidfilePids = [
+    ...new Set(
+      livePidfileSurvivors(persistedRecord)
+        .filter(
+          (survivor) =>
+            !persistedRecord?.pids.includes(survivor.pid) &&
+            remainingPids.includes(survivor.pid),
+        )
+        .map((survivor) => survivor.pid),
+    ),
+  ];
   // A partial stop is still a FAILED stop: if any recorded PID is confirmed
   // alive after reaping, the cluster may still hold its ports, so a fresh start
   // would collide. Surface it as an error (the record was retained above) so
   // the CLI exits non-zero and the user retries, rather than reporting success
   // while an orphan lingers (#560).
   if (remainingPids.length > 0) {
+    if (remainingPidfilePids.length === remainingPids.length) {
+      const processLabel =
+        remainingPidfilePids.length === 1 ? 'process' : 'processes';
+      const pidLabel = remainingPidfilePids.length === 1 ? 'PID' : 'PIDs';
+      const purgeVersion =
+        livePidfileSurvivors(persistedRecord)[0]?.version ||
+        markerVersion ||
+        persistedRecord?.version ||
+        record?.version;
+      const purgeHint =
+        purge && purgeVersion
+          ? ` Once they exit, run: c8ctl cluster purge ${purgeVersion}.`
+          : '';
+      const lastErrorMessage =
+        lastError instanceof Error ? ` ${lastError.message}` : '';
+      throw new Error(
+        `Stop incomplete: ${remainingPidfilePids.length} c8run pidfile ${processLabel} still running (${pidLabel}: ${remainingPidfilePids.join(', ')}). ` +
+          `The durable PID record was kept — retry with "c8ctl cluster stop".${lastErrorMessage}${purgeHint}`,
+      );
+    }
     throw new Error(
       `Stop incomplete: ${remainingPids.length} recorded cluster process${
         remainingPids.length === 1 ? '' : 'es'
@@ -3148,13 +3382,23 @@ export async function stopC8Run(
         'The durable PID record was kept — retry with "c8ctl cluster stop".',
     );
   }
+  if (unverifiedPidfilePids.length > 0) {
+    const processLabel =
+      unverifiedPidfilePids.length === 1 ? 'process' : 'processes';
+    const pidLabel = unverifiedPidfilePids.length === 1 ? 'PID' : 'PIDs';
+    throw new Error(
+      `Stop incomplete: ${unverifiedPidfilePids.length} c8run pidfile ${processLabel} could not be safely reaped because its start signature could not be verified (${pidLabel}: ${unverifiedPidfilePids.join(', ')}). ` +
+        'The version-attributed recovery record was kept; verify and stop these processes manually.',
+    );
+  }
   if (pidfileSurvivors.length > 0) {
     const processLabel = pidfileSurvivors.length === 1 ? 'process' : 'processes';
     const pidLabel = pidfileSurvivors.length === 1 ? 'PID' : 'PIDs';
     const lastErrorMessage =
       lastError instanceof Error ? ` ${lastError.message}` : '';
+    const survivorPids = pidfileSurvivors.map(({ pid }) => pid);
     throw new Error(
-      `Stop incomplete: ${pidfileSurvivors.length} c8run pidfile ${processLabel} still running (${pidLabel}: ${pidfileSurvivors.join(', ')}). ` +
+        `Stop incomplete: ${pidfileSurvivors.length} c8run pidfile ${processLabel} still running (${pidLabel}: ${survivorPids.join(', ')}). ` +
         `Retry with "c8ctl cluster stop".${lastErrorMessage}`,
     );
   }
