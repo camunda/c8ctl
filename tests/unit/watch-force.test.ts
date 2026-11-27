@@ -3,41 +3,69 @@
  */
 
 import assert from "node:assert";
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { c8WithOptions } from "../utils/cli.ts";
+import { pollUntil } from "../utils/polling.ts";
+import {
+	startWatchProcess,
+	type WatchProcess,
+} from "../utils/watch-process.ts";
+
+const WATCH_READY_MESSAGE = "Press Ctrl+C to stop watching";
+// The banner is the readiness signal; this deadline only guards against a
+// process that never starts under runner load.
+const WATCH_STARTUP_SAFETY_NET_MS = 15_000;
+const POLL_INTERVAL_MS = 50;
 
 describe("Watch Force Mode", () => {
 	let testDir: string;
+	let watcher: WatchProcess | undefined;
 
 	beforeEach(() => {
 		testDir = join(tmpdir(), `c8ctl-watch-force-test-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
+		await watcher?.cleanup();
+		watcher = undefined;
 		if (existsSync(testDir)) {
 			rmSync(testDir, { recursive: true, force: true });
 		}
 	});
 
-	test("help watch shows --force flag", () => {
-		const result = spawnSync(
-			"node",
-			[
-				"--experimental-strip-types",
-				join(process.cwd(), "src/index.ts"),
-				"help",
-				"watch",
-			],
-			{
-				encoding: "utf-8",
-				stdio: "pipe",
-				timeout: 5000,
-				env: { ...process.env, C8CTL_DATA_DIR: testDir },
-			},
+	async function startWatch(force: boolean): Promise<WatchProcess> {
+		const watchDir = join(testDir, "watch-test");
+		mkdirSync(watchDir, { recursive: true });
+		writeFileSync(join(watchDir, "test.bpmn"), "<definitions/>");
+
+		const watch = startWatchProcess({
+			watchDir,
+			dataDir: testDir,
+			extraArgs: force ? ["--force"] : [],
+		});
+		watcher = watch;
+
+		const ready = await pollUntil(
+			async () => watch.getOutput().includes(WATCH_READY_MESSAGE),
+			WATCH_STARTUP_SAFETY_NET_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(
+			ready,
+			`watch did not reach readiness within ${WATCH_STARTUP_SAFETY_NET_MS}ms. Output:\n${watch.getOutput()}`,
+		);
+		return watch;
+	}
+
+	test("help watch shows --force flag", async () => {
+		const result = await c8WithOptions(
+			{ env: { C8CTL_DATA_DIR: testDir } },
+			"help",
+			"watch",
 		);
 
 		assert.ok(
@@ -50,21 +78,11 @@ describe("Watch Force Mode", () => {
 		);
 	});
 
-	test("help watch alias w shows --force flag", () => {
-		const result = spawnSync(
-			"node",
-			[
-				"--experimental-strip-types",
-				join(process.cwd(), "src/index.ts"),
-				"help",
-				"w",
-			],
-			{
-				encoding: "utf-8",
-				stdio: "pipe",
-				timeout: 5000,
-				env: { ...process.env, C8CTL_DATA_DIR: testDir },
-			},
+	test("help watch alias w shows --force flag", async () => {
+		const result = await c8WithOptions(
+			{ env: { C8CTL_DATA_DIR: testDir } },
+			"help",
+			"w",
 		);
 
 		assert.ok(
@@ -73,62 +91,19 @@ describe("Watch Force Mode", () => {
 		);
 	});
 
-	test("watch --force shows force mode message", () => {
-		// Create a temp directory with a dummy bpmn file to watch
-		const watchDir = join(testDir, "watch-test");
-		mkdirSync(watchDir, { recursive: true });
-		writeFileSync(join(watchDir, "test.bpmn"), "<definitions/>");
-
-		// Start watch --force and kill after getting initial output
-		const result = spawnSync(
-			"node",
-			[
-				"--experimental-strip-types",
-				join(process.cwd(), "src/index.ts"),
-				"watch",
-				"--force",
-				watchDir,
-			],
-			{
-				encoding: "utf-8",
-				stdio: "pipe",
-				timeout: 3000,
-				env: { ...process.env, C8CTL_DATA_DIR: testDir },
-			},
-		);
-
-		// The watch command will timeout (exit due to timeout), but we should see the force mode message
-		const output = (result.stdout || "") + (result.stderr || "");
+	test("watch --force shows force mode message", async () => {
+		const watch = await startWatch(true);
 		assert.ok(
-			output.includes("Force mode"),
+			watch.getOutput().includes("Force mode"),
 			"watch --force should display force mode message",
 		);
 	});
 
-	test("watch without --force does not show force mode message", () => {
-		const watchDir = join(testDir, "watch-test");
-		mkdirSync(watchDir, { recursive: true });
-		writeFileSync(join(watchDir, "test.bpmn"), "<definitions/>");
+	test("watch without --force does not show force mode message", async () => {
+		const watch = await startWatch(false);
 
-		const result = spawnSync(
-			"node",
-			[
-				"--experimental-strip-types",
-				join(process.cwd(), "src/index.ts"),
-				"watch",
-				watchDir,
-			],
-			{
-				encoding: "utf-8",
-				stdio: "pipe",
-				timeout: 3000,
-				env: { ...process.env, C8CTL_DATA_DIR: testDir },
-			},
-		);
-
-		const output = (result.stdout || "") + (result.stderr || "");
 		assert.ok(
-			!output.includes("Force mode"),
+			!watch.getOutput().includes("Force mode"),
 			"watch without --force should NOT display force mode message",
 		);
 	});

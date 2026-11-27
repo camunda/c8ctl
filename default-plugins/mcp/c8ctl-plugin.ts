@@ -259,6 +259,17 @@ async function mcpHandler(
 	}
 
 	try {
+		if (operation === "uninstall" && ctx.unrecognizedFlags?.length) {
+			throw new Error(
+				`Unknown flag${ctx.unrecognizedFlags.length === 1 ? "" : "s"} ${ctx.unrecognizedFlags.join(", ")} for 'mcp uninstall'. Fix or remove the flag before removing MCP connections.`,
+			);
+		}
+		const suspiciousFlagValue = ctx.suspiciousFlagValues?.[0];
+		if (operation === "uninstall" && suspiciousFlagValue !== undefined) {
+			throw new Error(
+				`"${suspiciousFlagValue}" looks like a flag but was passed as a value. Fix the invocation before removing MCP connections.`,
+			);
+		}
 		if (operation === "list") {
 			// Selection flags shape writes; on a read-only listing they would
 			// silently imply a filter that does not exist.

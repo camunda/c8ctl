@@ -183,13 +183,12 @@ function protectFlagLikeValues({
 }
 
 /**
- * Find option-like tokens (`--…`) that a string flag swallowed as its
- * value. Known flags in that position are rewritten by
- * `protectFlagLikeValues`, so a surviving `--…` value is an undeclared
- * flag the user mistyped — for example `--fields --harnes=cursor`, where
- * the typo vanishes from the parsed values. Every occurrence is reported,
- * including repeated and pre-verb ones, so a later `--fields name` cannot
- * hide an earlier swallowed selector.
+ * Find option-like values supplied to string flags, both inline and as the
+ * next token. Known flags in the next-token position are rewritten by
+ * `protectFlagLikeValues`, so a surviving value such as
+ * `--fields --harnes=cursor` is an undeclared flag the user mistyped. Every
+ * occurrence is reported, including repeated and pre-verb ones, so a later
+ * `--fields name` cannot hide an earlier swallowed selector.
  */
 export function swallowedOptionLikeValues({
 	args,
@@ -202,9 +201,9 @@ export function swallowedOptionLikeValues({
 }): string[] {
 	const swallowed: string[] = [];
 	for (const token of tokens) {
-		if (token.kind !== "option" || token.inlineValue) continue;
+		if (token.kind !== "option") continue;
 		if (options[token.name]?.type !== "string") continue;
-		const raw = args[token.index + 1];
+		const raw = token.inlineValue ? token.value : args[token.index + 1];
 		// Dash-letter values are mistyped flags (`-harness=cursor`,
 		// `--harnes=cursor`); dash-digit values (`-5`) are legitimate input.
 		if (raw !== undefined && raw !== "--" && /^--?[a-zA-Z]/.test(raw)) {

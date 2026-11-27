@@ -699,6 +699,48 @@ test("empty or valueless --alias is rejected before any config write", async (t)
 	}
 });
 
+test("mcp uninstall rejects unknown and swallowed flags before config changes", async (t) => {
+	const s = sandbox(t);
+	await addProfile(s);
+	assert.equal((await s.run("use", "profile", "work")).status, 0);
+	const installed = await s.run(
+		"mcp",
+		"install",
+		"cursor",
+		"--docs",
+		"--orchestration",
+	);
+	assert.equal(installed.status, 0, installed.stderr);
+	const before = readFileSync(s.paths.cursor, "utf8");
+	const servers = serversAt(s.paths.cursor, "cursor");
+	assert.ok(servers.camunda);
+	assert.ok(servers["camunda-docs"]);
+
+	for (const { args, suspicious } of [
+		{ args: ["mcp", "uninstall", "cursor", "--doc"], suspicious: false },
+		{
+			args: ["mcp", "uninstall", "cursor", "--fields", "--doc"],
+			suspicious: true,
+		},
+		{
+			args: ["mcp", "uninstall", "cursor", "--fields=--doc"],
+			suspicious: true,
+		},
+		{
+			args: ["--fields=--doc", "mcp", "uninstall", "cursor"],
+			suspicious: true,
+		},
+	] as const) {
+		const result = await s.run(...args);
+		const label = args.join(" ");
+		const output = result.stdout + result.stderr;
+		assert.equal(result.status, 1, `${label}: ${output}`);
+		assert.match(output, /--doc/, label);
+		if (suspicious) assert.match(output, /looks like a flag/, label);
+		assert.equal(readFileSync(s.paths.cursor, "utf8"), before, label);
+	}
+});
+
 test("mcp list surfaces c8ctl-managed entries across harnesses and skips foreign ones", async (t) => {
 	const s = sandbox(t);
 	await addProfile(s);
