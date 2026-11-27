@@ -2053,13 +2053,10 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
 
-  const previousRecord = readRunningClusterRecord(config.cacheDir);
-  if (previousRecord) {
-    livePidfileEntries(config.cacheDir, {
-      knownSignatures: pidfileValidationSignatures(previousRecord),
-      retireStale: true,
-    });
-  }
+  // Retire stale pidfiles using the prior signatures before dropping the stale
+  // record and spawning a replacement, so a reused PID cannot be checked
+  // against the old process if startup is interrupted before recording anew.
+  clearStaleRunningClusterRecord(config.cacheDir);
 
   logger.info('Starting Camunda 8 local cluster...');
 
@@ -2397,10 +2394,12 @@ function commandLineIncludesPath(commandLine, path) {
   return false;
 }
 
-function commandLineIncludesConnectorsClasspath(commandLine, installDir) {
-  const mainClass = /(?:^|\s)(?:io\.camunda\.connector\.runtime\.app\.ConnectorRuntimeApplication|org\.springframework\.boot\.loader(?:\.launch)?\.PropertiesLauncher)(?=\s|$)/.exec(
-    commandLine,
-  );
+function commandLineIncludesJavaClasspath(
+  commandLine,
+  classpathPath,
+  mainClassPattern,
+) {
+  const mainClass = mainClassPattern.exec(commandLine);
   const classpathOption = /(?:^|\s)-(?:cp|classpath)\s+/.exec(commandLine);
   if (
     !mainClass ||
@@ -2414,10 +2413,27 @@ function commandLineIncludesConnectorsClasspath(commandLine, installDir) {
 
   const classpathStart = classpathOption.index + classpathOption[0].length;
   const classpath = commandLine.slice(classpathStart, mainClass.index);
-  return commandLineIncludesPath(classpath, join(installDir, '*'));
+  return commandLineIncludesPath(classpath, classpathPath);
 }
 
-function commandLineIncludesClusterLauncher(commandLine, entry, version) {
+function commandLineIncludesConnectorsClasspath(commandLine, installDir) {
+  return commandLineIncludesJavaClasspath(
+    commandLine,
+    join(installDir, '*'),
+    /(?:^|\s)(?:io\.camunda\.connector\.runtime\.app\.ConnectorRuntimeApplication|org\.springframework\.boot\.loader(?:\.launch)?\.PropertiesLauncher)(?=\s|$)/,
+  );
+}
+
+function commandLineIncludesCamundaClasspath(commandLine, componentDir) {
+  // Windows PID files include Java descendants whose command lines omit camunda.bat.
+  return commandLineIncludesJavaClasspath(
+    commandLine,
+    join(componentDir, 'lib'),
+    /(?:^|\s)(?:io\.camunda\.[\w.$]+|org\.springframework\.boot\.loader(?:\.launch)?\.PropertiesLauncher)(?=\s|$)/,
+  );
+}
+
+export function commandLineIncludesClusterLauncher(commandLine, entry, version) {
   const processName = basename(entry.path, '.process');
   const component =
     processName === 'camunda' || processName.startsWith('camunda-')
@@ -2429,9 +2445,13 @@ function commandLineIncludesClusterLauncher(commandLine, entry, version) {
   const installDirs = [dirname(entry.path), dirname(dirname(entry.path))];
 
   return installDirs.some((installDir) => {
+    const installDirName = basename(installDir);
+    const installedVersion = installDirName.startsWith('c8run-')
+      ? installDirName.slice('c8run-'.length)
+      : version;
+    const componentDir = join(installDir, `${component}-${installedVersion}`);
     const componentBin = join(
-      installDir,
-      `${component}-${version}`,
+      componentDir,
       'bin',
       executable,
     );
@@ -2446,6 +2466,9 @@ function commandLineIncludesClusterLauncher(commandLine, entry, version) {
     return (
       component === 'connectors' &&
       commandLineIncludesConnectorsClasspath(commandLine, installDir)
+    ) || (
+      component === 'camunda-zeebe' &&
+      commandLineIncludesCamundaClasspath(commandLine, componentDir)
     );
   });
 }
