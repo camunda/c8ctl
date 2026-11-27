@@ -204,7 +204,16 @@ describe("suspend/resume process-definition", () => {
 	after(async () => {
 		// Resume everything we suspended so later tests see active definitions.
 		for (const processId of touchedProcessIds) {
-			await cli("resume", "pd", `--processDefinitionId=${processId}`);
+			const result = await cli(
+				"resume",
+				"pd",
+				`--processDefinitionId=${processId}`,
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`Cleanup resume of ${processId} failed: ${result.stderr}`,
+			);
 		}
 		rmSync(dataDir, { recursive: true, force: true });
 	});
@@ -235,25 +244,6 @@ describe("suspend/resume process-definition", () => {
 			touchedProcessIds.push(processId);
 	}
 
-	async function searchVersions(processId: string) {
-		let items: ProcessDefinition[] = [];
-		await pollUntil(
-			async () => {
-				const result = await cli("search", "pd", `--id=${processId}`);
-				if (result.status !== 0) return false;
-				try {
-					items = parseJsonOutput<ProcessDefinition[]>(result.stdout);
-					return items.length > 0;
-				} catch {
-					return false;
-				}
-			},
-			POLL_TIMEOUT_MS,
-			POLL_INTERVAL_MS,
-		);
-		return items;
-	}
-
 	async function waitForVersionCount({
 		processId,
 		count,
@@ -264,7 +254,13 @@ describe("suspend/resume process-definition", () => {
 		let items: ProcessDefinition[] = [];
 		const reached = await pollUntil(
 			async () => {
-				items = await searchVersions(processId);
+				const result = await cli("search", "pd", `--id=${processId}`);
+				if (result.status !== 0) return false;
+				try {
+					items = parseJsonOutput<ProcessDefinition[]>(result.stdout);
+				} catch {
+					return false;
+				}
 				return items.length >= count;
 			},
 			POLL_TIMEOUT_MS,
@@ -357,10 +353,85 @@ describe("suspend/resume process-definition", () => {
 			"--includeProcessInstances",
 		);
 		assert.strictEqual(rows.length, 1);
-		assert.ok(
-			rows[0].batchOperationKey !== null &&
-				String(rows[0].batchOperationKey) !== "",
-			`Expected a batch operation key, got ${rows[0].batchOperationKey}`,
+		assert.match(
+			String(rows[0].batchOperationKey),
+			/^\d+$/,
+			`Expected a numeric batch operation key, got ${rows[0].batchOperationKey}`,
 		);
+
+		const resumed = await runRows(
+			"resume",
+			"pd",
+			key,
+			"--includeProcessInstances",
+		);
+		assert.strictEqual(resumed.length, 1);
+		assert.strictEqual(resumed[0].outcome, "RESUMED");
+		assert.match(
+			String(resumed[0].batchOperationKey),
+			/^\d+$/,
+			`Expected a numeric batch operation key on resume, got ${resumed[0].batchOperationKey}`,
+		);
+	});
+
+	test("suspend and resume by ID plus version with includeProcessInstances return a batch operation key", {
+		skip: pdSuspendResumeSkip,
+	}, async () => {
+		const processId = `pd-batch-id-${Date.now()}`;
+		await deployVersion({ processId, revision: 1 });
+		await waitForVersionCount({ processId, count: 1 });
+
+		const created = await cli("create", "pi", `--id=${processId}`);
+		assert.strictEqual(created.status, 0, created.stderr);
+
+		const idArgs = [`--processDefinitionId=${processId}`, "--version=1"];
+		const suspended = await runRows(
+			"suspend",
+			"pd",
+			...idArgs,
+			"--includeProcessInstances",
+		);
+		assert.strictEqual(suspended.length, 1);
+		assert.match(String(suspended[0].batchOperationKey), /^\d+$/);
+
+		const resumed = await runRows(
+			"resume",
+			"pd",
+			...idArgs,
+			"--includeProcessInstances",
+		);
+		assert.strictEqual(resumed.length, 1);
+		assert.match(String(resumed[0].batchOperationKey), /^\d+$/);
+	});
+
+	test("resume by ID and by ID plus version", {
+		skip: pdSuspendResumeSkip,
+	}, async () => {
+		const processId = `pd-resume-id-${Date.now()}`;
+		await deployVersion({ processId, revision: 1 });
+		await deployVersion({ processId, revision: 2 });
+		await waitForVersionCount({ processId, count: 2 });
+
+		await runRows("suspend", "pd", `--processDefinitionId=${processId}`);
+
+		const one = await runRows(
+			"resume",
+			"pd",
+			`--processDefinitionId=${processId}`,
+			"--version=1",
+		);
+		assert.strictEqual(one.length, 1, "--version should affect a single row");
+		assert.strictEqual(one[0].version, 1);
+		assert.strictEqual(one[0].outcome, "RESUMED");
+
+		const all = await runRows(
+			"resume",
+			"pd",
+			`--processDefinitionId=${processId}`,
+		);
+		assert.strictEqual(all.length, 2);
+		const byVersion = new Map(all.map((row) => [row.version, row.outcome]));
+		assert.strictEqual(byVersion.get(1), "ALREADY_ACTIVE");
+		assert.strictEqual(byVersion.get(2), "RESUMED");
 	});
 });

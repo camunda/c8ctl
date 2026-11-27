@@ -576,7 +576,7 @@ Add `--includeProcessInstances` to also suspend or resume the running instances 
 c8ctl suspend pd --processDefinitionId order-process --includeProcessInstances
 ```
 
-The output has one row per affected version with these columns: `processDefinitionKey`, `version`, `outcome` and `batchOperationKey`. Every row shows the same batch operation key, or `-` when no batch operation was started. Use `--dry-run` to preview the request first.
+The output has one row per affected version with these columns: `processDefinitionKey`, `version`, `outcome` and `batchOperationKey`. Every row shows the same batch operation key, or `null` in JSON output (an empty cell in text output) when no batch operation was started. Use `--dry-run` to preview the request first.
 
 ## Open web applications
 

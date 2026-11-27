@@ -38,7 +38,7 @@ for (const [verb, suffix] of VERBS) {
 			);
 		});
 
-		test("--dry-run by ID without version or tenant omits both", async () => {
+		test("--dry-run by ID without version omits the version", async () => {
 			const result = await c8(
 				verb,
 				"pd",
@@ -52,6 +52,51 @@ for (const [verb, suffix] of VERBS) {
 			assert.strictEqual(body.processDefinitionId, "order-process");
 			assert.strictEqual(body.processDefinitionKey, undefined);
 			assert.strictEqual(body.processDefinitionVersion, undefined);
+		});
+
+		test("--dry-run by ID uses the default tenant from the environment", async () => {
+			const result = await c8WithOptions(
+				{ env: { CAMUNDA_DEFAULT_TENANT_ID: "env-tenant" } },
+				verb,
+				"pd",
+				"--dry-run",
+				"--processDefinitionId",
+				"order-process",
+			);
+
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const body = asRecord(parseJson(result).body, "dry-run body");
+			assert.strictEqual(body.tenantId, "env-tenant");
+		});
+
+		test("--tenantId overrides the default tenant from the environment", async () => {
+			const result = await c8WithOptions(
+				{ env: { CAMUNDA_DEFAULT_TENANT_ID: "env-tenant" } },
+				verb,
+				"pd",
+				"--dry-run",
+				"--processDefinitionId",
+				"order-process",
+				"--tenantId",
+				"flag-tenant",
+			);
+
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const body = asRecord(parseJson(result).body, "dry-run body");
+			assert.strictEqual(body.tenantId, "flag-tenant");
+		});
+
+		test("by key never sends a tenant even when a default tenant is set", async () => {
+			const result = await c8WithOptions(
+				{ env: { CAMUNDA_DEFAULT_TENANT_ID: "env-tenant" } },
+				verb,
+				"pd",
+				"--dry-run",
+				"2251799813685249",
+			);
+
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const body = asRecord(parseJson(result).body, "dry-run body");
 			assert.strictEqual(body.tenantId, undefined);
 		});
 
@@ -88,6 +133,29 @@ for (const [verb, suffix] of VERBS) {
 			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 			const body = asRecord(parseJson(result).body, "dry-run body");
 			assert.strictEqual(body.includeProcessInstances, true);
+		});
+
+		test("--includeProcessInstances reaches the body with --processDefinitionId, with and without --version", async () => {
+			for (const extra of [[], ["--version", "2"]]) {
+				const result = await c8(
+					verb,
+					"pd",
+					"--dry-run",
+					"--processDefinitionId",
+					"order-process",
+					...extra,
+					"--includeProcessInstances",
+				);
+
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				const body = asRecord(parseJson(result).body, "dry-run body");
+				assert.strictEqual(body.processDefinitionId, "order-process");
+				assert.strictEqual(body.includeProcessInstances, true);
+				assert.strictEqual(
+					body.processDefinitionVersion,
+					extra.length > 0 ? 2 : undefined,
+				);
+			}
 		});
 
 		test("rejects a key together with --processDefinitionId", async () => {
@@ -153,7 +221,7 @@ for (const [verb, suffix] of VERBS) {
 			assert.ok(result.stderr.includes("Usage:"), `stderr: ${result.stderr}`);
 		});
 
-		for (const bad of ["abc", "0"]) {
+		for (const bad of ["abc", "0", "1.5", "2abc"]) {
 			test(`rejects --version ${bad} as not a positive integer`, async () => {
 				const result = await c8(
 					verb,

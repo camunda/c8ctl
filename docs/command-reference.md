@@ -648,7 +648,6 @@ Suspend a process instance (Camunda 8.10+) or process definition versions (Camun
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--processDefinitionId` | string |  | Select by BPMN process ID instead of key (all versions unless --version is given) |
-| `--version` | string |  | Process definition version (only with --processDefinitionId) |
 | `--tenantId` | string |  | Tenant ID (only with --processDefinitionId) |
 | `--includeProcessInstances` | boolean |  | Also suspend or resume the running instances through a batch operation |
 
@@ -684,7 +683,6 @@ Resume a suspended process instance (Camunda 8.10+) or process definition versio
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--processDefinitionId` | string |  | Select by BPMN process ID instead of key (all versions unless --version is given) |
-| `--version` | string |  | Process definition version (only with --processDefinitionId) |
 | `--tenantId` | string |  | Tenant ID (only with --processDefinitionId) |
 | `--includeProcessInstances` | boolean |  | Also suspend or resume the running instances through a batch operation |
 

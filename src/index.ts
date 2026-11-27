@@ -78,10 +78,14 @@ function bool(value: unknown): boolean | undefined {
 
 /**
  * Parse --version flag value into a number, or undefined if not set.
+ * Anything but plain digits (such as "1.5" or "2abc") yields NaN instead of a
+ * silently truncated version.
  */
 function parseVersionFlag(values: Record<string, unknown>): number | undefined {
 	return values.version && typeof values.version === "string"
-		? parseInt(values.version, 10)
+		? /^\d+$/.test(values.version)
+			? Number(values.version)
+			: Number.NaN
 		: undefined;
 }
 

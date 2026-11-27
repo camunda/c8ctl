@@ -2,14 +2,15 @@
  * Process definition commands
  */
 
-import type {
-	ProcessDefinitionId,
-	ProcessDefinitionKey,
-	suspendProcessDefinitionsInput,
+import {
+	type ProcessDefinitionId,
+	type ProcessDefinitionKey,
+	type suspendProcessDefinitionsInput,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
 import { fetchAllPages } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
+import { suspensionRows } from "../utils/index.ts";
 
 // ─── get pd ──────────────────────────────────────────────────────────────────
 
@@ -111,12 +112,16 @@ function buildSelector({
 	processDefinitionId,
 	version,
 	tenantId,
+	activeTenantId,
 	includeProcessInstances,
 }: {
 	key: ProcessDefinitionKey | undefined;
 	processDefinitionId: ProcessDefinitionId | undefined;
-	version: string | undefined;
+	version: number | undefined;
+	/** The explicit --tenantId flag. */
 	tenantId: TenantId | undefined;
+	/** Session, profile or environment tenant, used when no flag is given. */
+	activeTenantId: string | undefined;
 	includeProcessInstances: boolean | undefined;
 }): suspendProcessDefinitionsInput {
 	if (key && processDefinitionId) {
@@ -124,15 +129,8 @@ function buildSelector({
 			"Pass either a process definition key or --processDefinitionId, not both",
 		);
 	}
-	if (!key && !processDefinitionId) {
-		throw new Error(
-			`Process definition key or --processDefinitionId required. ${SUSPEND_RESUME_USAGE}`,
-		);
-	}
-	if (version !== undefined && !/^[1-9]\d*$/.test(version)) {
-		throw new Error(
-			`Invalid --version: "${version}" is not a positive integer`,
-		);
+	if (version !== undefined && !(Number.isInteger(version) && version > 0)) {
+		throw new Error("Invalid --version: it must be a positive integer");
 	}
 	const instances = includeProcessInstances ? { includeProcessInstances } : {};
 	if (key) {
@@ -144,30 +142,18 @@ function buildSelector({
 		return { processDefinitionKey: key, ...instances };
 	}
 	if (!processDefinitionId) {
-		throw new Error(SUSPEND_RESUME_USAGE);
+		throw new Error(
+			`Process definition key or --processDefinitionId required. ${SUSPEND_RESUME_USAGE}`,
+		);
 	}
 	return {
 		processDefinitionId,
-		...(version !== undefined && { processDefinitionVersion: Number(version) }),
-		...(tenantId && { tenantId }),
+		...(version !== undefined && { processDefinitionVersion: version }),
+		...((tenantId ?? activeTenantId) && {
+			tenantId: tenantId ?? TenantId.assumeExists(String(activeTenantId)),
+		}),
 		...instances,
 	};
-}
-
-function suspensionRows(result: {
-	processDefinitions: Array<{
-		processDefinitionKey: string;
-		processDefinitionVersion: number;
-		outcome: string;
-	}>;
-	batchOperationKey: string | null;
-}) {
-	return result.processDefinitions.map((pd) => ({
-		processDefinitionKey: pd.processDefinitionKey,
-		version: pd.processDefinitionVersion,
-		outcome: pd.outcome,
-		batchOperationKey: result.batchOperationKey ?? "-",
-	}));
 }
 
 export const suspendProcessDefinitionCommand = defineCommand(
@@ -178,8 +164,9 @@ export const suspendProcessDefinitionCommand = defineCommand(
 		const body = buildSelector({
 			key: args.key,
 			processDefinitionId: flags.processDefinitionId,
-			version: flags.version,
+			version: ctx.version,
 			tenantId: flags.tenantId,
+			activeTenantId: ctx.tenantId,
 			includeProcessInstances: flags.includeProcessInstances,
 		});
 
@@ -209,8 +196,9 @@ export const resumeProcessDefinitionCommand = defineCommand(
 		const body = buildSelector({
 			key: args.key,
 			processDefinitionId: flags.processDefinitionId,
-			version: flags.version,
+			version: ctx.version,
 			tenantId: flags.tenantId,
+			activeTenantId: ctx.tenantId,
 			includeProcessInstances: flags.includeProcessInstances,
 		});
 

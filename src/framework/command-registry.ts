@@ -826,10 +826,6 @@ const SUSPEND_RESUME_PD_FLAGS = {
 			"Select by BPMN process ID instead of key (all versions unless --version is given)",
 		validate: ProcessDefinitionId.assumeExists,
 	},
-	version: {
-		type: "string",
-		description: "Process definition version (only with --processDefinitionId)",
-	},
 	tenantId: {
 		type: "string",
 		description: "Tenant ID (only with --processDefinitionId)",
