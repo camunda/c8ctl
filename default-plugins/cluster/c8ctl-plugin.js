@@ -2323,6 +2323,72 @@ export function processStartSignature(pid) {
   return null;
 }
 
+function getProcessCommandLine(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  const platform = osPlatform();
+  try {
+    if (platform === 'linux') {
+      const commandLine = readFileSync(`/proc/${pid}/cmdline`, 'utf-8')
+        .split('\0')
+        .filter(Boolean)
+        .join(' ');
+      return commandLine || null;
+    }
+    if (platform === 'darwin' || platform.endsWith('bsd')) {
+      const commandLine = execFileSync(
+        'ps',
+        ['-o', 'command=', '-p', String(pid)],
+        { encoding: 'utf-8', timeout: 3000 },
+      ).trim();
+      return commandLine || null;
+    }
+    if (platform === 'win32') {
+      const commandLine = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+            'if ($p) { $p.CommandLine }',
+        ],
+        { encoding: 'utf-8', timeout: 10000 },
+      ).trim();
+      return commandLine || null;
+    }
+  } catch {
+    // Failure to inspect a process is not proof that it belongs to c8run.
+  }
+  return null;
+}
+
+function commandLineIncludesDirectory(commandLine, directory) {
+  const normalize = (value) => {
+    const normalized = value.replace(/\\/g, '/');
+    return osPlatform() === 'win32' ? normalized.toLowerCase() : normalized;
+  };
+  const expected = normalize(resolve(directory)).replace(/\/+$/, '');
+  const actual = normalize(commandLine);
+  let index = actual.indexOf(expected);
+
+  while (index !== -1) {
+    const previous = actual[index - 1];
+    const next = actual[index + expected.length];
+    if (
+      (previous === undefined || /[\s"'=:]/.test(previous)) &&
+      (next === undefined || /[\s"'/:,*;]/.test(next))
+    ) {
+      return true;
+    }
+    index = actual.indexOf(expected, index + 1);
+  }
+
+  return false;
+}
+
 /**
  * True when `pid` is alive AND, where we captured a start signature for it, that
  * signature still matches — i.e. it is the ORIGINAL recorded process, not an
@@ -2530,7 +2596,11 @@ function revalidatePidfileAttempt(
       pidfileAttempt.set(entry.pid, {
         signature,
         recordedSignature,
-        recordedOwnership: recordedSignatures.has(entry.pid),
+        recordedOwnership: hasTrustedRecordOwnership(
+          entry.pid,
+          recordedSignature,
+          recordedSignatures,
+        ),
       });
       previousSignatures.set(entry.pid, recordedSignature ?? signature);
     }
@@ -2579,6 +2649,25 @@ function revalidatePidfileAttempt(
   }
 
   return hasUnverifiablePidfile;
+}
+
+function hasUnverifiablePidfileOwnership(cacheDir, version, pidfileAttempt) {
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    if (!isPidAlive(entry.pid)) {
+      continue;
+    }
+    if (pidfileAttempt.get(entry.pid)?.recordedOwnership) {
+      continue;
+    }
+    const commandLine = getProcessCommandLine(entry.pid);
+    if (
+      !commandLine ||
+      !commandLineIncludesDirectory(commandLine, dirname(entry.path))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getPidRecordPath(cacheDir) {
@@ -2768,6 +2857,13 @@ function recordedClusterPidSignatures(record) {
     }
   }
   return signatures;
+}
+
+function hasTrustedRecordOwnership(pid, signature, signatures) {
+  return (
+    signatures.has(pid) &&
+    (!platformSupportsProcessSignature() || typeof signature === 'string')
+  );
 }
 
 function pidfileValidationSignatures(record) {
@@ -3392,7 +3488,11 @@ export async function stopC8Run(
         processes.set(pid, {
           signature,
           recordedSignature,
-          recordedOwnership: recordedSignatures.has(pid),
+          recordedOwnership: hasTrustedRecordOwnership(
+            pid,
+            recordedSignature,
+            recordedSignatures,
+          ),
         });
       }
     }
@@ -3433,7 +3533,11 @@ export async function stopC8Run(
       pidfileAttempt.set(pid, {
         signature,
         recordedSignature,
-        recordedOwnership: recordedSignatures.has(pid),
+        recordedOwnership: hasTrustedRecordOwnership(
+          pid,
+          recordedSignature,
+          recordedSignatures,
+        ),
       });
       previousSignatures.set(pid, recordedSignature ?? signature);
     }
@@ -3466,6 +3570,15 @@ export async function stopC8Run(
         pidfileAttempt,
         previousSignatures,
         recordedSignatures,
+      )
+    ) {
+      continue;
+    }
+    if (
+      hasUnverifiablePidfileOwnership(
+        config.cacheDir,
+        version,
+        pidfileAttempt,
       )
     ) {
       continue;
@@ -3554,7 +3667,11 @@ export async function stopC8Run(
               ? previousSignatures.get(pid)
               : processStartSignature(pid),
             recordedSignature: recordedSignatures.get(pid) ?? null,
-            recordedOwnership: recordedSignatures.has(pid),
+            recordedOwnership: hasTrustedRecordOwnership(
+              pid,
+              recordedSignatures.get(pid),
+              recordedSignatures,
+            ),
           });
         }
 

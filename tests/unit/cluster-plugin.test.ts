@@ -3237,7 +3237,7 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 			"sh",
 			[
 				"-c",
-				`trap "sleep 1; exit 0" TERM; touch "${readyFile}"; while :; do sleep 0.1; done`,
+				`trap "sleep 1; exit 0" TERM; touch "${readyFile}"; : "${installDir}"; while :; do sleep 0.1; done`,
 			],
 			{ stdio: "ignore" },
 		);
@@ -3764,14 +3764,24 @@ describe("Cluster Plugin – stopC8Run", () => {
 	test("fails when another live version survives the first successful stop", {
 		skip: process.platform === "win32",
 	}, async () => {
+		const requestedDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+		const survivorDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 		const stoppedChild = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			[
+				"-e",
+				"setInterval(() => {}, 1e9)",
+				join(requestedDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
+			],
 			{ stdio: "ignore" },
 		);
 		const survivor = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			[
+				"-e",
+				"setInterval(() => {}, 1e9)",
+				join(survivorDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
+			],
 			{ stdio: "ignore" },
 		);
 
@@ -3788,8 +3798,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.ok(stoppedChild.pid, "requested version process must have a PID");
 			assert.ok(survivor.pid, "second version process must have a PID");
 
-			const requestedDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
-			const survivorDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 			mkdirSync(requestedDir, { recursive: true });
 			mkdirSync(survivorDir, { recursive: true });
 			const secondStopMarker = join(tempDir, "second-version-stopped");
@@ -3842,9 +3850,15 @@ describe("Cluster Plugin – stopC8Run", () => {
 	test("keeps an unverified pidfile survivor non-signalable on retry", {
 		skip: process.platform === "win32",
 	}, async () => {
+		const version = "8.10.1";
+		const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
 		const survivor = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			[
+				"-e",
+				"setInterval(() => {}, 1e9)",
+				join(installDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
+			],
 			{ stdio: "ignore" },
 		);
 
@@ -3855,8 +3869,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 			});
 			assert.ok(survivor.pid, "pidfile-only process must have a PID");
 
-			const version = "8.10.1";
-			const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
 			const pidfile = join(installDir, "camunda.process");
 			mkdirSync(installDir, { recursive: true });
 			writeFileSync(pidfile, String(survivor.pid));
@@ -3968,7 +3980,10 @@ describe("Cluster Plugin – stopC8Run", () => {
 				: mockBinDir;
 
 			const currentSignature = plugin.processStartSignature(pid);
-			assert.ok(currentSignature, "the replacement process must be identifiable");
+			assert.ok(
+				currentSignature,
+				"the replacement process must be identifiable",
+			);
 			const previousSignature = `${currentSignature}-previous-process`;
 			rmSync(signatureAvailable);
 			writeFileSync(pidfile, String(pid));
@@ -4121,6 +4136,86 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	for (const durableIdentity of ["absent", "signatureless"] as const) {
+		test(`does not pass a pre-snapshot reused PID from a ${durableIdentity} identity to c8run`, {
+			skip: process.platform === "win32",
+		}, async () => {
+			const replacement = spawn(
+				process.execPath,
+				["-e", "setInterval(() => {}, 1e9)"],
+				{ stdio: "ignore" },
+			);
+
+			try {
+				await new Promise<void>((resolveSpawn, rejectSpawn) => {
+					replacement.once("spawn", () => resolveSpawn());
+					replacement.once("error", rejectSpawn);
+				});
+				assert.ok(replacement.pid, "replacement process must have a PID");
+
+				const pid = replacement.pid;
+				const version = "8.10.1";
+				const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+				const pidfile = join(installDir, "camunda.process");
+				const stopStarted = join(tempDir, "stop-started");
+				mkdirSync(installDir, { recursive: true });
+				writeFileSync(pidfile, String(pid));
+				writeFileSync(
+					join(installDir, C8RUN_BINARY),
+					`#!/bin/sh\ntouch "${stopStarted}"\nkill -TERM ${pid}\nexit 0\n`,
+					{ mode: 0o755 },
+				);
+				writeFileSync(join(tempDir, "cluster.active"), "running");
+				writeFileSync(join(tempDir, "cluster.version"), version);
+				if (durableIdentity === "signatureless") {
+					plugin.writeRunningClusterRecord(tempDir, {
+						version,
+						pids: [pid],
+						signatures: {},
+					});
+				}
+
+				assert.strictEqual(
+					plugin.readRunningClusterRecord(tempDir)?.signatures?.[pid],
+					undefined,
+					"the reused PID must have no trusted signature from an earlier start",
+				);
+				assert.ok(
+					plugin.processStartSignature(pid),
+					"the reused PID must have a current process signature at the first snapshot",
+				);
+
+				await assert.rejects(
+					() =>
+						plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+							timeoutMs: 25,
+						}),
+					/could not be safely reaped/,
+				);
+
+				assert.strictEqual(
+					existsSync(stopStarted),
+					false,
+					"c8run must not consume a pidfile whose live PID has no ownership proof",
+				);
+				assert.strictEqual(
+					plugin.isPidAlive(pid),
+					true,
+					"the unrelated process that reused the PID must remain alive",
+				);
+				assert.strictEqual(existsSync(pidfile), true);
+			} finally {
+				if (replacement.pid && plugin.isPidAlive(replacement.pid)) {
+					try {
+						process.kill(replacement.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			}
+		});
+	}
+
 	test("reconciles post-stop pidfile scans with the attempted process identity", {
 		skip: process.platform === "win32",
 	}, async () => {
@@ -4147,7 +4242,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			mkdirSync(installDir, { recursive: true });
 			writeFileSync(
 				join(mockBinDir, "ps"),
-				`#!/bin/sh\nif [ -f "${reuseMarker}" ]; then\n  printf '%s\\n' 'Tue Jan 2 00:00:00 2020 /replacement'\nelse\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /cluster'\nfi\n`,
+				`#!/bin/sh\nif [ "$2" = "command=" ]; then\n  printf '%s\\n' '${installDir}/camunda-zeebe-8.10.1/bin/camunda'\n  exit 0\nfi\nif [ -f "${reuseMarker}" ]; then\n  printf '%s\\n' 'Tue Jan 2 00:00:00 2020 /replacement'\nelse\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /cluster'\nfi\n`,
 				{ mode: 0o755 },
 			);
 			os.platform = () => "darwin";
@@ -4363,7 +4458,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			mkdirSync(secondInstallDir, { recursive: true });
 			writeFileSync(
 				join(mockBinDir, "ps"),
-				`#!/bin/sh\nif [ "$4" = "${second.pid}" ] && [ -f "${reuseMarker}" ]; then\n  printf '%s\\n' 'Tue Jan 2 00:00:00 2020 /replacement'\nelse\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /cluster'\nfi\n`,
+				`#!/bin/sh\nif [ "$2" = "command=" ]; then\n  if [ "$4" = "${first.pid}" ]; then\n    printf '%s\\n' '${firstInstallDir}/camunda-zeebe-8.10.1/bin/camunda'\n  else\n    printf '%s\\n' '${secondInstallDir}/camunda-zeebe-8.10.2/bin/camunda'\n  fi\n  exit 0\nfi\nif [ "$4" = "${second.pid}" ] && [ -f "${reuseMarker}" ]; then\n  printf '%s\\n' 'Tue Jan 2 00:00:00 2020 /replacement'\nelse\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /cluster'\nfi\n`,
 				{ mode: 0o755 },
 			);
 			os.platform = () => "darwin";
@@ -4372,7 +4467,10 @@ describe("Cluster Plugin – stopC8Run", () => {
 				? `${mockBinDir}${delimiter}${originalPath}`
 				: mockBinDir;
 			const originalSecondSignature = plugin.processStartSignature(second.pid);
-			assert.ok(originalSecondSignature, "the initial PID identity must be captured");
+			assert.ok(
+				originalSecondSignature,
+				"the initial PID identity must be captured",
+			);
 
 			writeFileSync(firstPidfile, String(first.pid));
 			writeFileSync(secondPidfile, String(second.pid));
@@ -4688,9 +4786,14 @@ describe("Cluster Plugin – stopC8Run", () => {
 		test(`stops the live pidfile version when ${requestedVersion} is requested`, {
 			skip: process.platform === "win32",
 		}, async () => {
+			const runningBinaryDir = join(tempDir, "c8run-8.10.5", "c8run-8.10.5");
 			const child = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1e9)"],
+				[
+					"-e",
+					"setInterval(() => {}, 1e9)",
+					join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
+				],
 				{ stdio: "ignore" },
 			);
 			await new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -4701,7 +4804,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 			try {
 				assert.ok(child.pid, "spawned child must have a PID");
 				const idleBinaryDir = join(tempDir, "c8run-8.10", "c8run-8.10.10");
-				const runningBinaryDir = join(tempDir, "c8run-8.10.5", "c8run-8.10.5");
 				mkdirSync(idleBinaryDir, { recursive: true });
 				mkdirSync(runningBinaryDir, { recursive: true });
 				const idleStopMarker = join(tempDir, "idle-version-stopped");
@@ -4861,14 +4963,24 @@ describe("Cluster Plugin – stopC8Run", () => {
 	test("fails when a pidfile-only process survives later stop and reaper successes", {
 		skip: process.platform === "win32",
 	}, async () => {
+		const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+		const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 		const survivor = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			[
+				"-e",
+				"setInterval(() => {}, 1e9)",
+				join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
+			],
 			{ stdio: "ignore" },
 		);
 		const stoppedByNextVersion = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			[
+				"-e",
+				"setInterval(() => {}, 1e9)",
+				join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
+			],
 			{ stdio: "ignore" },
 		);
 		const orphan = spawn(
@@ -4894,8 +5006,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 			);
 			assert.ok(orphan.pid, "orphan process must have a PID");
 
-			const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
-			const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 			mkdirSync(firstVersionDir, { recursive: true });
 			mkdirSync(secondVersionDir, { recursive: true });
 			writeFileSync(
@@ -4972,14 +5082,24 @@ describe("Cluster Plugin – stopC8Run", () => {
 		test(`rejects a surviving pidfile after a ${failedStop.name} and later stop success`, {
 			skip: process.platform === "win32",
 		}, async () => {
+			const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 			const survivor = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1e9)"],
+				[
+					"-e",
+					"setInterval(() => {}, 1e9)",
+					join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
+				],
 				{ stdio: "ignore" },
 			);
 			const nextVersion = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1e9)"],
+				[
+					"-e",
+					"setInterval(() => {}, 1e9)",
+					join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
+				],
 				{ stdio: "ignore" },
 			);
 
@@ -4996,8 +5116,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 				assert.ok(survivor.pid, "first version process must have a PID");
 				assert.ok(nextVersion.pid, "second version process must have a PID");
 
-				const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
-				const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 				mkdirSync(firstVersionDir, { recursive: true });
 				mkdirSync(secondVersionDir, { recursive: true });
 				writeFileSync(
@@ -5070,19 +5188,33 @@ describe("Cluster Plugin – stopC8Run", () => {
 		test(`rescans pidfiles created after a ${failedStop.name}`, {
 			skip: process.platform === "win32",
 		}, async () => {
+			const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 			const original = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1e9)"],
+				[
+					"-e",
+					"setInterval(() => {}, 1e9)",
+					join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
+				],
 				{ stdio: "ignore" },
 			);
 			const survivor = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1e9)"],
+				[
+					"-e",
+					"setInterval(() => {}, 1e9)",
+					join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
+				],
 				{ stdio: "ignore" },
 			);
 			const nextVersion = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1e9)"],
+				[
+					"-e",
+					"setInterval(() => {}, 1e9)",
+					join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
+				],
 				{ stdio: "ignore" },
 			);
 			const secondStopStarted = join(tempDir, "second-stop-started");
@@ -5104,8 +5236,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 				assert.ok(survivor.pid, "late pidfile process must have a PID");
 				assert.ok(nextVersion.pid, "second version process must have a PID");
 
-				const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
-				const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
 				const originalPidfile = join(firstVersionDir, "camunda.process");
 				const latePidfile = join(firstVersionDir, "late.process");
 				mkdirSync(firstVersionDir, { recursive: true });
@@ -5191,6 +5321,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 	test("continues after a reused PID makes c8run stop a no-op", {
 		skip: process.platform === "win32",
 	}, async () => {
+		const runningBinaryDir = join(tempDir, "c8run-8.10.5", "c8run-8.10.5");
 		const unrelatedChild = spawn(
 			process.execPath,
 			["-e", "setInterval(() => {}, 1e9)"],
@@ -5198,7 +5329,11 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 		const clusterChild = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)"],
+			[
+				"-e",
+				"setInterval(() => {}, 1e9)",
+				join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
+			],
 			{ stdio: "ignore" },
 		);
 
@@ -5218,7 +5353,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.ok(currentSignature, "unrelated child should have a signature");
 
 			const staleBinaryDir = join(tempDir, "c8run-8.10", "c8run-8.10.10");
-			const runningBinaryDir = join(tempDir, "c8run-8.10.5", "c8run-8.10.5");
 			mkdirSync(staleBinaryDir, { recursive: true });
 			mkdirSync(runningBinaryDir, { recursive: true });
 			const staleStopMarker = join(tempDir, "stale-version-stopped");
