@@ -37,6 +37,8 @@ export interface Ignore {
 export interface ParsedPattern {
 	negate: boolean;
 	globs: string[];
+	/** Match only this path entry, not descendants inherited from a directory. */
+	entryGlobs: string[];
 }
 
 /**
@@ -80,6 +82,7 @@ export function parsePattern(raw: string): ParsedPattern | null {
 	const anchored = withoutNegate.startsWith("/") || pattern.includes("/");
 
 	let globs: string[];
+	let entryGlobs: string[];
 	if (dirOnly) {
 		// Directory-only (`dir/`): match the directory entry (queried with a
 		// trailing slash) and everything under it, but NOT a bare path of the
@@ -87,22 +90,26 @@ export function parsePattern(raw: string): ParsedPattern | null {
 		globs = anchored
 			? [`${pattern}/**`]
 			: [`${pattern}/**`, `**/${pattern}/**`];
+		entryGlobs = anchored ? [`${pattern}/`] : [`${pattern}/`, `**/${pattern}/`];
 	} else if (pattern.endsWith("/**")) {
 		// Contents-only (`dir/**`): match everything inside the directory but
 		// not the directory entry itself.
 		const core = pattern.slice(0, -3);
 		globs = [`${core}/*`, `${core}/*/**`];
+		entryGlobs = [`${core}/*`, `${core}/*/`, `${core}/*/**`];
 	} else if (anchored) {
 		// Anchored entry: match the entry itself (file or directory) and its
 		// contents. e.g. `/src`, `src/build`.
 		globs = [pattern, `${pattern}/**`];
+		entryGlobs = [pattern, `${pattern}/`];
 	} else {
 		// Unanchored entry: match as a file or directory at any depth.
 		// e.g. `*.log` or `target` → the entry and its contents at any depth.
 		globs = [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
+		entryGlobs = [pattern, `${pattern}/`, `**/${pattern}`, `**/${pattern}/`];
 	}
 
-	return { negate, globs };
+	return { negate, globs, entryGlobs };
 }
 
 /** Whether a project-relative, `/`-separated path matches a parsed pattern. */
@@ -111,6 +118,13 @@ export function matchesParsedPattern(
 	{ globs }: ParsedPattern,
 ): boolean {
 	return globs.some((g) => matchesGlob(path, g));
+}
+
+function matchesPatternEntry(
+	path: string,
+	{ entryGlobs }: ParsedPattern,
+): boolean {
+	return entryGlobs.some((g) => matchesGlob(path, g));
 }
 
 /**
@@ -125,41 +139,37 @@ export function matchesGlob(path: string, pattern: string): boolean {
 function buildIgnoreChecker(
 	patterns: ParsedPattern[],
 ): (path: string) => boolean {
-	const matches = matchesParsedPattern;
+	const matchesEntry = matchesPatternEntry;
 
 	// gitignore rule: you cannot re-include a file if a parent directory of
-	// that file is excluded. Returns true when any ancestor of `rel` is
+	// that file is excluded. Returns true when any parent directory of `rel` is
 	// ignored by the first `upTo` patterns (last-match-wins for ancestors).
 	// Ancestors are directories, so they are queried with a trailing slash —
 	// otherwise directory-only patterns (`dir/`) would not match them.
-	const ancestorIgnored = (rel: string, upTo: number): boolean =>
-		rel
-			.split("/")
-			.slice(1)
-			.some((_, depth) => {
-				const ancestor = `${rel
-					.split("/")
-					.slice(0, depth + 1)
-					.join("/")}/`;
-				return patterns
-					.slice(0, upTo)
-					.reduce(
-						(ignored, p) => (matches(ancestor, p) ? !p.negate : ignored),
-						false,
-					);
-			});
+	const ancestorIgnored = (rel: string, upTo: number): boolean => {
+		const pathSegments = rel.split("/");
+		const directorySegments =
+			pathSegments.at(-1) === "" ? pathSegments.slice(0, -1) : pathSegments;
 
-	return (rel: string): boolean =>
-		patterns.reduce<boolean>((ignored, p, i) => {
-			if (!matches(rel, p)) return ignored;
-			if (p.negate) {
-				// A negation can only un-ignore a path if no parent directory is
-				// currently excluded (gitignore rule: excluded dirs cannot be
-				// re-included via negation on their descendants).
-				return ancestorIgnored(rel, i) ? ignored : false;
-			}
-			return true;
+		return directorySegments.slice(0, -1).some((_, depth) => {
+			const ancestor = `${directorySegments.slice(0, depth + 1).join("/")}/`;
+			return patterns
+				.slice(0, upTo)
+				.reduce(
+					(ignored, p) => (matchesEntry(ancestor, p) ? !p.negate : ignored),
+					false,
+				);
+		});
+	};
+
+	return (rel: string): boolean => {
+		const entryIgnored = patterns.reduce<boolean>((ignored, p) => {
+			if (!matchesEntry(rel, p)) return ignored;
+			return !p.negate;
 		}, false);
+
+		return entryIgnored || ancestorIgnored(rel, patterns.length);
+	};
 }
 
 /**
@@ -186,6 +196,7 @@ export function loadIgnoreRules(baseDir: string): Ignore {
  * Check whether a path should be ignored.
  *
  * `filePath` must be an absolute path.
+ * Directory entries must include a trailing path separator.
  * `baseDir` is the root directory the ignore rules are relative to.
  *
  * Returns `true` when the path matches an ignore rule.
@@ -195,10 +206,14 @@ export function isIgnored(
 	filePath: string,
 	baseDir: string,
 ): boolean {
+	const directoryEntry = filePath.endsWith("/") || filePath.endsWith(sep);
 	let rel = relative(baseDir, filePath);
 	// `ignore` expects forward-slash separators
 	if (sep !== "/") {
 		rel = rel.split(sep).join("/");
+	}
+	if (directoryEntry && rel !== "" && !rel.endsWith("/")) {
+		rel += "/";
 	}
 	// Paths outside baseDir can't be ignored.
 	// On Windows, when filePath is on a different drive than baseDir,

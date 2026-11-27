@@ -152,6 +152,83 @@ const MATCHER_CASES: readonly MatcherCase[] = [
 		],
 	},
 	{
+		name: "negation re-includes a directory excluded by wildcard",
+		patterns: ["*/", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/kept.bpmn", false],
+			["other/", true],
+			["other/other.bpmn", true],
+		],
+	},
+	{
+		name: "negation re-includes an explicitly excluded directory",
+		patterns: ["keep/", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/kept.bpmn", false],
+			["other/other.bpmn", false],
+		],
+	},
+	{
+		name: "directory negation preserves independently excluded files",
+		patterns: ["keep/", "*.bpmn", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/private.bpmn", true],
+			["keep/readme.txt", false],
+		],
+	},
+	{
+		name: "directory negation preserves excluded child directories",
+		patterns: ["keep/", "keep/private/", "!keep/"],
+		expect: [
+			["keep/", false],
+			["keep/private/", true],
+			["keep/private/secret.bpmn", true],
+			["keep/public/", false],
+		],
+	},
+	{
+		name: "recursive directory negation re-includes matching files at any depth",
+		patterns: ["*.bpmn", "!keep/**"],
+		expect: [
+			["keep/", false],
+			["keep/public/a.bpmn", false],
+			["other/a.bpmn", true],
+		],
+	},
+	{
+		name: "recursive exclusion keeps matching descendants when a directory is negated",
+		patterns: ["foo/**", "!foo/bar/"],
+		expect: [
+			["foo/", false],
+			["foo/bar/", false],
+			["foo/bar/a.bpmn", true],
+			["foo/bar/nested/a.bpmn", true],
+			["foo/baz/a.bpmn", true],
+		],
+	},
+	{
+		name: "later parent negation consistently re-includes child directories",
+		patterns: ["parent/", "parent/child/", "!parent/child/", "!parent/"],
+		expect: [
+			["parent/", false],
+			["parent/child/", false],
+			["parent/child/file.bpmn", false],
+		],
+	},
+	{
+		name: "negation re-includes a directory matched by a child wildcard",
+		patterns: ["logs/*", "!logs/keep/"],
+		expect: [
+			["logs/", false],
+			["logs/keep/", false],
+			["logs/keep/k.bpmn", false],
+			["logs/other/other.bpmn", true],
+		],
+	},
+	{
 		name: "single-level wildcard directory (foo/*)",
 		patterns: ["foo/*"],
 		expect: [
@@ -327,6 +404,20 @@ describe(".c8ignore — isIgnored() functional contract for deploy/watch", () =>
 			assert.strictEqual(isIgnored(ig, abs, baseDir), ignored);
 		});
 	}
+
+	test("re-included directory entries stay traversable through absolute paths", () => {
+		writeFileSync(join(baseDir, ".c8ignore"), "logs/*\n!logs/keep/\n");
+		const keepDir = join(baseDir, "logs", "keep");
+		mkdirSync(keepDir, { recursive: true });
+		writeFileSync(join(keepDir, "kept.bpmn"), "");
+
+		const ig = loadIgnoreRules(baseDir);
+		assert.strictEqual(isIgnored(ig, `${keepDir}/`, baseDir), false);
+		assert.strictEqual(
+			isIgnored(ig, join(keepDir, "kept.bpmn"), baseDir),
+			false,
+		);
+	});
 
 	test("paths outside the base directory are never ignored", () => {
 		const ig = loadIgnoreRules(baseDir);
