@@ -58,7 +58,11 @@ async function liveSelfRecord({
 	signatureOf?: (pid: number) => string | null;
 	canFingerprint?: boolean;
 	timeoutMs?: number;
-} = {}) {
+} = {}): Promise<{
+	version: string;
+	pids: number[];
+	signatures: Record<number, string>;
+}> {
 	// A real signature is the readiness signal. The deadline only bounds setup
 	// when Windows CIM/PowerShell is slow; it must never produce an unsigned record.
 	const sig = canFingerprint
@@ -69,10 +73,12 @@ async function liveSelfRecord({
 				`process start signature for PID ${pid}`,
 			)
 		: null;
+	const signatures: Record<number, string> = {};
+	if (sig) signatures[pid] = sig;
 	return {
 		version,
 		pids: [pid],
-		signatures: sig ? { [pid]: sig } : {},
+		signatures,
 	};
 }
 
@@ -3903,6 +3909,175 @@ describe("Cluster Plugin – stopC8Run", () => {
 					process.kill(survivor.pid, "SIGKILL");
 				} catch {
 					// already gone
+				}
+			}
+		}
+	});
+
+	test("returns the live pidfile survivor version after reaping a stale-record retry", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const staleProcess = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await Promise.all(
+				[staleProcess, survivor].map(
+					(child) =>
+						new Promise<void>((resolveSpawn, rejectSpawn) => {
+							child.once("spawn", () => resolveSpawn());
+							child.once("error", rejectSpawn);
+						}),
+				),
+			);
+			assert.ok(staleProcess.pid, "stale recorded process must have a PID");
+			assert.ok(survivor.pid, "pidfile survivor must have a PID");
+
+			const staleRecord = await liveSelfRecord({
+				version: "8.9",
+				pid: staleProcess.pid,
+			});
+			const staleExit = new Promise<void>((resolveExit) => {
+				staleProcess.once("exit", () => resolveExit());
+			});
+			staleProcess.kill("SIGKILL");
+			await staleExit;
+			plugin.writeRunningClusterRecord(tempDir, staleRecord);
+
+			const version = "8.10.1";
+			const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
+			const pidfile = join(installDir, "camunda.process");
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(pidfile, String(survivor.pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\nrm -f "${pidfile}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.9");
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({ cacheDir: tempDir, version: "8.9" }, false, {
+						timeoutMs: 100,
+					}),
+				/Stop incomplete/,
+			);
+			assert.strictEqual(
+				plugin.readRunningClusterRecord(tempDir)?.version,
+				"8.9",
+				"the live survivor should coexist with the stale record version",
+			);
+
+			const stoppedVersion = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version: "8.9",
+			});
+			assert.strictEqual(
+				stoppedVersion,
+				version,
+				"purge must target the version attributed to the reaped survivor",
+			);
+			assert.ok(
+				await pollUntil(async () => !plugin.isPidAlive(survivor.pid), 5000, 50),
+				"the retry should reap the pidfile survivor",
+			);
+		} finally {
+			for (const child of [staleProcess, survivor]) {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			}
+		}
+	});
+
+	test("does not select a purge version when reaped survivors span versions", async () => {
+		const first = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const second = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+
+		try {
+			await Promise.all(
+				[first, second].map(
+					(child) =>
+						new Promise<void>((resolveSpawn, rejectSpawn) => {
+							child.once("spawn", () => resolveSpawn());
+							child.once("error", rejectSpawn);
+						}),
+				),
+			);
+			assert.ok(first.pid, "first survivor must have a PID");
+			assert.ok(second.pid, "second survivor must have a PID");
+
+			const [firstRecord, secondRecord] = await Promise.all([
+				liveSelfRecord({ version: "8.10.1", pid: first.pid }),
+				liveSelfRecord({ version: "8.10.2", pid: second.pid }),
+			]);
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [],
+				signatures: {},
+				pidfileSurvivors: [
+					{
+						version: firstRecord.version,
+						pid: first.pid,
+						signature: firstRecord.signatures[first.pid] ?? null,
+					},
+					{
+						version: secondRecord.version,
+						pid: second.pid,
+						signature: secondRecord.signatures[second.pid] ?? null,
+					},
+				],
+			});
+
+			const stoppedVersion = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version: "8.9",
+			});
+
+			assert.strictEqual(
+				stoppedVersion,
+				null,
+				"stopping survivors from multiple versions must not pick one purge target",
+			);
+			assert.ok(
+				await pollUntil(
+					async () =>
+						!plugin.isPidAlive(first.pid) && !plugin.isPidAlive(second.pid),
+					5000,
+					50,
+				),
+				"all version-attributed survivors should be reaped",
+			);
+		} finally {
+			for (const child of [first, second]) {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
 				}
 			}
 		}
