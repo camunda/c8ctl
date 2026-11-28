@@ -72,7 +72,7 @@ describe("cluster plugin: flags reach the handler", () => {
 		// Nothing is running in the scratch cache dir; the purge branch is
 		// reached and reports that it cannot pick a version to purge.
 		assert.ok(
-			out.includes("Cannot determine which version to purge"),
+			out.includes("Cannot determine a single version to purge"),
 			`expected the purge branch to run, got:\n${out}`,
 		);
 	});

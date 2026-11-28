@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -28,13 +29,46 @@ describe("cluster startup outcomes through the CLI", () => {
 		installDir = join(cacheDir, "c8run-8.10.1");
 		mkdirSync(installDir);
 		children = [];
+		writeFileSync(join(cacheDir, "fixture-executable-paths.txt"), "");
 		preload = join(cacheDir, "health.mjs");
 		writeFileSync(
 			preload,
 			`import childProcess from 'node:child_process';
+import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 const spawn = childProcess.spawn;
+const originalExecFileSync = childProcess.execFileSync;
+const originalReadlinkSync = fs.readlinkSync;
+const executablePathsFile = join(process.env.C8RUN_CACHE_DIR, 'fixture-executable-paths.txt');
+const fixtureExecutablePath = (pid) => fs.readFileSync(executablePathsFile, 'utf8')
+  .split(/\\r?\\n/)
+  .reverse()
+  .find((line) => line.startsWith(pid + '\\t'))
+  ?.slice(String(pid).length + 1) ?? null;
+// Report launch metadata only for process IDs registered by this fixture.
+fs.readlinkSync = (path, ...args) => {
+  const pid = /^\\/proc\\/(\\d+)\\/exe$/.exec(String(path))?.[1];
+  return (pid && fixtureExecutablePath(pid)) || originalReadlinkSync(path, ...args);
+};
+childProcess.execFileSync = (command, args, options) => {
+  const commandArgs = Array.isArray(args) ? args : [];
+  if (command === 'lsof') {
+    const pidIndex = commandArgs.indexOf('-p');
+    const pid = pidIndex < 0 ? undefined : commandArgs[pidIndex + 1];
+    const executablePath = pid && fixtureExecutablePath(pid);
+    if (executablePath) return 'n' + executablePath + '\\n';
+  }
+  if (command === 'powershell') {
+    const commandText = commandArgs.join(' ');
+    const pid = /ProcessId=(\\d+)/.exec(commandText)?.[1];
+    const executablePath = pid && fixtureExecutablePath(pid);
+    if (executablePath && commandText.includes('$p.ExecutablePath')) {
+      return executablePath + '\\n';
+    }
+  }
+  return originalExecFileSync(command, args, options);
+};
 const installDir = join(process.env.C8RUN_CACHE_DIR, 'c8run-8.10.1');
 const binary = join(installDir, process.platform === 'win32' ? 'c8run.exe' : 'c8run');
 // Replace only the fixture executable; PID identity and cleanup use real OS processes.
@@ -64,30 +98,41 @@ globalThis.fetch = async () => {
 		rmSync(cacheDir, { recursive: true, force: true });
 	});
 
+	const clusterEnv = (health: string) => ({
+		C8RUN_CACHE_DIR: cacheDir,
+		C8CTL_OUTPUT_MODE: "text",
+		NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
+		TEST_HEALTH: health,
+	});
+
 	const cluster = (health: string, ...args: string[]) =>
-		c8WithEnv(
-			{
-				C8RUN_CACHE_DIR: cacheDir,
-				C8CTL_OUTPUT_MODE: "text",
-				NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
-				TEST_HEALTH: health,
-			},
-			"cluster",
-			...args,
+		c8WithEnv(clusterEnv(health), "cluster", ...args);
+
+	const recordFixtureExecutablePath = (pid: number, executablePath: string) => {
+		appendFileSync(
+			join(cacheDir, "fixture-executable-paths.txt"),
+			`${pid}\t${executablePath}\n`,
 		);
+	};
+
+	const componentLaunchMetadata = (name: string) => {
+		const component = name === "camunda" ? "camunda-zeebe" : "connectors";
+		const executable = name === "camunda" ? "camunda" : "connectors";
+		return join(installDir, `${component}-8.10.1`, "bin", executable);
+	};
 
 	async function launcher(exitCode: number) {
 		for (const name of ["camunda", "connectors", "connectors-sales"]) {
+			const launchMetadata = componentLaunchMetadata(name);
 			const child = spawn(
 				process.execPath,
 				["-e", "setInterval(() => {}, 1000)"],
-				{
-					stdio: "ignore",
-				},
+				{ argv0: launchMetadata, stdio: "ignore" },
 			);
 			children.push(child);
 			await once(child, "spawn");
 			assert.ok(child.pid);
+			recordFixtureExecutablePath(child.pid, launchMetadata);
 			writeFileSync(join(cacheDir, `${name}.pid`), String(child.pid));
 		}
 		const binary = join(
@@ -139,6 +184,7 @@ if (process.argv[2] === 'stop') {
 			join(installDir, "launcher.mjs"),
 			`import { spawn } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 if (process.argv[2] === 'start') {
   // Record our own PID first so the test can signal the launcher itself.
   appendFileSync('fixture.pids', process.pid + '\\n');
@@ -146,8 +192,18 @@ if (process.argv[2] === 'start') {
   // parent c8ctl is interrupted while we are still "starting". Record each
   // service PID for teardown; the .process pidfiles are the readiness signal.
   for (const name of ['camunda', 'connectors', 'connectors-sales']) {
-    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    const component = name === 'camunda' ? 'camunda-zeebe' : 'connectors';
+    const executable = name === 'camunda' ? 'camunda' : 'connectors';
+    const launchMetadata = join(process.cwd(), component + '-8.10.1', 'bin', executable);
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      argv0: launchMetadata,
+      stdio: 'ignore',
+    });
     child.on('spawn', () => {
+      appendFileSync(
+        join(process.env.C8RUN_CACHE_DIR, 'fixture-executable-paths.txt'),
+        child.pid + '\\t' + launchMetadata + '\\n',
+      );
       writeFileSync(name + '.process', String(child.pid));
       appendFileSync('fixture.pids', child.pid + '\\n');
     });
@@ -366,28 +422,39 @@ if (process.argv[2] === 'start') {
 
 	test("a failed stop keeps the recorded port while pidfile-only survivors remain", async () => {
 		await launcher(0);
-		assert.equal(
-			(await cluster("UP", "start", "8.10.1", "--port=9091")).status,
-			0,
-		);
+		const start = await cluster("UP", "start", "8.10.1", "--port=9091");
+		assert.equal(start.status, 0, `${start.stderr}\n${start.stdout}`);
 		// A process c8run tracks ONLY through a .process pidfile — the durable
 		// PID record never captured it. Its liveness is real (a live child), so
 		// hasRunningClusterPidfiles sees it even after the recorded PIDs exit.
+		const survivorLaunchMetadata = componentLaunchMetadata("camunda");
 		const survivor = spawn(
 			process.execPath,
 			["-e", "setInterval(() => {}, 1000)"],
-			{ stdio: "ignore" },
+			{ argv0: survivorLaunchMetadata, stdio: "ignore" },
 		);
 		children.push(survivor);
 		await once(survivor, "spawn");
 		assert.ok(survivor.pid);
 		const survivorPid = survivor.pid;
-		writeFileSync(join(installDir, "survivor.process"), String(survivorPid));
+		recordFixtureExecutablePath(survivorPid, survivorLaunchMetadata);
+		writeFileSync(
+			join(installDir, "camunda-survivor.process"),
+			String(survivorPid),
+		);
 
 		// c8run stop signals + reaps the three recorded processes (the launcher
 		// removes their pidfiles), but the pidfile-only survivor stays alive.
-		const stop = await cluster("DOWN", "stop");
-		assert.equal(stop.status, 0, stop.stderr);
+		const stop = await c8WithEnv(
+			{ ...clusterEnv("DOWN"), C8CTL_STOP_WAIT_TIMEOUT_MS: "300" },
+			"cluster",
+			"stop",
+		);
+		assert.equal(stop.status, 1, `${stop.stderr}\n${stop.stdout}`);
+		assert.match(
+			`${stop.stderr}\n${stop.stdout}`,
+			/Stop command reported success, but c8run 8\.10\.1 processes are still running/,
+		);
 		assert.ok(
 			await pollUntil(
 				async () =>

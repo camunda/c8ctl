@@ -1171,6 +1171,8 @@ export const commands = {
 		// Regression test for: "c8 load plugin --from doesn't respect the plugin name and overwrites existing plugin"
 		const pluginOneDir = join(process.cwd(), "test-multi-plugin-one-temp");
 		const pluginTwoDir = join(process.cwd(), "test-multi-plugin-two-temp");
+		const pluginOneSource = pathToFileURL(pluginOneDir).href;
+		const pluginTwoSource = pathToFileURL(pluginTwoDir).href;
 		const multiPluginDataDir = join(
 			tmpdir(),
 			`test-multi-plugin-data-dir-${process.pid}`,
@@ -1223,11 +1225,11 @@ export const commands = {
 
 			// Load both plugins sequentially via --from
 			loadFixturePlugin({
-				source: pathToFileURL(pluginOneDir).href,
+				source: pluginOneSource,
 				dataDir: multiPluginDataDir,
 			});
 			loadFixturePlugin({
-				source: pathToFileURL(pluginTwoDir).href,
+				source: pluginTwoSource,
 				dataDir: multiPluginDataDir,
 			});
 
@@ -1260,11 +1262,11 @@ export const commands = {
 			// Verify the source for each plugin is preserved correctly by checking the registry
 			// Each plugin's source should point to its own directory, not the other plugin's directory
 			assert.ok(
-				listOutput.includes(pluginOneDir),
+				listOutput.includes(pluginOneSource),
 				`Plugin list should include first plugin source. Output: ${listOutput}`,
 			);
 			assert.ok(
-				listOutput.includes(pluginTwoDir),
+				listOutput.includes(pluginTwoSource),
 				`Plugin list should include second plugin source. Output: ${listOutput}`,
 			);
 		} finally {

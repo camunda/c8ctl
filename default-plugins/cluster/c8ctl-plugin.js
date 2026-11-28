@@ -21,6 +21,7 @@ import {
   rmSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   readSync,
   statSync,
 } from 'node:fs';
@@ -38,9 +39,17 @@ import { fileURLToPath } from 'node:url';
 
 // C8CTL_C8RUN_DOWNLOAD_URL overrides the download center base URL (e.g. for
 // mirrors or tests that must not depend on network access).
-const DOWNLOAD_BASE_URL = (
+export function stripTrailingSlashes(value) {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+const DOWNLOAD_BASE_URL = `${stripTrailingSlashes(
   process.env.C8CTL_C8RUN_DOWNLOAD_URL || 'https://downloads.camunda.cloud/release/camunda/c8run/'
-).replace(/\/*$/, '/');
+)}/`;
 
 const _pluginPackageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
@@ -1532,14 +1541,19 @@ export function findC8RunBinaryPath(config) {
 
   for (const versionDir of versionDirs) {
     const binaryPath = join(installDir, versionDir, platformInfo.executable);
-    if (existsSync(binaryPath)) {
+    if (existsSync(binaryPath) && statSync(binaryPath).isFile()) {
       return binaryPath;
     }
   }
 
   const directPath = join(installDir, platformInfo.executable);
-  if (existsSync(directPath)) {
+  if (existsSync(directPath) && statSync(directPath).isFile()) {
     return directPath;
+  }
+
+  const nestedPath = join(installDir, 'c8run', platformInfo.executable);
+  if (existsSync(nestedPath) && statSync(nestedPath).isFile()) {
+    return nestedPath;
   }
 
   return null;
@@ -2040,6 +2054,11 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
 
+  // Retire stale pidfiles using the prior signatures before dropping the stale
+  // record and spawning a replacement, so a reused PID cannot be checked
+  // against the old process if startup is interrupted before recording anew.
+  clearStaleRunningClusterRecord(config.cacheDir);
+
   logger.info('Starting Camunda 8 local cluster...');
 
   // Persist the chosen port BEFORE spawning c8run. If c8ctl is interrupted
@@ -2063,12 +2082,15 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
   });
 
   if (typeof proc.pid !== 'number') {
-    // spawn() reports this failure via an async 'error' event; without a
-    // listener it would crash the process while the hints are flushed below.
-    proc.on('error', (err) => logger.error(`Failed to spawn c8run: ${err.message}`));
+    // spawn() reports this failure via an async 'error' event. Wait for it so
+    // the actionable OS error is logged before the process exits.
+    const spawnError = await new Promise((resolve) => {
+      proc.once('error', resolve);
+    });
     if (!hasRunningClusterPidfiles(config.cacheDir)) {
       rmSync(portFile, { force: true });
     }
+    logger.error(`Failed to spawn c8run: ${spawnError.message}`);
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
     logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
@@ -2307,22 +2329,728 @@ export function processStartSignature(pid) {
   return null;
 }
 
-/**
- * True when `pid` is alive AND, where we captured a start signature for it, that
- * signature still matches — i.e. it is the ORIGINAL recorded process, not an
- * unrelated one that reused the PID after the original exited. A recorded entry
- * with NO signature is trusted (liveness only) ONLY on platforms that cannot
- * fingerprint at all; on a fingerprinting platform our writer never persists a
- * signature-less PID (#568), so a signature-less entry there can only be a
- * stale/legacy/hand-edited `cluster.pids` and is rejected rather than risk
- * signalling a reused, unrelated process. When a signature WAS recorded but the
- * platform cannot reproduce one now (transient `ps` failure), the guard still
- * degrades to liveness only, never inventing a false negative that would strand
- * a real orphan.
- */
-export function recordedPidIsLive(pid, signature) {
-  if (!isPidAlive(pid)) {
+function getProcessCommandLine(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  const platform = osPlatform();
+  try {
+    if (platform === 'linux') {
+      const commandLine = readFileSync(`/proc/${pid}/cmdline`, 'utf-8')
+        .split('\0');
+      if (commandLine.at(-1) === '') {
+        commandLine.pop();
+      }
+      return commandLine.length ? commandLine : null;
+    }
+    if (platform === 'darwin' || platform.endsWith('bsd')) {
+      const commandLine = execFileSync(
+        'ps',
+        ['-o', 'command=', '-p', String(pid)],
+        { encoding: 'utf-8', timeout: 3000 },
+      ).trim();
+      return commandLine || null;
+    }
+    if (platform === 'win32') {
+      const commandLine = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+            'if ($p) { $p.CommandLine }',
+        ],
+        { encoding: 'utf-8', timeout: 10000 },
+      ).trim();
+      return commandLine || null;
+    }
+  } catch {
+    // Failure to inspect a process is not proof that it belongs to c8run.
+  }
+  return null;
+}
+
+function getProcessExecutablePath(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  const platform = osPlatform();
+  try {
+    if (platform === 'linux') {
+      return readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, '');
+    }
+    if (platform === 'darwin' || platform.endsWith('bsd')) {
+      const output = execFileSync(
+        'lsof',
+        ['-a', '-p', String(pid), '-d', 'txt', '-Fn'],
+        { encoding: 'utf-8', timeout: 3000 },
+      );
+      return /^n(.+)$/m.exec(output)?.[1]?.trim() || null;
+    }
+    if (platform === 'win32') {
+      const output = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+            'if ($p) { $p.ExecutablePath }',
+        ],
+        { encoding: 'utf-8', timeout: 10000 },
+      ).trim();
+      return output || null;
+    }
+  } catch {
+    // Without the OS executable image, command-line text cannot prove ownership.
+  }
+  return null;
+}
+
+function findCommandLinePathMatch(commandLine, path) {
+  const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
+  const actual = normalizeProcessPath(commandLine);
+  let index = actual.indexOf(expected);
+
+  while (index !== -1) {
+    const previous = actual[index - 1];
+    const next = actual[index + expected.length];
+    // BSD ps can flatten argv; paths after JVM options are not classpath evidence.
+    const hasJvmOptionBeforePath =
+      /(?:^|\s)-{1,2}[A-Za-z]/.test(actual.slice(0, index));
+    if (
+      (previous === undefined || /[\s"':;]/.test(previous)) &&
+      (next === undefined || /[\s"'/:,*;]/.test(next)) &&
+      !hasJvmOptionBeforePath
+    ) {
+      return { start: index, end: index + expected.length };
+    }
+    index = actual.indexOf(expected, index + 1);
+  }
+
+  return null;
+}
+
+function originalOffsetForNormalizedProcessPath(value, normalizedOffset) {
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (normalizeProcessPath(value.slice(0, middle)).length < normalizedOffset) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+function commandLineIncludesPath(commandLine, path) {
+  return findCommandLinePathMatch(commandLine, path) !== null;
+}
+
+function normalizeProcessPath(value) {
+  const normalized = value.replace(/\\/g, '/');
+  return osPlatform() === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function commandLineArgumentMatchesPath(argument, expected) {
+  return (
+    stripTrailingSlashes(
+      normalizeProcessPath(argument.replace(/^["']+|["']+$/g, '')),
+    ) === expected
+  );
+}
+
+function commandLineStartsWithPath(commandLine, expected) {
+  const actual = normalizeProcessPath(commandLine.trimStart()).replace(
+    /^["']+/,
+    '',
+  );
+  if (!actual.startsWith(expected)) {
     return false;
+  }
+  return (
+    actual.length === expected.length ||
+    /["'\s&|;]/.test(actual[expected.length])
+  );
+}
+
+function readCommandLineArgument(commandLine) {
+  const match = /^\s*(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(commandLine);
+  if (!match) {
+    return null;
+  }
+  return {
+    argument: match[1] ?? match[2] ?? match[3],
+    end: match[0].length,
+  };
+}
+
+function commandLineExecutableName(argument) {
+  return argument.replace(/\\/g, '/').split('/').at(-1).toLowerCase();
+}
+
+function commandLineAfterCmdOption(commandLine) {
+  let remainder = commandLine.trimStart();
+  while (remainder) {
+    const parsed = readCommandLineArgument(remainder);
+    if (!parsed) {
+      return null;
+    }
+    const option = parsed.argument.toLowerCase();
+    const next = remainder.slice(parsed.end);
+    if (option === '/c' || option === '/k') {
+      return next;
+    }
+    if (!option.startsWith('/')) {
+      return null;
+    }
+    remainder = next.trimStart();
+  }
+  return null;
+}
+
+function commandLineStartsWithScriptPath(commandLine, expected) {
+  if (commandLineStartsWithPath(commandLine, expected)) {
+    return true;
+  }
+  const parsed = readCommandLineArgument(commandLine);
+  if (!parsed) {
+    return false;
+  }
+  if (commandLineArgumentMatchesPath(parsed.argument, expected)) {
+    return true;
+  }
+  if (['-c', '-lc', '-ec'].includes(parsed.argument.toLowerCase())) {
+    return commandLineStartsWithPath(
+      commandLine.slice(parsed.end),
+      expected,
+    );
+  }
+  return false;
+}
+
+function commandLineIncludesArgumentPath(
+  commandLine,
+  path,
+  { allowArgv0 = true } = {},
+) {
+  const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
+  if (Array.isArray(commandLine)) {
+    if (
+      commandLine.length === 0 ||
+      commandLine[0] === undefined
+    ) {
+      return false;
+    }
+    if (
+      allowArgv0 &&
+      commandLineArgumentMatchesPath(commandLine[0], expected)
+    ) {
+      return true;
+    }
+
+    const executableName = commandLineExecutableName(commandLine[0]);
+    if (executableName === 'cmd' || executableName === 'cmd.exe') {
+      const optionIndex = commandLine.findIndex(
+        (argument, index) => index > 0 && /^\/[ck]$/i.test(argument),
+      );
+      return (
+        optionIndex !== -1 &&
+        commandLineStartsWithPath(
+          commandLine.slice(optionIndex + 1).join(' '),
+          expected,
+        )
+      );
+    }
+    if (['sh', 'bash', 'dash', 'zsh', 'ksh'].includes(executableName)) {
+      return (
+        commandLineArgumentMatchesPath(commandLine[1] ?? '', expected) ||
+        commandLineStartsWithScriptPath(
+          commandLine.slice(1).join(' '),
+          expected,
+        )
+      );
+    }
+    return false;
+  }
+
+  if (allowArgv0 && commandLineStartsWithPath(commandLine, expected)) {
+    return true;
+  }
+  const firstArgument = readCommandLineArgument(commandLine);
+  if (!firstArgument) {
+    return false;
+  }
+  if (
+    allowArgv0 &&
+    commandLineArgumentMatchesPath(firstArgument.argument, expected)
+  ) {
+    return true;
+  }
+
+  const executableName = commandLineExecutableName(firstArgument.argument);
+  const remainder = commandLine.slice(firstArgument.end);
+  if (executableName === 'cmd' || executableName === 'cmd.exe') {
+    const command = commandLineAfterCmdOption(remainder);
+    return command !== null && commandLineStartsWithPath(command, expected);
+  }
+  if (['sh', 'bash', 'dash', 'zsh', 'ksh'].includes(executableName)) {
+    return commandLineStartsWithScriptPath(remainder, expected);
+  }
+  return false;
+}
+
+function componentLauncherPathMatches(
+  commandLine,
+  componentBin,
+  { allowArgv0 = true } = {},
+) {
+  return (
+    commandLineIncludesArgumentPath(commandLine, componentBin, {
+      allowArgv0,
+    }) ||
+    commandLineIncludesArgumentPath(commandLine, `${componentBin}.bat`, {
+      allowArgv0,
+    })
+  );
+}
+
+function isInsideQuotedCommandLine(commandLine, position) {
+  let quote = null;
+  for (let index = 0; index < position; index += 1) {
+    const character = commandLine[index];
+    if (character !== '"' && character !== "'") {
+      continue;
+    }
+
+    let backslashCount = 0;
+    for (
+      let previous = index - 1;
+      previous >= 0 && commandLine[previous] === '\\';
+      previous -= 1
+    ) {
+      backslashCount += 1;
+    }
+    if (backslashCount % 2 !== 0) {
+      continue;
+    }
+
+    if (quote === character) {
+      quote = null;
+    } else if (quote === null) {
+      quote = character;
+    }
+  }
+  return quote !== null;
+}
+
+function findCommandLineMatchOutsideQuotes(commandLine, pattern) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  for (const match of commandLine.matchAll(globalPattern)) {
+    if (
+      match.index !== undefined &&
+      !isInsideQuotedCommandLine(commandLine, match.index)
+    ) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function findLastCommandLineMatchOutsideQuotes(commandLine, pattern) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  let lastMatch = null;
+  for (const match of commandLine.matchAll(globalPattern)) {
+    if (
+      match.index !== undefined &&
+      !isInsideQuotedCommandLine(commandLine, match.index)
+    ) {
+      lastMatch = match;
+    }
+  }
+  return lastMatch;
+}
+
+const JAVA_CLASSPATH_OPTIONS = new Set(['-cp', '-classpath', '--class-path']);
+const JAVA_OPTIONS_WITH_ARGUMENTS = new Set([
+  ...JAVA_CLASSPATH_OPTIONS,
+  '-p',
+  '--module-path',
+  '--upgrade-module-path',
+  '--limit-modules',
+  '--add-modules',
+  '--add-exports',
+  '--add-opens',
+  '--add-reads',
+  '--patch-module',
+  '--enable-native-access',
+  '--system',
+]);
+
+function isJavaLaunchModeOption(argument) {
+  return (
+    argument === '-jar' ||
+    argument === '-m' ||
+    argument === '--module' ||
+    argument.startsWith('--module=') ||
+    argument.startsWith('-m=') ||
+    argument === '--source' ||
+    argument.startsWith('--source=')
+  );
+}
+
+function isJavaExecutable(commandLine) {
+  const firstArgument = Array.isArray(commandLine)
+    ? commandLine[0]
+    : (
+        /^\s*(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(commandLine) || []
+      ).slice(1).find(Boolean);
+  if (!firstArgument) {
+    return false;
+  }
+  const executableName = firstArgument
+    .replace(/\\/g, '/')
+    .split('/')
+    .at(-1)
+    .toLowerCase();
+  return /^javaw?(?:\.exe)?$/.test(executableName);
+}
+
+function isJavaExecutableImagePath(executablePath) {
+  if (typeof executablePath !== 'string') {
+    return false;
+  }
+  const executableName = basename(executablePath.replace(/\\/g, '/')).toLowerCase();
+  return /^javaw?(?:\.exe)?$/.test(executableName);
+}
+
+function isSupportedScriptInterpreterImagePath(executablePath) {
+  if (typeof executablePath !== 'string') {
+    return false;
+  }
+  const executableName = basename(executablePath.replace(/\\/g, '/')).toLowerCase();
+  if (osPlatform() === 'win32') {
+    return executableName === 'cmd' || executableName === 'cmd.exe';
+  }
+  return ['sh', 'bash', 'dash', 'zsh', 'ksh'].includes(executableName);
+}
+
+function findJavaClassLaunch(commandLine) {
+  let classpath;
+  for (let index = 1; index < commandLine.length; index += 1) {
+    const argument = commandLine[index];
+    if (JAVA_CLASSPATH_OPTIONS.has(argument)) {
+      classpath = commandLine[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('--class-path=')) {
+      classpath = argument.slice('--class-path='.length);
+      continue;
+    }
+    if (isJavaLaunchModeOption(argument)) {
+      return null;
+    }
+    if (JAVA_OPTIONS_WITH_ARGUMENTS.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      continue;
+    }
+    return { classpath, mainClass: argument };
+  }
+  return null;
+}
+
+function hasEarlierJavaLaunchArgument(commandLine) {
+  const argumentsList = commandLine.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const argument = argumentsList[index].replace(/^(['"])(.*)\1$/, '$2');
+    if (isJavaLaunchModeOption(argument)) {
+      return true;
+    }
+    if (JAVA_OPTIONS_WITH_ARGUMENTS.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function findFirstJavaLaunchArgument(commandLine) {
+  const argumentsList = commandLine.matchAll(/"[^"]*"|'[^']*'|\S+/g);
+  let skipNext = false;
+  for (const match of argumentsList) {
+    const rawArgument = match[0];
+    const argument = rawArgument.replace(/^(['"])(.*)\1$/, '$2');
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (isJavaLaunchModeOption(argument)) {
+      return null;
+    }
+    if (JAVA_OPTIONS_WITH_ARGUMENTS.has(argument)) {
+      skipNext = true;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      continue;
+    }
+    return { argument, index: match.index };
+  }
+  return null;
+}
+
+function hasAmbiguousJavaArgumentsAfterMainClass(commandLine, mainClassIndex) {
+  const argumentsAfterMainClass =
+    commandLine.slice(mainClassIndex).match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  return argumentsAfterMainClass.slice(1).some((rawArgument) => {
+    const argument = rawArgument.replace(/^(['"])(.*)\1$/, '$2');
+    return (
+      isJavaLaunchModeOption(argument) ||
+      JAVA_OPTIONS_WITH_ARGUMENTS.has(argument) ||
+      /^-(?:D|X|agentlib:|agentpath:|javaagent:)/.test(argument) ||
+      /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(argument)
+    );
+  });
+}
+
+function matchesJavaMainClass(argument, mainClassPattern) {
+  const match = mainClassPattern.exec(argument);
+  return match !== null && match[0] === argument;
+}
+
+function commandLineIncludesJavaClasspath(
+  commandLine,
+  classpathPath,
+  mainClassPattern,
+) {
+  if (Array.isArray(commandLine)) {
+    if (!isJavaExecutable(commandLine)) {
+      return false;
+    }
+    const launch = findJavaClassLaunch(commandLine);
+    return Boolean(
+      launch &&
+        launch.mainClass &&
+        matchesJavaMainClass(launch.mainClass, mainClassPattern) &&
+        launch.classpath &&
+        !launch.classpath.startsWith('-') &&
+        commandLineIncludesPath(launch.classpath, classpathPath),
+    );
+  }
+
+  if (!isJavaExecutable(commandLine)) {
+    return false;
+  }
+  const classpathOption = findLastCommandLineMatchOutsideQuotes(
+    commandLine,
+    /(?:^|\s)(?:-cp|-classpath|--class-path)(?:\s+|=)/,
+  );
+  if (!classpathOption || classpathOption.index === undefined) {
+    return false;
+  }
+  if (
+    hasEarlierJavaLaunchArgument(
+      commandLine.slice(
+        /^\s*(?:"[^"]*"|'[^']*'|\S+)\s*/.exec(commandLine)?.[0].length || 0,
+        classpathOption.index,
+      ),
+    )
+  ) {
+    return false;
+  }
+
+  const classpathStart = classpathOption.index + classpathOption[0].length;
+  const classpathAndOptions = commandLine.slice(classpathStart);
+  const classpathMatch = findCommandLinePathMatch(
+    classpathAndOptions,
+    classpathPath,
+  );
+  if (classpathMatch === null) {
+    return false;
+  }
+  const normalizedClasspathAndOptions =
+    normalizeProcessPath(classpathAndOptions);
+  const classpathPrefix = normalizedClasspathAndOptions.slice(
+    0,
+    classpathMatch.start,
+  );
+  if (
+    /\s/.test(classpathPrefix) ||
+    /(?:^|[\s"'/:;])\/?-D[^/\s:=;]+[:=]/i.test(classpathPrefix)
+  ) {
+    return false;
+  }
+  const argumentsAfterClasspath = classpathAndOptions
+    .slice(
+      originalOffsetForNormalizedProcessPath(
+        classpathAndOptions,
+        classpathMatch.end,
+      ),
+    )
+    .replace(/^[/*:;][^\s]*\s*/, '')
+    .replace(/^["']\s*/, '');
+  const launch = findFirstJavaLaunchArgument(argumentsAfterClasspath);
+  if (!launch || !matchesJavaMainClass(launch.argument, mainClassPattern)) {
+    return false;
+  }
+  const platform = osPlatform();
+  // BSD `ps` flattens argv; later JVM arguments can be hidden behind custom argv[0].
+  if (
+    (platform === 'darwin' || platform.endsWith('bsd')) &&
+    hasAmbiguousJavaArgumentsAfterMainClass(
+      argumentsAfterClasspath,
+      launch.index,
+    )
+  ) {
+    return false;
+  }
+  const hasJvmPropertyBeforeMainClass = findCommandLineMatchOutsideQuotes(
+    argumentsAfterClasspath.slice(0, launch.index),
+    /(?:^|\s)-D(?:[^\s=]+)?(?:=|\s|$)/,
+  );
+  return !hasJvmPropertyBeforeMainClass;
+}
+
+function commandLineIncludesConnectorsClasspath(commandLine, installDir) {
+  return commandLineIncludesJavaClasspath(
+    commandLine,
+    join(installDir, '*'),
+    /(?:^|\s)(?:io\.camunda\.connector\.runtime\.app\.ConnectorRuntimeApplication|org\.springframework\.boot\.loader(?:\.launch)?\.PropertiesLauncher)(?=\s|$)/,
+  );
+}
+
+function commandLineIncludesCamundaClasspath(commandLine, componentDir) {
+  // Windows PID files include Java descendants whose command lines omit camunda.bat.
+  return commandLineIncludesJavaClasspath(
+    commandLine,
+    join(componentDir, 'lib'),
+    /(?:^|\s)(?:io\.camunda\.[\w.$]+|org\.springframework\.boot\.loader(?:\.launch)?\.PropertiesLauncher)(?=\s|$)/,
+  );
+}
+
+export function commandLineIncludesClusterLauncher(commandLine, entry, version) {
+  const processName = basename(entry.path, '.process');
+  const component =
+    processName === 'camunda' || processName.startsWith('camunda-')
+      ? 'camunda-zeebe'
+      : processName.startsWith('connectors')
+        ? 'connectors'
+        : processName;
+  const executable = component === 'camunda-zeebe' ? 'camunda' : component;
+  const installDirs = [dirname(entry.path), dirname(dirname(entry.path))];
+
+  return installDirs.some((installDir) => {
+    const installDirName = basename(installDir);
+    const installedVersion = installDirName.startsWith('c8run-')
+      ? installDirName.slice('c8run-'.length)
+      : version;
+    const componentDir = join(installDir, `${component}-${installedVersion}`);
+    const componentBin = join(componentDir, 'bin', executable);
+    if (componentLauncherPathMatches(commandLine, componentBin)) {
+      return true;
+    }
+
+    return (
+      component === 'connectors' &&
+      commandLineIncludesConnectorsClasspath(commandLine, installDir)
+    ) || (
+      component === 'camunda-zeebe' &&
+      commandLineIncludesCamundaClasspath(commandLine, componentDir)
+    );
+  });
+}
+
+export function processExecutableMatchesClusterLauncher(
+  executablePath,
+  commandLine,
+  entry,
+  version,
+) {
+  if (typeof executablePath !== 'string') {
+    return false;
+  }
+  const processName = basename(entry.path, '.process');
+  const component =
+    processName === 'camunda' || processName.startsWith('camunda-')
+      ? 'camunda-zeebe'
+      : processName.startsWith('connectors')
+        ? 'connectors'
+        : processName;
+  const installDirs = [dirname(entry.path), dirname(dirname(entry.path))];
+
+  if (isJavaExecutableImagePath(executablePath)) {
+    if (typeof commandLine !== 'string' && !Array.isArray(commandLine)) {
+      return false;
+    }
+    return installDirs.some((installDir) => {
+      const installDirName = basename(installDir);
+      const installedVersion = installDirName.startsWith('c8run-')
+        ? installDirName.slice('c8run-'.length)
+        : version;
+      const componentDir = join(installDir, `${component}-${installedVersion}`);
+      return (
+        (component === 'connectors' &&
+          commandLineIncludesConnectorsClasspath(commandLine, installDir)) ||
+        (component === 'camunda-zeebe' &&
+          commandLineIncludesCamundaClasspath(commandLine, componentDir))
+      );
+    });
+  }
+
+  if (isSupportedScriptInterpreterImagePath(executablePath)) {
+    if (typeof commandLine !== 'string' && !Array.isArray(commandLine)) {
+      return false;
+    }
+    return installDirs.some((installDir) => {
+      const installDirName = basename(installDir);
+      const installedVersion = installDirName.startsWith('c8run-')
+        ? installDirName.slice('c8run-'.length)
+        : version;
+      const componentDir = join(installDir, `${component}-${installedVersion}`);
+      const executable = component === 'camunda-zeebe' ? 'camunda' : component;
+      return componentLauncherPathMatches(
+        commandLine,
+        join(componentDir, 'bin', executable),
+        { allowArgv0: false },
+      );
+    });
+  }
+
+  const actualPath = stripTrailingSlashes(
+    normalizeProcessPath(resolve(executablePath)),
+  );
+  return installDirs.some((installDir) => {
+    const installDirName = basename(installDir);
+    const installedVersion = installDirName.startsWith('c8run-')
+      ? installDirName.slice('c8run-'.length)
+      : version;
+    const componentDir = join(installDir, `${component}-${installedVersion}`);
+    const executable = component === 'camunda-zeebe' ? 'camunda' : component;
+    const expectedPath = stripTrailingSlashes(
+      normalizeProcessPath(resolve(componentDir, 'bin', executable)),
+    );
+    return actualPath === expectedPath;
+  });
+}
+
+function recordedPidStatus(pid, signature) {
+  if (!isPidAlive(pid)) {
+    return 'stale';
   }
   if (!signature) {
     // No signature recorded. On a fingerprinting platform this can only be a
@@ -2331,10 +3059,22 @@ export function recordedPidIsLive(pid, signature) {
     // — refuse it. Only non-fingerprinting platforms keep the liveness-only
     // degrade, since there no recorded PID can ever carry a signature and
     // rejecting would strand every real orphan (#560/#568).
-    return !platformSupportsProcessSignature();
+    return platformSupportsProcessSignature() ? 'stale' : 'live';
   }
   const current = processStartSignature(pid);
-  return current === null || current === signature;
+  if (current === null) {
+    // Unknown identity stays visible to status/stop, but is never signalable.
+    return platformSupportsProcessSignature() ? 'unknown' : 'live';
+  }
+  return current === signature ? 'live' : 'stale';
+}
+
+/**
+ * True only when the PID is alive and its recorded identity is confirmed. An
+ * unavailable identity query is unknown, not proof that the PID was reused.
+ */
+export function recordedPidIsLive(pid, signature) {
+  return recordedPidStatus(pid, signature) === 'live';
 }
 
 /**
@@ -2343,25 +3083,41 @@ export function recordedPidIsLive(pid, signature) {
  * otherwise every `c8run-*` install dir is scanned. Each install dir and its
  * immediate subdirectories are scanned (max depth 1) rather than a full
  * recursive DFS — c8run installs can contain large extracted trees, logs, and
- * data that would make a deep walk slow. Returns parsed positive integers
+ * data that would make a deep walk slow. Returns each distinct parsed PID
  * (alive or not); the caller decides liveness.
  */
-export function collectPidfilePids(cacheDir, { version } = {}) {
-  const pids = [];
+function parsePidfilePids(contents) {
+  const pids = new Set();
+  for (const entry of contents.split(/[\r\n,;]/)) {
+    const pid = Number(entry.trim());
+    if (Number.isSafeInteger(pid) && pid > 0) {
+      pids.add(pid);
+    }
+  }
+  return [...pids];
+}
+
+function collectPidfileEntries(cacheDir, { version } = {}) {
+  const pidfiles = [];
   if (!existsSync(cacheDir)) {
-    return pids;
+    return pidfiles;
   }
 
   let versionDirs;
   if (version) {
-    versionDirs = [join(cacheDir, `c8run-${version}`)];
+    versionDirs = [
+      { version, path: join(cacheDir, `c8run-${version}`) },
+    ];
   } else {
     versionDirs = readdirSync(cacheDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name.startsWith('c8run-'))
-      .map((entry) => join(cacheDir, entry.name));
+      .map((entry) => ({
+        version: entry.name.slice('c8run-'.length),
+        path: join(cacheDir, entry.name),
+      }));
   }
 
-  for (const versionDir of versionDirs) {
+  for (const { version: pidfileVersion, path: versionDir } of versionDirs) {
     let entries;
     try {
       entries = readdirSync(versionDir, { withFileTypes: true });
@@ -2389,25 +3145,284 @@ export function collectPidfilePids(cacheDir, { version } = {}) {
         if (!entry.isFile() || !entry.name.endsWith('.process')) {
           continue;
         }
-        let pid;
+        let contents;
         try {
-          pid = Number.parseInt(readFileSync(join(dir, entry.name), 'utf-8').trim(), 10);
+          contents = readFileSync(join(dir, entry.name), 'utf-8');
         } catch {
           // Pidfile may have been removed between listing and reading.
           continue;
         }
-        if (Number.isInteger(pid) && pid > 0) {
-          pids.push(pid);
+        for (const pid of parsePidfilePids(contents)) {
+          pidfiles.push({
+            path: join(dir, entry.name),
+            pid,
+            version: pidfileVersion,
+          });
         }
       }
     }
   }
 
-  return pids;
+  return pidfiles;
+}
+
+export function collectPidfilePids(cacheDir, options = {}) {
+  return collectPidfileEntries(cacheDir, options).map(({ pid }) => pid);
+}
+
+function pidfileIdentityKey(version, pid) {
+  return `${version}\0${pid}`;
+}
+
+function retireStalePidfileEntry({ path, pid }) {
+  let contents;
+  try {
+    contents = readFileSync(path, 'utf-8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+
+  const pids = parsePidfilePids(contents);
+  if (!pids.includes(pid)) {
+    return;
+  }
+
+  // Keep the process-tree entries that are still live when pruning a stale PID.
+  const remainingPids = pids.filter(
+    (candidate) => candidate !== pid && isPidAlive(candidate),
+  );
+  if (remainingPids.length === 0) {
+    rmSync(path, { force: true });
+    return;
+  }
+
+  try {
+    writeFileSync(path, remainingPids.join('\n'));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
+
+function livePidfileEntries(
+  cacheDir,
+  { version, knownSignatures = new Map(), retireStale = false } = {},
+) {
+  const signatureChecks = new Map();
+  const liveEntries = [];
+
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    const key = pidfileIdentityKey(entry.version, entry.pid);
+    const recordedSignature = knownSignatures.get(key);
+    if (!isPidAlive(entry.pid)) {
+      if (retireStale) {
+        retireStalePidfileEntry(entry);
+      }
+      continue;
+    }
+
+    if (typeof recordedSignature !== 'string') {
+      liveEntries.push(entry);
+      continue;
+    }
+
+    if (!signatureChecks.has(key)) {
+      signatureChecks.set(
+        key,
+        recordedPidStatus(entry.pid, recordedSignature) !== 'stale',
+      );
+    }
+    if (signatureChecks.get(key)) {
+      liveEntries.push(entry);
+    } else if (retireStale) {
+      retireStalePidfileEntry(entry);
+    }
+  }
+
+  return liveEntries;
+}
+
+function hasUnverifiablePidfileSurvivor(cacheDir, version, signatures) {
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    const key = pidfileIdentityKey(entry.version, entry.pid);
+    const recordedSignature = signatures.get(key);
+    if (!signatures.has(key)) {
+      continue;
+    }
+    if (!isPidAlive(entry.pid)) {
+      retireStalePidfileEntry(entry);
+      continue;
+    }
+    if (typeof recordedSignature !== 'string') {
+      return true;
+    }
+
+    const currentSignature = processStartSignature(entry.pid);
+    if (currentSignature === null) {
+      if (!isPidAlive(entry.pid)) {
+        retireStalePidfileEntry(entry);
+        continue;
+      }
+      return true;
+    }
+    if (currentSignature !== recordedSignature) {
+      retireStalePidfileEntry(entry);
+    }
+  }
+  return false;
+}
+
+function revalidatePidfileAttempt(
+  cacheDir,
+  version,
+  pidfileAttempt,
+  previousSignatures,
+  record,
+) {
+  const entriesByPid = new Map();
+  const stalePids = new Set();
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    const entries = entriesByPid.get(entry.pid) ?? [];
+    entries.push(entry);
+    entriesByPid.set(entry.pid, entries);
+
+    if (!isPidAlive(entry.pid)) {
+      stalePids.add(entry.pid);
+      retireStalePidfileEntry(entry);
+      continue;
+    }
+    if (!pidfileAttempt.has(entry.pid)) {
+      const recordedIdentity = pidfileRecordIdentity(record, version, entry.pid);
+      const recordedSignature = recordedIdentity.signature;
+      const signature = recordedSignature ?? processStartSignature(entry.pid);
+      pidfileAttempt.set(entry.pid, {
+        signature,
+        recordedSignature,
+        recordedOwnership: recordedIdentity.recordedOwnership,
+      });
+      previousSignatures.set(entry.pid, recordedSignature ?? signature);
+    }
+  }
+
+  let hasUnverifiablePidfile = false;
+  const checkedSignatures = new Map();
+  if (platformSupportsProcessSignature()) {
+    for (const [pid, identity] of pidfileAttempt) {
+      if (stalePids.has(pid) || !isPidAlive(pid)) {
+        stalePids.add(pid);
+        continue;
+      }
+
+      const expectedSignature =
+        identity.recordedSignature ??
+        identity.signature ??
+        pidfileRecordIdentity(record, version, pid).signature;
+      if (typeof expectedSignature !== 'string') {
+        hasUnverifiablePidfile = true;
+        continue;
+      }
+
+      if (!checkedSignatures.has(pid)) {
+        checkedSignatures.set(pid, processStartSignature(pid));
+      }
+      const currentSignature = checkedSignatures.get(pid);
+      if (currentSignature === null) {
+        if (isPidAlive(pid)) {
+          hasUnverifiablePidfile = true;
+        } else {
+          stalePids.add(pid);
+        }
+      } else if (currentSignature !== expectedSignature) {
+        stalePids.add(pid);
+      }
+    }
+  }
+
+  for (const pid of stalePids) {
+    for (const entry of entriesByPid.get(pid) ?? []) {
+      retireStalePidfileEntry(entry);
+    }
+    pidfileAttempt.delete(pid);
+    previousSignatures.delete(pid);
+  }
+
+  return hasUnverifiablePidfile;
+}
+
+function hasUnverifiablePidfileOwnership(cacheDir, version, pidfileAttempt) {
+  for (const entry of collectPidfileEntries(cacheDir, { version })) {
+    if (!isPidAlive(entry.pid)) {
+      continue;
+    }
+    if (pidfileAttempt.get(entry.pid)?.recordedOwnership) {
+      continue;
+    }
+    const executablePath = getProcessExecutablePath(entry.pid);
+    const commandLine = getProcessCommandLine(entry.pid);
+    if (
+      !processExecutableMatchesClusterLauncher(
+        executablePath,
+        commandLine,
+        entry,
+        version,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getPidRecordPath(cacheDir) {
   return join(cacheDir, PID_RECORD_FILE);
+}
+
+function sanitizePidfileSurvivors(survivors) {
+  if (!Array.isArray(survivors)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const clean = [];
+  for (const survivor of survivors) {
+    if (!survivor || typeof survivor !== 'object' || Array.isArray(survivor)) {
+      continue;
+    }
+    const { version, pid, signature } = survivor;
+    if (
+      typeof version !== 'string' ||
+      !version ||
+      !Number.isInteger(pid) ||
+      pid <= 0 ||
+      (signature !== null &&
+        signature !== undefined &&
+        (typeof signature !== 'string' || !signature))
+    ) {
+      continue;
+    }
+    try {
+      validateVersionSpec(version);
+    } catch {
+      continue;
+    }
+
+    const key = `${version}\0${pid}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    clean.push({
+      version,
+      pid,
+      signature: typeof signature === 'string' ? signature : null,
+      signalable:
+        survivor.signalable === true &&
+        (!platformSupportsProcessSignature() || typeof signature === 'string'),
+    });
+  }
+  return clean;
 }
 
 /**
@@ -2461,11 +3476,21 @@ export function readRunningClusterRecord(cacheDir) {
   } catch {
     return null;
   }
-  return { version, pids, signatures, ...(parsed.startupFailed === true ? { startupFailed: true } : {}) };
+  const pidfileSurvivors = sanitizePidfileSurvivors(parsed.pidfileSurvivors);
+  return {
+    version,
+    pids,
+    signatures,
+    pidfileSurvivors,
+    ...(parsed.startupFailed === true ? { startupFailed: true } : {}),
+  };
 }
 
 /** Persist the durable running-cluster PID record. */
-export function writeRunningClusterRecord(cacheDir, { version, pids, signatures, startupFailed }) {
+export function writeRunningClusterRecord(
+  cacheDir,
+  { version, pids, signatures, pidfileSurvivors, startupFailed },
+) {
   mkdirSync(cacheDir, { recursive: true });
   const cleanPids = Array.isArray(pids)
     ? [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]
@@ -2479,6 +3504,7 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures,
       }
     }
   }
+  const cleanPidfileSurvivors = sanitizePidfileSurvivors(pidfileSurvivors);
   // `cluster.pids` is the ONLY recovery handle once an install dir disappears,
   // so the write must be crash-safe: serialise to a sibling temp file and
   // atomically rename it into place. An interruption then leaves either the
@@ -2490,6 +3516,7 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures,
     version: version ?? null,
     pids: cleanPids,
     signatures: cleanSignatures,
+    pidfileSurvivors: cleanPidfileSurvivors,
     ...(startupFailed === true ? { startupFailed: true } : {}),
   });
   try {
@@ -2503,6 +3530,140 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures,
     }
     throw error;
   }
+}
+
+function pidfileSurvivorIsLive(survivor) {
+  if (!survivor.signature && platformSupportsProcessSignature()) {
+    // Keep an unverified survivor visible so stop/purge cannot claim success,
+    // but never signal it: a pidfile without a captured identity may be stale.
+    return isPidAlive(survivor.pid);
+  }
+  return recordedPidStatus(survivor.pid, survivor.signature) !== 'stale';
+}
+
+function livePidfileSurvivors(record) {
+  return (record?.pidfileSurvivors ?? []).filter(pidfileSurvivorIsLive);
+}
+
+function liveUnverifiedPidfileSurvivors(cacheDir) {
+  return livePidfileSurvivors(readRunningClusterRecord(cacheDir))
+    .filter((survivor) => !survivor.signalable)
+    .map((survivor) => survivor.pid);
+}
+
+function recordedClusterPidSignatures(record) {
+  const signatures = new Map();
+  for (const pid of record.pids) {
+    signatures.set(pidfileIdentityKey(record.version, pid), {
+      version: record.version,
+      pid,
+      signature: record.signatures?.[pid],
+    });
+  }
+  for (const survivor of record.pidfileSurvivors ?? []) {
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
+    if (survivor.signalable && !signatures.has(key)) {
+      signatures.set(key, survivor);
+    }
+  }
+  return signatures;
+}
+
+function pidfileRecordIdentity(record, version, pid) {
+  if (record?.version === version && record.pids.includes(pid)) {
+    const signature = record.signatures?.[pid] ?? null;
+    return {
+      signature,
+      recordedOwnership:
+        !platformSupportsProcessSignature() || typeof signature === 'string',
+    };
+  }
+
+  const survivors = record?.pidfileSurvivors ?? [];
+  const survivor =
+    survivors.find(
+      (entry) =>
+        entry.version === version && entry.pid === pid && entry.signalable,
+    ) ??
+    survivors.find((entry) => entry.version === version && entry.pid === pid);
+  if (!survivor) {
+    return { signature: null, recordedOwnership: false };
+  }
+
+  const signature = survivor.signature ?? null;
+  return {
+    signature,
+    recordedOwnership:
+      survivor.signalable === true &&
+      (!platformSupportsProcessSignature() || typeof signature === 'string'),
+  };
+}
+
+function pidfileValidationSignatures(record) {
+  const signatures = new Map();
+  if (!record) {
+    return signatures;
+  }
+  for (const pid of record.pids) {
+    signatures.set(
+      pidfileIdentityKey(record.version, pid),
+      record.signatures?.[pid],
+    );
+  }
+  for (const survivor of record?.pidfileSurvivors ?? []) {
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
+    if (survivor.signature && typeof signatures.get(key) !== 'string') {
+      signatures.set(key, survivor.signature);
+    }
+  }
+  return signatures;
+}
+
+function nonSignalablePidfileSurvivorSignatures(record) {
+  if (!platformSupportsProcessSignature()) {
+    return new Map();
+  }
+
+  const signatures = new Map();
+  for (const survivor of record?.pidfileSurvivors ?? []) {
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
+    if (
+      !survivor.signalable &&
+      !pidfileRecordIdentity(record, survivor.version, survivor.pid)
+        .recordedOwnership &&
+      !signatures.has(key)
+    ) {
+      signatures.set(key, survivor.signature ?? null);
+    }
+  }
+  return signatures;
+}
+
+function mergePidfileSurvivors(record, discoveredSurvivors) {
+  const priorSurvivors = record?.pidfileSurvivors ?? [];
+  const merged = priorSurvivors.filter(pidfileSurvivorIsLive);
+  const seen = new Set(merged.map((survivor) => `${survivor.version}\0${survivor.pid}`));
+  const recordedPids = new Set(record?.pids ?? []);
+
+  for (const survivor of sanitizePidfileSurvivors(discoveredSurvivors)) {
+    const key = pidfileIdentityKey(survivor.version, survivor.pid);
+    if (seen.has(key)) {
+      continue;
+    }
+    if (record?.version === survivor.version && recordedPids.has(survivor.pid)) {
+      if (
+        !record?.signatures?.[survivor.pid] &&
+        platformSupportsProcessSignature()
+      ) {
+        seen.add(key);
+        merged.push({ ...survivor, signature: null, signalable: false });
+      }
+      continue;
+    }
+    seen.add(key);
+    merged.push(survivor);
+  }
+  return merged;
 }
 
 /** Remove the durable running-cluster PID record if present. */
@@ -2523,7 +3684,18 @@ export function clearRunningClusterRecord(cacheDir) {
  * record is absent or still has at least one live recorded PID.
  */
 export function clearStaleRunningClusterRecord(cacheDir) {
-  if (readRunningClusterRecord(cacheDir) && liveRecordedPids(cacheDir).length === 0) {
+  const record = readRunningClusterRecord(cacheDir);
+  if (record) {
+    livePidfileEntries(cacheDir, {
+      knownSignatures: pidfileValidationSignatures(record),
+      retireStale: true,
+    });
+  }
+  if (
+    record &&
+    liveRecordedPids(cacheDir).length === 0 &&
+    livePidfileSurvivors(record).length === 0
+  ) {
     clearRunningClusterRecord(cacheDir);
   }
 }
@@ -2534,7 +3706,13 @@ export function liveRecordedPids(cacheDir) {
   if (!record) {
     return [];
   }
-  return record.pids.filter((pid) => recordedPidIsLive(pid, record.signatures?.[pid]));
+  const livePids = new Set();
+  for (const { pid, signature } of recordedClusterPidSignatures(record).values()) {
+    if (recordedPidStatus(pid, signature) !== 'stale') {
+      livePids.add(pid);
+    }
+  }
+  return [...livePids];
 }
 
 /**
@@ -2638,14 +3816,24 @@ export function recordRunningClusterPids(
  * PID record attributing a live process to that version.
  */
 export function isVersionInstanceRunning(cacheDir, version) {
-  if (collectPidfilePids(cacheDir, { version }).some((pid) => isPidAlive(pid))) {
+  const record = readRunningClusterRecord(cacheDir);
+  const knownSignatures = record
+    ? pidfileValidationSignatures(record)
+    : new Map();
+  if (
+    livePidfileEntries(cacheDir, { version, knownSignatures }).length > 0
+  ) {
     return true;
   }
-  const record = readRunningClusterRecord(cacheDir);
   return Boolean(
     record &&
-      record.version === version &&
-      record.pids.some((pid) => recordedPidIsLive(pid, record.signatures?.[pid])),
+      ((record.version === version &&
+        record.pids.some((pid) =>
+          recordedPidStatus(pid, record.signatures?.[pid]) !== 'stale',
+        )) ||
+        livePidfileSurvivors(record).some(
+          (survivor) => survivor.version === version,
+        )),
   );
 }
 
@@ -2687,9 +3875,9 @@ async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {
     }
     await sleep(pollMs);
   }
-  // Confirmed gone once the ORIGINAL recorded process is no longer live — a
-  // signature mismatch (PID reuse) counts as gone: the process we tracked ended.
-  return !recordedPidIsLive(pid, signature);
+  // Only a dead PID or a confirmed signature mismatch proves the original
+  // process is gone; a failed identity query must remain incomplete.
+  return recordedPidStatus(pid, signature) === 'stale';
 }
 
 /**
@@ -2705,8 +3893,14 @@ async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {
  */
 export async function reapClusterProcesses(cacheDir) {
   const record = readRunningClusterRecord(cacheDir);
-  const signatures = record?.signatures ?? {};
-  const targets = new Set(liveRecordedPids(cacheDir));
+  const targets = new Map();
+  if (record) {
+    for (const { pid, signature } of recordedClusterPidSignatures(record).values()) {
+      if (recordedPidIsLive(pid, signature) && !targets.has(pid)) {
+        targets.set(pid, signature);
+      }
+    }
+  }
   // Guard against ever signalling the c8ctl process itself (or its parent) —
   // a cluster's Java process is never c8ctl, and tests stand in with own PIDs.
   targets.delete(process.pid);
@@ -2715,10 +3909,10 @@ export async function reapClusterProcesses(cacheDir) {
   }
 
   let reaped = 0;
-  for (const pid of targets) {
+  for (const [pid, signature] of targets) {
     // Carry the recorded start signature into termination so each signal is
     // gated on the ORIGINAL identity, not bare numeric liveness (#560).
-    if (await terminatePid(pid, { signature: signatures[pid] })) {
+    if (await terminatePid(pid, { signature })) {
       reaped += 1;
     }
   }
@@ -2730,8 +3924,13 @@ export function hasRunningClusterPidfiles(cacheDir) {
     return false;
   }
 
+  const record = readRunningClusterRecord(cacheDir);
+  const knownSignatures = record
+    ? pidfileValidationSignatures(record)
+    : new Map();
+
   // Primary signal: c8run's own .process pidfiles inside the install dirs.
-  if (collectPidfilePids(cacheDir).some((pid) => isPidAlive(pid))) {
+  if (livePidfileEntries(cacheDir, { knownSignatures }).length > 0) {
     return true;
   }
 
@@ -2739,7 +3938,174 @@ export function hasRunningClusterPidfiles(cacheDir) {
   // running version's install dir (and with it the .process pidfiles) has been
   // replaced or deleted, which would otherwise make c8ctl report the live
   // cluster as stopped and leave its process orphaned (#560).
-  return liveRecordedPids(cacheDir).length > 0;
+  return (
+    liveRecordedPids(cacheDir).length > 0 ||
+    livePidfileSurvivors(record).length > 0
+  );
+}
+
+export function hasLivePidfileProcesses(cacheDir, version, previousSignatures) {
+  const currentPids = new Set(collectPidfilePids(cacheDir, { version }));
+
+  for (const pid of previousSignatures.keys()) {
+    if (!isPidAlive(pid)) {
+      continue;
+    }
+
+    const previousSignature = previousSignatures.get(pid);
+    if (!previousSignature) {
+      return true;
+    }
+
+    const currentSignature = processStartSignature(pid);
+    if (currentSignature === null || currentSignature === previousSignature) {
+      return true;
+    }
+  }
+
+  return [...currentPids].some(
+    (pid) => !previousSignatures.has(pid) && isPidAlive(pid),
+  );
+}
+
+function findPidfileSurvivors(attempts, cacheDir) {
+  const candidates = [];
+  const latestRecord = readRunningClusterRecord(cacheDir);
+  const knownSignatures = latestRecord
+    ? pidfileValidationSignatures(latestRecord)
+    : new Map();
+  for (const { version, processes } of attempts) {
+    for (const [pid, identity] of processes) {
+      const signature = identity.recordedSignature ?? identity.signature;
+      const key = pidfileIdentityKey(version, pid);
+      if (
+        typeof signature === 'string' &&
+        typeof knownSignatures.get(key) !== 'string'
+      ) {
+        knownSignatures.set(key, signature);
+      }
+    }
+  }
+  const currentVersions = existsSync(cacheDir)
+    ? readdirSync(cacheDir, { withFileTypes: true })
+        .filter(
+          (entry) => entry.isDirectory() && entry.name.startsWith('c8run-'),
+        )
+        .map((entry) => entry.name.slice('c8run-'.length))
+    : [];
+  const currentPidfileKeys = new Set();
+  const currentSignatures = new Map();
+  for (const version of currentVersions) {
+    for (const { pid } of livePidfileEntries(cacheDir, {
+      version,
+      knownSignatures,
+      retireStale: true,
+    })) {
+      if (!isPidAlive(pid)) {
+        continue;
+      }
+
+      const key = pidfileIdentityKey(version, pid);
+      if (!currentSignatures.has(key)) {
+        currentSignatures.set(key, processStartSignature(pid));
+      }
+      const signature = currentSignatures.get(key);
+      const recordedIdentity = pidfileRecordIdentity(latestRecord, version, pid);
+      const recordedSignature = recordedIdentity.signature;
+      const recordedOwnership =
+        recordedIdentity.recordedOwnership &&
+        (!platformSupportsProcessSignature() ||
+          Boolean(recordedSignature && (!signature || signature === recordedSignature)));
+      candidates.push({
+        version,
+        pid,
+        identity: {
+          signature,
+          recordedSignature,
+          recordedOwnership,
+        },
+      });
+      currentPidfileKeys.add(key);
+    }
+  }
+
+  for (const { version, processes } of attempts) {
+    for (const [pid, identity] of processes) {
+      if (!currentPidfileKeys.has(pidfileIdentityKey(version, pid))) {
+        candidates.push({ version, pid, identity });
+      }
+    }
+  }
+
+  const survivors = new Map();
+  for (const { version, pid, identity } of candidates) {
+    if (!isPidAlive(pid)) {
+      continue;
+    }
+
+    const key = pidfileIdentityKey(version, pid);
+    const currentSignature = currentPidfileKeys.has(key)
+      ? currentSignatures.get(key)
+      : processStartSignature(pid);
+    if (
+      identity.recordedSignature &&
+      currentSignature &&
+      currentSignature !== identity.recordedSignature
+    ) {
+      continue;
+    }
+    if (
+      identity.signature &&
+      currentSignature &&
+      currentSignature !== identity.signature
+    ) {
+      continue;
+    }
+
+    // A pidfile-captured signature identifies a process but does not prove
+    // cluster ownership. Only a previously trusted record makes it signalable.
+    const signalable =
+      identity.recordedOwnership &&
+      (!platformSupportsProcessSignature() || Boolean(identity.recordedSignature));
+    const survivor = {
+      version,
+      pid,
+      signature:
+        identity.recordedSignature ?? identity.signature ?? currentSignature ?? null,
+      signalable,
+    };
+    const previous = survivors.get(key);
+    if (!previous || (signalable && !previous.signalable)) {
+      survivors.set(key, survivor);
+    }
+  }
+  return [...survivors.values()];
+}
+
+async function waitForPidfileProcessesExit(
+  cacheDir,
+  version,
+  previousSignatures,
+  { timeoutMs = 60_000, intervalMs = 250 } = {},
+) {
+  if (!hasLivePidfileProcesses(cacheDir, version, previousSignatures)) {
+    return true;
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  // Keep the polling cheap; only fingerprint PIDs that remain live at timeout.
+  while (
+    [...new Set([
+      ...previousSignatures.keys(),
+      ...collectPidfilePids(cacheDir, { version }),
+    ])].some((pid) => isPidAlive(pid))
+  ) {
+    if (Date.now() >= deadline) {
+      return !hasLivePidfileProcesses(cacheDir, version, previousSignatures);
+    }
+    await sleep(intervalMs);
+  }
+  return true;
 }
 
 // `c8run stop` only signals the cluster processes; Java can keep running for a
@@ -2754,10 +4120,26 @@ export async function waitForClusterExit(cacheDir, { timeoutMs = 60_000, interva
   return true;
 }
 
-export async function stopC8Run(config, debug = false) {
+export async function stopC8Run(
+  config,
+  debug = false,
+  { timeoutMs = 60_000, purge = false } = {},
+) {
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
+  const record = readRunningClusterRecord(config.cacheDir);
+  const pidfileSignatures = record
+    ? pidfileValidationSignatures(record)
+    : new Map();
+  const nonSignalableSurvivorSignatures = record
+    ? nonSignalablePidfileSurvivorSignatures(record)
+    : new Map();
+
+  livePidfileEntries(config.cacheDir, {
+    knownSignatures: pidfileSignatures,
+    retireStale: true,
+  });
 
   const markerExists = existsSync(markerFile);
   const clusterAppearsRunning = hasRunningClusterPidfiles(config.cacheDir);
@@ -2810,48 +4192,149 @@ export async function stopC8Run(config, debug = false) {
         .map((entry) => entry.name.slice('c8run-'.length))
         .sort()
     : [];
+  const livePidfileVersions = installedVersions.filter((version) =>
+    livePidfileEntries(config.cacheDir, {
+      version,
+      knownSignatures: pidfileSignatures,
+    }).length > 0,
+  );
 
   const versionsToTry = [];
+  const markerVersion = existsSync(versionFile)
+    ? readFileSync(versionFile, 'utf-8').trim()
+    : '';
   let stoppedVersion = null;
 
-  if (existsSync(versionFile)) {
-    const markerVersion = readFileSync(versionFile, 'utf-8').trim();
-    if (markerVersion) {
-      stoppedVersion = markerVersion;
-      versionsToTry.push(markerVersion);
+  const addLiveVersion = (version) => {
+    if (
+      version &&
+      livePidfileVersions.includes(version) &&
+      !versionsToTry.includes(version)
+    ) {
+      versionsToTry.push(version);
     }
-  }
+  };
 
-  // Fall back to the durable PID record's version when the marker is gone —
-  // this is the version whose install dir may have been removed (#560).
-  if (versionsToTry.length === 0) {
-    const record = readRunningClusterRecord(config.cacheDir);
-    if (record?.version) {
-      stoppedVersion = record.version;
-      versionsToTry.push(record.version);
-    }
-  }
-
-  if (versionsToTry.length === 0) {
-    if (installedVersions.length === 0) {
-      versionsToTry.push(config.version);
-    } else {
-      versionsToTry.push(...installedVersions);
-    }
+  // Prefer the requested version, then the marker and durable record. If
+  // neither identifies the live process, use the version whose pidfile does.
+  addLiveVersion(config.version);
+  addLiveVersion(markerVersion);
+  addLiveVersion(record?.version);
+  for (const version of livePidfileVersions) {
+    addLiveVersion(version);
   }
 
   logger.info('Stopping Camunda 8 local cluster...');
+
+  const pidfileAttempts = livePidfileVersions.map((version) => {
+    const processes = new Map();
+    for (const { pid } of livePidfileEntries(config.cacheDir, {
+      version,
+      knownSignatures: pidfileSignatures,
+    })) {
+      const signature = processStartSignature(pid);
+      const recordedIdentity = pidfileRecordIdentity(record, version, pid);
+      const recordedSignature = recordedIdentity.signature;
+      if (signature || isPidAlive(pid)) {
+        processes.set(pid, {
+          signature,
+          recordedSignature,
+          recordedOwnership: recordedIdentity.recordedOwnership,
+        });
+      }
+    }
+    return { version, processes };
+  });
+  const pidfileAttemptsByVersion = new Map(
+    pidfileAttempts.map(({ version, processes }) => [version, processes]),
+  );
 
   let attempted = 0;
   let hadSuccessfulStop = false;
   let lastError;
 
   for (const version of versionsToTry) {
+    // A pidfile can become stale between version discovery and execution. Keep
+    // the process identity so an unrelated process that reused its PID cannot
+    // make an idle c8run stop look successful.
+    const pidfileAttempt =
+      pidfileAttemptsByVersion.get(version) ?? new Map();
+    const previousSignatures = new Map();
+    for (const [pid, identity] of pidfileAttempt) {
+      if (isPidAlive(pid)) {
+        previousSignatures.set(
+          pid,
+          identity.recordedSignature ?? identity.signature,
+        );
+      }
+    }
+    for (const { pid } of livePidfileEntries(config.cacheDir, {
+      version,
+      knownSignatures: pidfileSignatures,
+    })) {
+      if (!isPidAlive(pid) || pidfileAttempt.has(pid)) {
+        continue;
+      }
+      const signature = processStartSignature(pid);
+      const recordedIdentity = pidfileRecordIdentity(record, version, pid);
+      const recordedSignature = recordedIdentity.signature;
+      pidfileAttempt.set(pid, {
+        signature,
+        recordedSignature,
+        recordedOwnership: recordedIdentity.recordedOwnership,
+      });
+      previousSignatures.set(pid, recordedSignature ?? signature);
+    }
+    if (previousSignatures.size === 0) {
+      continue;
+    }
     const versionConfig = { cacheDir: config.cacheDir, version };
     let binaryPath;
     try {
       binaryPath = getC8RunBinaryPath(versionConfig);
     } catch {
+      continue;
+    }
+
+    // c8run stop consumes every pidfile for a version, so do not pass it a
+    // non-signalable survivor whose saved process identity cannot be checked.
+    if (
+      hasUnverifiablePidfileSurvivor(
+        config.cacheDir,
+        version,
+        nonSignalableSurvivorSignatures,
+      )
+    ) {
+      continue;
+    }
+    if (
+      revalidatePidfileAttempt(
+        config.cacheDir,
+        version,
+        pidfileAttempt,
+        previousSignatures,
+        record,
+      )
+    ) {
+      continue;
+    }
+    if (
+      hasUnverifiablePidfileOwnership(
+        config.cacheDir,
+        version,
+        pidfileAttempt,
+      )
+    ) {
+      continue;
+    }
+    if (
+      previousSignatures.size === 0 ||
+      livePidfileEntries(config.cacheDir, {
+        version,
+        knownSignatures: pidfileSignatures,
+        retireStale: true,
+      }).length === 0
+    ) {
       continue;
     }
 
@@ -2907,7 +4390,42 @@ export async function stopC8Run(config, debug = false) {
     });
 
     if (exitCode === 0 || (exitCode === null && !exitSignal)) {
+      if (
+        !(await waitForPidfileProcessesExit(
+          config.cacheDir,
+          version,
+          previousSignatures,
+          { timeoutMs },
+        ))
+      ) {
+        const candidatePids = new Set([
+          ...previousSignatures.keys(),
+          ...collectPidfilePids(config.cacheDir, { version }),
+        ]);
+        for (const pid of candidatePids) {
+          if (!isPidAlive(pid) || pidfileAttempt.has(pid)) {
+            continue;
+          }
+          const recordedIdentity = pidfileRecordIdentity(record, version, pid);
+          pidfileAttempt.set(pid, {
+            signature: previousSignatures.has(pid)
+              ? previousSignatures.get(pid)
+              : processStartSignature(pid),
+            recordedSignature: recordedIdentity.signature,
+            recordedOwnership: recordedIdentity.recordedOwnership,
+          });
+        }
+
+        const purgeHint = purge
+          ? ` Once they exit, run: c8ctl cluster purge ${markerVersion || record?.version || version}.`
+          : '';
+        lastError = new Error(
+          `Stop command reported success, but c8run ${version} processes are still running.${purgeHint}`,
+        );
+        continue;
+      }
       hadSuccessfulStop = true;
+      stoppedVersion = version;
       break;
     } else if (exitCode === null && exitSignal) {
       lastError = new Error(
@@ -2920,6 +4438,35 @@ export async function stopC8Run(config, debug = false) {
       );
     }
   }
+
+  const pidfileStopCandidates = [];
+  for (const { version, processes } of pidfileAttempts) {
+    for (const [pid, identity] of processes) {
+      // A mismatched signature proves the numeric PID was reused.
+      if (
+        identity.recordedSignature &&
+        identity.signature &&
+        identity.recordedSignature !== identity.signature
+      ) {
+        continue;
+      }
+      pidfileStopCandidates.push({
+        version,
+        pid,
+        signature:
+          identity.recordedSignature ?? identity.signature ?? null,
+      });
+    }
+  }
+  const recordBeforeReaping = readRunningClusterRecord(config.cacheDir);
+  const signaturesBeforeReaping = recordBeforeReaping
+    ? recordedClusterPidSignatures(recordBeforeReaping)
+    : new Map();
+  const reaperCandidates = recordBeforeReaping
+    ? [...signaturesBeforeReaping.values()].filter(({ pid, signature }) =>
+        recordedPidIsLive(pid, signature),
+      )
+    : [];
 
   // Reap any cluster processes still alive after the c8run stop attempt(s).
   // In the orphan case (#560) the version's install dir — and with it the
@@ -2934,12 +4481,36 @@ export async function stopC8Run(config, debug = false) {
     );
   }
 
+  const pidfileSurvivors = findPidfileSurvivors(pidfileAttempts, config.cacheDir);
+  const latestRecord = readRunningClusterRecord(config.cacheDir);
+  const recoveredPidfileSurvivors = mergePidfileSurvivors(
+    latestRecord,
+    pidfileSurvivors,
+  );
+  if (latestRecord || recoveredPidfileSurvivors.length > 0) {
+    const version =
+      latestRecord?.version ?? recoveredPidfileSurvivors[0]?.version;
+    if (version) {
+      writeRunningClusterRecord(config.cacheDir, {
+        version,
+        pids: latestRecord?.pids ?? [],
+        signatures: latestRecord?.signatures ?? {},
+        pidfileSurvivors: recoveredPidfileSurvivors,
+        startupFailed: latestRecord?.startupFailed,
+      });
+    }
+  }
+  const persistedRecord = readRunningClusterRecord(config.cacheDir);
+  livePidfileEntries(config.cacheDir, {
+    knownSignatures: persistedRecord
+      ? pidfileValidationSignatures(persistedRecord)
+      : pidfileSignatures,
+    retireStale: true,
+  });
+
   // Markers are always cleared (a stale marker or version file would block
-  // future starts), but the durable PID record is the ONLY handle to an orphan.
-  // If reaping could not confirm every recorded process dead — e.g. signalling
-  // returned EPERM, or the kill did not land — keep the record so a later
-  // "c8ctl cluster stop" can retry. Only clear it once every recorded PID is
-  // confirmed gone (#560).
+  // future starts). Keep the durable PID record while any tracked process or
+  // unverified pidfile survivor may still be alive so a later stop can retry.
   if (existsSync(markerFile)) {
     rmSync(markerFile);
   }
@@ -2947,13 +4518,21 @@ export async function stopC8Run(config, debug = false) {
     rmSync(versionFile);
   }
   const remainingPids = liveRecordedPids(config.cacheDir);
-  if (remainingPids.length === 0) {
+  const unverifiedPidfilePids = liveUnverifiedPidfileSurvivors(config.cacheDir);
+  if (remainingPids.length === 0 && unverifiedPidfilePids.length === 0) {
     clearRunningClusterRecord(config.cacheDir);
   } else {
-    logger.warn(
-      'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
-        'PID record so "c8ctl cluster stop" can retry.',
-    );
+    if (remainingPids.length > 0) {
+      logger.warn(
+        'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
+          'PID record so "c8ctl cluster stop" can retry.',
+      );
+    } else {
+      logger.warn(
+        'Some live c8run pidfile processes have no verifiable start signature; keeping their ' +
+          'version-attributed recovery record without signalling them.',
+      );
+    }
   }
 
   // The port record describes the cluster that was just stopped. Only drop it
@@ -2963,7 +4542,10 @@ export async function stopC8Run(config, debug = false) {
   // whose record was already cleared), so gating on it would delete the port
   // while that survivor still serves — and a later `cluster status` would
   // advertise the default port for a custom-port cluster.
-  if (!hasRunningClusterPidfiles(config.cacheDir)) {
+  if (
+    pidfileSurvivors.length === 0 &&
+    !hasRunningClusterPidfiles(config.cacheDir)
+  ) {
     rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   }
 
@@ -2972,21 +4554,63 @@ export async function stopC8Run(config, debug = false) {
     // still alive (e.g. reaping hit EPERM), the incomplete-stop diagnostic
     // below carries the actionable PID/retry guidance and must win over this
     // generic "no binary" message even though the install dir is gone (#560).
-    if (remainingPids.length === 0) {
+    if (
+      remainingPids.length === 0 &&
+      unverifiedPidfilePids.length === 0
+    ) {
       throw new Error(
         'Could not find an installed c8run binary to execute stop.',
       );
     }
-  } else if (!hadSuccessfulStop && lastError && remainingPids.length === 0) {
+  } else if (
+    !hadSuccessfulStop &&
+    lastError &&
+    remainingPids.length === 0 &&
+    unverifiedPidfilePids.length === 0
+  ) {
     throw lastError;
   }
 
+  const remainingPidfilePids = [
+    ...new Set(
+      livePidfileSurvivors(persistedRecord)
+        .filter(
+          (survivor) =>
+            !(
+              persistedRecord?.version === survivor.version &&
+              persistedRecord.pids.includes(survivor.pid)
+            ) &&
+            remainingPids.includes(survivor.pid),
+        )
+        .map((survivor) => survivor.pid),
+    ),
+  ];
   // A partial stop is still a FAILED stop: if any recorded PID is confirmed
   // alive after reaping, the cluster may still hold its ports, so a fresh start
   // would collide. Surface it as an error (the record was retained above) so
   // the CLI exits non-zero and the user retries, rather than reporting success
   // while an orphan lingers (#560).
   if (remainingPids.length > 0) {
+    if (remainingPidfilePids.length === remainingPids.length) {
+      const processLabel =
+        remainingPidfilePids.length === 1 ? 'process' : 'processes';
+      const pidLabel = remainingPidfilePids.length === 1 ? 'PID' : 'PIDs';
+      const purgeVersion =
+        livePidfileSurvivors(persistedRecord)[0]?.version ||
+        markerVersion ||
+        persistedRecord?.version ||
+        record?.version;
+      const purgeHint =
+        purge && purgeVersion
+          ? ` Once they exit, run: c8ctl cluster purge ${purgeVersion}.`
+          : '';
+      const lastErrorMessage =
+        lastError instanceof Error ? ` ${lastError.message}` : '';
+      throw new Error(
+        `Stop incomplete: ${remainingPidfilePids.length} c8run pidfile ${processLabel} still running (${pidLabel}: ${remainingPidfilePids.join(', ')}). ` +
+          `The durable PID record was kept — retry with "c8ctl cluster stop".${lastErrorMessage}${purgeHint}`,
+      );
+    }
     throw new Error(
       `Stop incomplete: ${remainingPids.length} recorded cluster process${
         remainingPids.length === 1 ? '' : 'es'
@@ -2994,9 +4618,54 @@ export async function stopC8Run(config, debug = false) {
         'The durable PID record was kept — retry with "c8ctl cluster stop".',
     );
   }
+  if (unverifiedPidfilePids.length > 0) {
+    const processLabel =
+      unverifiedPidfilePids.length === 1 ? 'process' : 'processes';
+    const pidLabel = unverifiedPidfilePids.length === 1 ? 'PID' : 'PIDs';
+    const purgeVersion =
+      livePidfileSurvivors(persistedRecord)[0]?.version ||
+      markerVersion ||
+      persistedRecord?.version ||
+      record?.version;
+    const purgeHint =
+      purge && purgeVersion
+        ? ` Once they exit, run: c8ctl cluster purge ${purgeVersion}.`
+        : '';
+    const lastErrorMessage =
+      lastError instanceof Error ? ` ${lastError.message}` : '';
+    throw new Error(
+      `Stop incomplete: ${unverifiedPidfilePids.length} c8run pidfile ${processLabel} could not be safely reaped because cluster ownership could not be verified (${pidLabel}: ${unverifiedPidfilePids.join(', ')}). ` +
+        `The version-attributed recovery record was kept; verify and stop these processes manually.${lastErrorMessage}${purgeHint}`,
+    );
+  }
+  if (pidfileSurvivors.length > 0) {
+    const processLabel = pidfileSurvivors.length === 1 ? 'process' : 'processes';
+    const pidLabel = pidfileSurvivors.length === 1 ? 'PID' : 'PIDs';
+    const lastErrorMessage =
+      lastError instanceof Error ? ` ${lastError.message}` : '';
+    const survivorPids = pidfileSurvivors.map(({ pid }) => pid);
+    throw new Error(
+        `Stop incomplete: ${pidfileSurvivors.length} c8run pidfile ${processLabel} still running (${pidLabel}: ${survivorPids.join(', ')}). ` +
+        `Retry with "c8ctl cluster stop".${lastErrorMessage}`,
+    );
+  }
+
+  // A durable record can retain a stale top-level version while its live
+  // pidfile survivors belong to other installs. Only return a purge target
+  // when every stopped process identity points to the same version.
+  const stoppedVersions = new Set(stoppedVersion ? [stoppedVersion] : []);
+  for (const candidate of [...pidfileStopCandidates, ...reaperCandidates]) {
+    if (recordedPidStatus(candidate.pid, candidate.signature) === 'stale') {
+      stoppedVersions.add(candidate.version);
+    }
+  }
+  const purgeVersion =
+    stoppedVersions.size === 1
+      ? stoppedVersions.values().next().value
+      : null;
 
   logger.info('Cluster stopped.');
-  return stoppedVersion;
+  return purgeVersion;
 }
 
 // ---------------------------------------------------------------------------
@@ -4295,10 +5964,16 @@ export const commands = {
       }
     } else if (parsed.subcommand === 'stop') {
       try {
-        const stoppedVersion = await stopC8Run(config, parsed.debug);
+        // Internal override lets tests bound stop confirmation and purge waits.
+        const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
+        const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
+        const stoppedVersion = await stopC8Run(config, parsed.debug, {
+          timeoutMs,
+          purge: parsed.purge,
+        });
         if (parsed.purge) {
           if (!stoppedVersion) {
-            logger.warn('Cannot determine which version to purge (version marker is missing). ' +
+            logger.warn('Cannot determine a single version to purge. ' +
                 'To purge manually, run: c8ctl cluster purge <version>');
           } else if (!existsSync(join(theCacheDir, `c8run-${stoppedVersion}`))) {
             // The install dir itself is already gone — e.g. the orphan case
@@ -4312,9 +5987,6 @@ export const commands = {
               `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
             );
           } else {
-            // C8CTL_STOP_WAIT_TIMEOUT_MS is an internal override so tests can bound the wait.
-            const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
-            const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
             if (!(await waitForClusterExit(theCacheDir, { timeoutMs }))) {
               throw new Error(
                 'Cluster processes are still shutting down, so runtime data was not purged. ' +
