@@ -1413,8 +1413,16 @@ async function runSetup(ctx: PluginCtx, flags: SetupFlags): Promise<void> {
 	// stdout is a terminal, so piped output stays plain text.
 	const color = process.stdout.isTTY === true;
 
-	// The banner is UI chrome: hidden by --quiet, omitted in JSON mode.
+	// Hide the setup introduction in --quiet and JSON modes.
 	if (!jsonMode && !ctx.quiet) {
+		const guide =
+			"Setup guide: https://docs.camunda.io/docs/apis-tools/c8ctl/getting-started/";
+		if (interactive) {
+			process.stderr.write(`${guide}\n`);
+		} else {
+			logger.output(guide);
+		}
+
 		const banner = renderWelcomeBanner({ color: interactive });
 		if (interactive) {
 			process.stderr.write(`${banner}\n`);
