@@ -42,11 +42,10 @@ describe("Cluster Plugin – stripTrailingSlashes", () => {
 const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
 
 function spawnClusterLauncher(commandLine: string) {
-	return spawn(
-		process.execPath,
-		["-e", "setInterval(() => {}, 1e9)"],
-		{ argv0: commandLine, stdio: "ignore" },
-	);
+	return spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], {
+		argv0: commandLine,
+		stdio: "ignore",
+	});
 }
 
 /**
@@ -4233,7 +4232,12 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 		assert.strictEqual(
 			plugin.commandLineIncludesClusterLauncher(
-				["node", "-cp", camundaClasspath, "io.camunda.application.StandaloneCamunda"],
+				[
+					"node",
+					"-cp",
+					camundaClasspath,
+					"io.camunda.application.StandaloneCamunda",
+				],
 				camundaEntry,
 				version,
 			),
