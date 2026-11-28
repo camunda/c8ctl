@@ -3968,6 +3968,103 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 	});
 
+	test("recognizes flattened JVM classpaths with spaces without matching JVM properties", () => {
+		const version = "8.10.1";
+		const installDir = join(
+			tempDir,
+			"cache with spaces",
+			`c8run-${version}`,
+			`c8run-${version}`,
+		);
+		const componentDir = join(installDir, `camunda-zeebe-${version}`);
+		const camundaEntry = { path: join(installDir, "camunda.process") };
+		const connectorsEntry = { path: join(installDir, "connectors.process") };
+		const camundaClasspath = join(componentDir, "lib", "*");
+		const connectorsClasspath = join(installDir, "*");
+		const mainClass = "io.camunda.application.StandaloneCamunda";
+
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${camundaClasspath} ${mainClass}`,
+				camundaEntry,
+				version,
+			),
+			true,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${connectorsClasspath} io.camunda.connector.runtime.app.ConnectorRuntimeApplication`,
+				connectorsEntry,
+				version,
+			),
+			true,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp /opt/unrelated/app.jar -Dloader.path=${camundaClasspath} ${mainClass}`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+	});
+
+	test("does not treat a JVM property as a Java classpath", () => {
+		const version = "8.10.1";
+		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+		const componentDir = join(installDir, `camunda-zeebe-${version}`);
+		const entry = { path: join(installDir, "camunda.process") };
+		const mainClass = "io.camunda.application.StandaloneCamunda";
+		const classpathProperty = `-Dloader.path=${join(componentDir, "lib")}`;
+
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				["java", "-cp", classpathProperty, mainClass],
+				entry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${classpathProperty} ${mainClass}`,
+				entry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -Dmessage="value -cp ${join(componentDir, "lib")}" -cp /opt/unrelated/app.jar ${mainClass}`,
+				entry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${join(componentDir, "lib")} -Dmessage="value ${mainClass}" com.example.Worker`,
+				entry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					"java",
+					"-cp",
+					join(componentDir, "lib"),
+					`-Dmessage=value ${mainClass}`,
+					"com.example.Worker",
+				],
+				entry,
+				version,
+			),
+			false,
+		);
+	});
+
 	test("ignores JVM properties after the classpath when checking ownership", () => {
 		const version = "8.10.1";
 		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);

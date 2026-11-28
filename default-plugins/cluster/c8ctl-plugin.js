@@ -2379,9 +2379,13 @@ function commandLineIncludesPath(commandLine, path) {
   while (index !== -1) {
     const previous = actual[index - 1];
     const next = actual[index + expected.length];
+    // BSD ps can flatten argv; paths after JVM options are not classpath evidence.
+    const hasJvmOptionBeforePath =
+      /(?:^|\s)-{1,2}[A-Za-z]/.test(actual.slice(0, index));
     if (
-      (previous === undefined || /[\s"'=:]/.test(previous)) &&
-      (next === undefined || /[\s"'/:,*;]/.test(next))
+      (previous === undefined || /[\s"':;]/.test(previous)) &&
+      (next === undefined || /[\s"'/:,*;]/.test(next)) &&
+      !hasJvmOptionBeforePath
     ) {
       return true;
     }
@@ -2411,6 +2415,49 @@ function commandLineIncludesArgumentPath(commandLine, path) {
   ).test(normalizeProcessPath(commandLine));
 }
 
+function isInsideQuotedCommandLine(commandLine, position) {
+  let quote = null;
+  for (let index = 0; index < position; index += 1) {
+    const character = commandLine[index];
+    if (quote) {
+      if (character !== quote) {
+        continue;
+      }
+      let backslashCount = 0;
+      for (
+        let previous = index - 1;
+        previous >= 0 && commandLine[previous] === '\\';
+        previous -= 1
+      ) {
+        backslashCount += 1;
+      }
+      if (backslashCount % 2 === 0) {
+        quote = null;
+      }
+    } else if (
+      (character === '"' || character === "'") &&
+      (index === 0 || /[\s=]/.test(commandLine[index - 1]))
+    ) {
+      quote = character;
+    }
+  }
+  return quote !== null;
+}
+
+function findCommandLineMatchOutsideQuotes(commandLine, pattern) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  for (const match of commandLine.matchAll(globalPattern)) {
+    if (
+      match.index !== undefined &&
+      !isInsideQuotedCommandLine(commandLine, match.index)
+    ) {
+      return match;
+    }
+  }
+  return null;
+}
+
 function commandLineIncludesJavaClasspath(
   commandLine,
   classpathPath,
@@ -2418,7 +2465,7 @@ function commandLineIncludesJavaClasspath(
 ) {
   if (Array.isArray(commandLine)) {
     const mainClassIndex = commandLine.findIndex(
-      (argument) => mainClassPattern.test(argument),
+      (argument) => !argument.startsWith('-') && mainClassPattern.test(argument),
     );
     if (mainClassIndex === -1) {
       return false;
@@ -2431,15 +2478,20 @@ function commandLineIncludesJavaClasspath(
       }
     }
     return Boolean(
-      classpath && commandLineIncludesPath(classpath, classpathPath),
+      classpath &&
+        !classpath.startsWith('-') &&
+        commandLineIncludesPath(classpath, classpathPath),
     );
   }
 
-  const mainClass = mainClassPattern.exec(commandLine);
-  const classpathOption =
-    /(?:^|\s)-(?:cp|classpath)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(
-      commandLine,
-    );
+  const mainClass = findCommandLineMatchOutsideQuotes(
+    commandLine,
+    mainClassPattern,
+  );
+  const classpathOption = findCommandLineMatchOutsideQuotes(
+    commandLine,
+    /(?:^|\s)-(?:cp|classpath)\s+/,
+  );
   if (
     !mainClass ||
     !classpathOption ||
@@ -2449,12 +2501,13 @@ function commandLineIncludesJavaClasspath(
     return false;
   }
 
-  const classpath = classpathOption[1] ?? classpathOption[2] ?? classpathOption[3];
-  const classpathEnd = classpathOption.index + classpathOption[0].length;
+  const classpathStart = classpathOption.index + classpathOption[0].length;
   return Boolean(
-    classpath &&
-      classpathEnd <= mainClass.index &&
-      commandLineIncludesPath(classpath, classpathPath),
+    classpathStart < mainClass.index &&
+      commandLineIncludesPath(
+        commandLine.slice(classpathStart, mainClass.index),
+        classpathPath,
+      ),
   );
 }
 
