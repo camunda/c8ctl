@@ -41,6 +41,14 @@ describe("Cluster Plugin – stripTrailingSlashes", () => {
 /** Platform-correct binary name: c8run.exe on Windows, c8run elsewhere. */
 const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
 
+function spawnClusterLauncher(commandLine: string) {
+	return spawn(
+		process.execPath,
+		["-e", "setInterval(() => {}, 1e9)"],
+		{ argv0: commandLine, stdio: "ignore" },
+	);
+}
+
 /**
  * Upper bound for obtaining a real process start signature. On Windows each
  * lookup is a blocking `powershell` + CIM call with a 10 s per-call timeout in
@@ -3747,14 +3755,8 @@ describe("Cluster Plugin – stopC8Run", () => {
 		mkdirSync(installDir, { recursive: true });
 		const pidfile = join(installDir, "camunda.process");
 		const stoppedMarker = join(tempDir, "live-version-stopped");
-		const child = spawn(
-			process.execPath,
-			[
-				"-e",
-				"setInterval(() => {}, 1e9)",
-				join(installDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
-			],
-			{ stdio: "ignore" },
+		const child = spawnClusterLauncher(
+			join(installDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
 		);
 
 		try {
@@ -4247,6 +4249,72 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 	});
 
+	test("requires launcher paths to appear at a command entrypoint", () => {
+		const version = "8.10.1";
+		const installDir = join(
+			tempDir,
+			"cache with spaces",
+			`c8run-${version}`,
+			`c8run-${version}`,
+		);
+		const componentBin = join(
+			installDir,
+			`camunda-zeebe-${version}`,
+			"bin",
+			"camunda",
+		);
+		const entry = { path: join(installDir, "camunda.process") };
+
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				["java", "-cp", "/opt/worker.jar", "com.example.Worker", componentBin],
+				entry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp /opt/worker.jar com.example.Worker ${componentBin}`,
+				entry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`"${componentBin}"`,
+				entry,
+				version,
+			),
+			true,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				["sh", componentBin],
+				entry,
+				version,
+			),
+			true,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				["cmd.exe", "/d", "/s", "/c", `"${componentBin}.bat"`],
+				entry,
+				version,
+			),
+			true,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`cmd.exe /d /s /c ""${componentBin}.bat""`,
+				entry,
+				version,
+			),
+			true,
+		);
+	});
+
 	test("does not treat a JVM property as a Java classpath", () => {
 		const version = "8.10.1";
 		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
@@ -4640,23 +4708,11 @@ describe("Cluster Plugin – stopC8Run", () => {
 	}, async () => {
 		const requestedDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
 		const survivorDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
-		const stoppedChild = spawn(
-			process.execPath,
-			[
-				"-e",
-				"setInterval(() => {}, 1e9)",
-				join(requestedDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
-			],
-			{ stdio: "ignore" },
+		const stoppedChild = spawnClusterLauncher(
+			join(requestedDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
 		);
-		const survivor = spawn(
-			process.execPath,
-			[
-				"-e",
-				"setInterval(() => {}, 1e9)",
-				join(survivorDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
-			],
-			{ stdio: "ignore" },
+		const survivor = spawnClusterLauncher(
+			join(survivorDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
 		);
 
 		try {
@@ -4726,14 +4782,8 @@ describe("Cluster Plugin – stopC8Run", () => {
 	}, async () => {
 		const version = "8.10.1";
 		const installDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
-		const survivor = spawn(
-			process.execPath,
-			[
-				"-e",
-				"setInterval(() => {}, 1e9)",
-				join(installDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
-			],
-			{ stdio: "ignore" },
+		const survivor = spawnClusterLauncher(
+			join(installDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
 		);
 
 		try {
@@ -5661,14 +5711,8 @@ describe("Cluster Plugin – stopC8Run", () => {
 			skip: process.platform === "win32",
 		}, async () => {
 			const runningBinaryDir = join(tempDir, "c8run-8.10.5", "c8run-8.10.5");
-			const child = spawn(
-				process.execPath,
-				[
-					"-e",
-					"setInterval(() => {}, 1e9)",
-					join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
-				],
-				{ stdio: "ignore" },
+			const child = spawnClusterLauncher(
+				join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
 			);
 			await new Promise<void>((resolveSpawn, rejectSpawn) => {
 				child.once("spawn", () => resolveSpawn());
@@ -5750,11 +5794,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		mkdirSync(dirname(componentLauncher), { recursive: true });
 		writeFileSync(componentLauncher, "", { mode: 0o755 });
 
-		const child = spawn(
-			process.execPath,
-			["-e", "setInterval(() => {}, 1e9)", componentLauncher],
-			{ stdio: "ignore" },
-		);
+		const child = spawnClusterLauncher(componentLauncher);
 
 		try {
 			await new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -5907,23 +5947,11 @@ describe("Cluster Plugin – stopC8Run", () => {
 	}, async () => {
 		const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
 		const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
-		const survivor = spawn(
-			process.execPath,
-			[
-				"-e",
-				"setInterval(() => {}, 1e9)",
-				join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
-			],
-			{ stdio: "ignore" },
+		const survivor = spawnClusterLauncher(
+			join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
 		);
-		const stoppedByNextVersion = spawn(
-			process.execPath,
-			[
-				"-e",
-				"setInterval(() => {}, 1e9)",
-				join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
-			],
-			{ stdio: "ignore" },
+		const stoppedByNextVersion = spawnClusterLauncher(
+			join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
 		);
 		const orphan = spawn(
 			process.execPath,
@@ -6026,23 +6054,11 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}, async () => {
 			const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
 			const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
-			const survivor = spawn(
-				process.execPath,
-				[
-					"-e",
-					"setInterval(() => {}, 1e9)",
-					join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
-				],
-				{ stdio: "ignore" },
+			const survivor = spawnClusterLauncher(
+				join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
 			);
-			const nextVersion = spawn(
-				process.execPath,
-				[
-					"-e",
-					"setInterval(() => {}, 1e9)",
-					join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
-				],
-				{ stdio: "ignore" },
+			const nextVersion = spawnClusterLauncher(
+				join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
 			);
 
 			try {
@@ -6132,32 +6148,14 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}, async () => {
 			const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
 			const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
-			const original = spawn(
-				process.execPath,
-				[
-					"-e",
-					"setInterval(() => {}, 1e9)",
-					join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
-				],
-				{ stdio: "ignore" },
+			const original = spawnClusterLauncher(
+				join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
 			);
-			const survivor = spawn(
-				process.execPath,
-				[
-					"-e",
-					"setInterval(() => {}, 1e9)",
-					join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
-				],
-				{ stdio: "ignore" },
+			const survivor = spawnClusterLauncher(
+				join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
 			);
-			const nextVersion = spawn(
-				process.execPath,
-				[
-					"-e",
-					"setInterval(() => {}, 1e9)",
-					join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
-				],
-				{ stdio: "ignore" },
+			const nextVersion = spawnClusterLauncher(
+				join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
 			);
 			const secondStopStarted = join(tempDir, "second-stop-started");
 			const releaseSecondStop = join(tempDir, "release-second-stop");
@@ -6269,14 +6267,8 @@ describe("Cluster Plugin – stopC8Run", () => {
 			["-e", "setInterval(() => {}, 1e9)"],
 			{ stdio: "ignore" },
 		);
-		const clusterChild = spawn(
-			process.execPath,
-			[
-				"-e",
-				"setInterval(() => {}, 1e9)",
-				join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
-			],
-			{ stdio: "ignore" },
+		const clusterChild = spawnClusterLauncher(
+			join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
 		);
 
 		try {

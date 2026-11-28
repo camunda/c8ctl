@@ -2404,19 +2404,142 @@ function normalizeProcessPath(value) {
   return osPlatform() === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
+function commandLineArgumentMatchesPath(argument, expected) {
+  return (
+    stripTrailingSlashes(
+      normalizeProcessPath(argument.replace(/^["']+|["']+$/g, '')),
+    ) === expected
+  );
+}
+
+function commandLineStartsWithPath(commandLine, expected) {
+  const actual = normalizeProcessPath(commandLine.trimStart()).replace(
+    /^["']+/,
+    '',
+  );
+  if (!actual.startsWith(expected)) {
+    return false;
+  }
+  return (
+    actual.length === expected.length ||
+    /["'\s&|;]/.test(actual[expected.length])
+  );
+}
+
+function readCommandLineArgument(commandLine) {
+  const match = /^\s*(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(commandLine);
+  if (!match) {
+    return null;
+  }
+  return {
+    argument: match[1] ?? match[2] ?? match[3],
+    end: match[0].length,
+  };
+}
+
+function commandLineExecutableName(argument) {
+  return argument.replace(/\\/g, '/').split('/').at(-1).toLowerCase();
+}
+
+function commandLineAfterCmdOption(commandLine) {
+  let remainder = commandLine.trimStart();
+  while (remainder) {
+    const parsed = readCommandLineArgument(remainder);
+    if (!parsed) {
+      return null;
+    }
+    const option = parsed.argument.toLowerCase();
+    const next = remainder.slice(parsed.end);
+    if (option === '/c' || option === '/k') {
+      return next;
+    }
+    if (!option.startsWith('/')) {
+      return null;
+    }
+    remainder = next.trimStart();
+  }
+  return null;
+}
+
+function commandLineStartsWithScriptPath(commandLine, expected) {
+  if (commandLineStartsWithPath(commandLine, expected)) {
+    return true;
+  }
+  const parsed = readCommandLineArgument(commandLine);
+  if (!parsed) {
+    return false;
+  }
+  if (commandLineArgumentMatchesPath(parsed.argument, expected)) {
+    return true;
+  }
+  if (['-c', '-lc', '-ec'].includes(parsed.argument.toLowerCase())) {
+    return commandLineStartsWithPath(
+      commandLine.slice(parsed.end),
+      expected,
+    );
+  }
+  return false;
+}
+
 function commandLineIncludesArgumentPath(commandLine, path) {
   const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
   if (Array.isArray(commandLine)) {
-    return commandLine.some(
-      (argument) =>
-        stripTrailingSlashes(normalizeProcessPath(argument)) === expected,
-    );
+    if (
+      commandLine.length === 0 ||
+      commandLine[0] === undefined
+    ) {
+      return false;
+    }
+    if (commandLineArgumentMatchesPath(commandLine[0], expected)) {
+      return true;
+    }
+
+    const executableName = commandLineExecutableName(commandLine[0]);
+    if (executableName === 'cmd' || executableName === 'cmd.exe') {
+      const optionIndex = commandLine.findIndex(
+        (argument, index) => index > 0 && /^\/[ck]$/i.test(argument),
+      );
+      return (
+        optionIndex !== -1 &&
+        commandLineStartsWithPath(
+          commandLine.slice(optionIndex + 1).join(' '),
+          expected,
+        )
+      );
+    }
+    if (['sh', 'bash', 'dash', 'zsh', 'ksh'].includes(executableName)) {
+      return (
+        commandLineArgumentMatchesPath(commandLine[1] ?? '', expected) ||
+        commandLineStartsWithScriptPath(
+          commandLine.slice(1).join(' '),
+          expected,
+        )
+      );
+    }
+    return false;
   }
 
-  const escapedPath = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(
-    `(?:^|\\s)(?:"${escapedPath}"|'${escapedPath}'|${escapedPath})(?=\\s|$)`,
-  ).test(normalizeProcessPath(commandLine));
+  if (commandLineStartsWithPath(commandLine, expected)) {
+    return true;
+  }
+  const firstArgument = readCommandLineArgument(commandLine);
+  if (!firstArgument) {
+    return false;
+  }
+  if (commandLineArgumentMatchesPath(firstArgument.argument, expected)) {
+    return true;
+  }
+
+  const executableName = commandLineExecutableName(firstArgument.argument);
+  const remainder = commandLine.slice(firstArgument.end);
+  if (executableName === 'cmd' || executableName === 'cmd.exe') {
+    const command = commandLineAfterCmdOption(remainder);
+    return command !== null && commandLineStartsWithPath(command, expected);
+  }
+  if (['sh', 'bash', 'dash', 'zsh', 'ksh'].includes(executableName)) {
+    return commandLineStartsWithScriptPath(remainder, expected);
+  }
+  return false;
 }
 
 function isInsideQuotedCommandLine(commandLine, position) {

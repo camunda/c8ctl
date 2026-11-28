@@ -82,12 +82,11 @@ globalThis.fetch = async () => {
 
 	async function launcher(exitCode: number) {
 		for (const name of ["camunda", "connectors", "connectors-sales"]) {
+			const launchMetadata = componentLaunchMetadata(name);
 			const child = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1000)", componentLaunchMetadata(name)],
-				{
-					stdio: "ignore",
-				},
+				["-e", "setInterval(() => {}, 1000)"],
+				{ argv0: launchMetadata, stdio: "ignore" },
 			);
 			children.push(child);
 			await once(child, "spawn");
@@ -154,7 +153,10 @@ if (process.argv[2] === 'start') {
     const component = name === 'camunda' ? 'camunda-zeebe' : 'connectors';
     const executable = name === 'camunda' ? 'camunda' : 'connectors';
     const launchMetadata = join(process.cwd(), component + '-8.10.1', 'bin', executable);
-    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', launchMetadata], { stdio: 'ignore' });
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      argv0: launchMetadata,
+      stdio: 'ignore',
+    });
     child.on('spawn', () => {
       writeFileSync(name + '.process', String(child.pid));
       appendFileSync('fixture.pids', child.pid + '\\n');
@@ -379,10 +381,11 @@ if (process.argv[2] === 'start') {
 		// A process c8run tracks ONLY through a .process pidfile — the durable
 		// PID record never captured it. Its liveness is real (a live child), so
 		// hasRunningClusterPidfiles sees it even after the recorded PIDs exit.
+		const survivorLaunchMetadata = componentLaunchMetadata("camunda");
 		const survivor = spawn(
 			process.execPath,
-			["-e", "setInterval(() => {}, 1000)", componentLaunchMetadata("camunda")],
-			{ stdio: "ignore" },
+			["-e", "setInterval(() => {}, 1000)"],
+			{ argv0: survivorLaunchMetadata, stdio: "ignore" },
 		);
 		children.push(survivor);
 		await once(survivor, "spawn");
