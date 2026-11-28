@@ -4660,6 +4660,30 @@ describe("Cluster Plugin – stopC8Run", () => {
 				),
 				true,
 			);
+			const forgedArgv = [
+				`java -cp "${fixture.classpath}" ${fixture.mainClass}`,
+				"-jar",
+				"/opt/worker.jar",
+			];
+			assert.strictEqual(
+				plugin.commandLineIncludesClusterLauncher(
+					forgedArgv,
+					fixture.entry,
+					version,
+				),
+				false,
+				"argv[0] must not be parsed as Java launch arguments",
+			);
+			assert.strictEqual(
+				plugin.processExecutableMatchesClusterLauncher(
+					javaExecutable,
+					forgedArgv,
+					fixture.entry,
+					version,
+				),
+				false,
+				"caller-controlled argv[0] must not prove Java process ownership",
+			);
 		}
 	});
 

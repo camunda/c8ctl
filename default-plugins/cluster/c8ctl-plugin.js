@@ -2825,16 +2825,6 @@ function commandLineIncludesJavaClasspath(
   mainClassPattern,
 ) {
   if (Array.isArray(commandLine)) {
-    if (
-      commandLine.length === 1 ||
-      /^\s*javaw?(?:\.exe)?\s/i.test(commandLine[0])
-    ) {
-      return commandLineIncludesJavaClasspath(
-        commandLine.join(' '),
-        classpathPath,
-        mainClassPattern,
-      );
-    }
     if (!isJavaExecutable(commandLine)) {
       return false;
     }
