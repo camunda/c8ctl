@@ -4687,6 +4687,49 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	test("rejects ambiguous flattened JVM command lines on Darwin and BSD", () => {
+		const version = "8.10.1";
+		const installDir = join(
+			tempDir,
+			"cache with spaces",
+			`c8run-${version}`,
+			`c8run-${version}`,
+		);
+		const componentDir = join(installDir, `camunda-zeebe-${version}`);
+		const javaExecutable = join(tempDir, "bin", "java");
+		const entry = { path: join(installDir, "camunda.process") };
+		const classpath = join(componentDir, "lib", "*");
+		const commandLines = [
+			`java -cp "${classpath}" ` +
+				"io.camunda.application.StandaloneCamunda -jar /opt/worker.jar",
+			`java -cp "${classpath}" ` +
+				"io.camunda.application.StandaloneCamunda com.example.Worker",
+		];
+		const originalPlatform = os.platform;
+
+		try {
+			for (const platform of ["darwin", "freebsd"]) {
+				os.platform = () => platform;
+				syncBuiltinESMExports();
+				for (const commandLine of commandLines) {
+					assert.strictEqual(
+						plugin.processExecutableMatchesClusterLauncher(
+							javaExecutable,
+							commandLine,
+							entry,
+							version,
+						),
+						false,
+						`${platform} flattened argv cannot prove Java process ownership`,
+					);
+				}
+			}
+		} finally {
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+		}
+	});
+
 	test("requires a supported interpreter and exact component script entrypoint", () => {
 		const version = "8.10.1";
 		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);

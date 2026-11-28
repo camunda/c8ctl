@@ -2814,6 +2814,20 @@ function findFirstJavaLaunchArgument(commandLine) {
   return null;
 }
 
+function hasAmbiguousJavaArgumentsAfterMainClass(commandLine, mainClassIndex) {
+  const argumentsAfterMainClass =
+    commandLine.slice(mainClassIndex).match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  return argumentsAfterMainClass.slice(1).some((rawArgument) => {
+    const argument = rawArgument.replace(/^(['"])(.*)\1$/, '$2');
+    return (
+      isJavaLaunchModeOption(argument) ||
+      JAVA_OPTIONS_WITH_ARGUMENTS.has(argument) ||
+      /^-(?:D|X|agentlib:|agentpath:|javaagent:)/.test(argument) ||
+      /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(argument)
+    );
+  });
+}
+
 function matchesJavaMainClass(argument, mainClassPattern) {
   const match = mainClassPattern.exec(argument);
   return match !== null && match[0] === argument;
@@ -2892,6 +2906,17 @@ function commandLineIncludesJavaClasspath(
     .replace(/^["']\s*/, '');
   const launch = findFirstJavaLaunchArgument(argumentsAfterClasspath);
   if (!launch || !matchesJavaMainClass(launch.argument, mainClassPattern)) {
+    return false;
+  }
+  const platform = osPlatform();
+  // BSD `ps` flattens argv; later JVM arguments can be hidden behind custom argv[0].
+  if (
+    (platform === 'darwin' || platform.endsWith('bsd')) &&
+    hasAmbiguousJavaArgumentsAfterMainClass(
+      argumentsAfterClasspath,
+      launch.index,
+    )
+  ) {
     return false;
   }
   const hasJvmPropertyBeforeMainClass = findCommandLineMatchOutsideQuotes(
