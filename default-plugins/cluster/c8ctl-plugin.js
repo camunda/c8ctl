@@ -2502,12 +2502,17 @@ function commandLineIncludesJavaClasspath(
   }
 
   const classpathStart = classpathOption.index + classpathOption[0].length;
+  const classpathAndOptions = commandLine.slice(classpathStart, mainClass.index);
+  // Flattened BSD ps output loses argv boundaries; a class-looking token after
+  // -D may still be part of its value, so fail closed on that ambiguous region.
+  const hasJvmPropertyBeforeMainClass = findCommandLineMatchOutsideQuotes(
+    classpathAndOptions,
+    /(?:^|\s)-D(?:[^\s=]+)?(?:=|\s|$)/,
+  );
   return Boolean(
     classpathStart < mainClass.index &&
-      commandLineIncludesPath(
-        commandLine.slice(classpathStart, mainClass.index),
-        classpathPath,
-      ),
+      !hasJvmPropertyBeforeMainClass &&
+      commandLineIncludesPath(classpathAndOptions, classpathPath),
   );
 }
 

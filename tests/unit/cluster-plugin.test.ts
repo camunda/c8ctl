@@ -4009,6 +4009,49 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 	});
 
+	test("rejects class-name lookalikes embedded in flattened JVM properties", () => {
+		const version = "8.10.1";
+		const installDir = join(
+			tempDir,
+			"cache with spaces",
+			`c8run-${version}`,
+			`c8run-${version}`,
+		);
+		const componentDir = join(installDir, `camunda-zeebe-${version}`);
+		const camundaEntry = { path: join(installDir, "camunda.process") };
+		const connectorsEntry = { path: join(installDir, "connectors.process") };
+		const camundaClasspath = join(componentDir, "lib", "*");
+		const connectorsClasspath = join(installDir, "*");
+		const camundaMainClass = "io.camunda.application.StandaloneCamunda";
+		const connectorsMainClass =
+			"io.camunda.connector.runtime.app.ConnectorRuntimeApplication";
+
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${camundaClasspath} -Dlabel=launching ${camundaMainClass} com.example.Worker`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${connectorsClasspath} -Dlabel=launching ${connectorsMainClass} com.example.Worker`,
+				connectorsEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -Dlabel=launching -cp ${camundaClasspath} ${camundaMainClass}`,
+				camundaEntry,
+				version,
+			),
+			true,
+		);
+	});
+
 	test("does not treat a JVM property as a Java classpath", () => {
 		const version = "8.10.1";
 		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
