@@ -4052,6 +4052,201 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 	});
 
+	test("requires a matching Java class launch target", () => {
+		const version = "8.10.1";
+		const installDir = join(
+			tempDir,
+			"cache with spaces",
+			`c8run-${version}`,
+			`c8run-${version}`,
+		);
+		const componentDir = join(installDir, `camunda-zeebe-${version}`);
+		const camundaEntry = { path: join(installDir, "camunda.process") };
+		const connectorsEntry = { path: join(installDir, "connectors.process") };
+		const camundaClasspath = join(componentDir, "lib", "*");
+		const connectorsClasspath = join(installDir, "*");
+		const javaExecutable = join(
+			tempDir,
+			"java with spaces",
+			"bin",
+			process.platform === "win32" ? "java.exe" : "java",
+		);
+
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					"java",
+					"-cp",
+					camundaClasspath,
+					"com.example.Worker",
+					"io.camunda.application.StandaloneCamunda",
+				],
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${camundaClasspath} com.example.Worker io.camunda.application.StandaloneCamunda`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					javaExecutable,
+					"-cp",
+					camundaClasspath,
+					"com.example.Worker io.camunda.application.StandaloneCamunda",
+				],
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${camundaClasspath} "com.example.Worker io.camunda.application.StandaloneCamunda"`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					"java",
+					"-cp",
+					connectorsClasspath,
+					"com.example.Worker",
+					"io.camunda.connector.runtime.app.ConnectorRuntimeApplication",
+				],
+				connectorsEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${connectorsClasspath} com.example.Worker io.camunda.connector.runtime.app.ConnectorRuntimeApplication`,
+				connectorsEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					"java",
+					"-cp",
+					"/opt/unrelated/app.jar",
+					"com.example.Worker",
+					camundaClasspath,
+					"io.camunda.application.StandaloneCamunda",
+				],
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp /opt/unrelated/app.jar com.example.Worker ${camundaClasspath} io.camunda.application.StandaloneCamunda`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					"java",
+					"-cp",
+					camundaClasspath,
+					"-p",
+					"io.camunda.application.StandaloneCamunda",
+					"com.example.Worker",
+				],
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${camundaClasspath} -p io.camunda.application.StandaloneCamunda com.example.Worker`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					"java",
+					"-cp",
+					camundaClasspath,
+					"--source",
+					"17",
+					"io.camunda.application.StandaloneCamunda",
+				],
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${camundaClasspath} --source 17 io.camunda.application.StandaloneCamunda`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				[
+					"java",
+					"-cp",
+					camundaClasspath,
+					"-jar",
+					"worker.jar",
+					"io.camunda.application.StandaloneCamunda",
+				],
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`java -cp ${camundaClasspath} -jar worker.jar io.camunda.application.StandaloneCamunda`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				["node", "-cp", camundaClasspath, "io.camunda.application.StandaloneCamunda"],
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+		assert.strictEqual(
+			plugin.commandLineIncludesClusterLauncher(
+				`node -cp ${camundaClasspath} io.camunda.application.StandaloneCamunda`,
+				camundaEntry,
+				version,
+			),
+			false,
+		);
+	});
+
 	test("does not treat a JVM property as a Java classpath", () => {
 		const version = "8.10.1";
 		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
@@ -4200,18 +4395,19 @@ describe("Cluster Plugin – stopC8Run", () => {
 								camundaClasspath,
 								"io.camunda.application.StandaloneCamunda",
 							];
-			const commandLineMarker =
-				fixture.kind === "connectors"
-					? "org.springframework.boot.loader.launch.PropertiesLauncher"
-					: fixture.kind === "batch"
-						? "camunda.bat"
-						: "io.camunda.application.StandaloneCamunda";
+			const processTitle =
+				fixture.kind === "batch"
+					? join(componentDir, "bin", "camunda.bat")
+					: `java ${commandLineArgs.join(" ")}`;
 			if (fixture.kind === "camunda-classpath") {
 				mkdirSync(join(componentDir, "lib"), { recursive: true });
 			}
 			const child = spawn(
 				process.execPath,
-				["-e", "setInterval(() => {}, 1e9)", "--", ...commandLineArgs],
+				[
+					"-e",
+					`process.title = ${JSON.stringify(processTitle)}; setInterval(() => {}, 1e9)`,
+				],
 				{ stdio: "ignore" },
 			);
 
@@ -4232,7 +4428,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 							return (
 								child.exitCode === null &&
 								child.signalCode === null &&
-								commandLine.includes(commandLineMarker) &&
+								commandLine.trim() === processTitle &&
 								(!plugin.platformSupportsProcessSignature() ||
 									plugin.processStartSignature(child.pid) !== null)
 							);
@@ -4240,7 +4436,20 @@ describe("Cluster Plugin – stopC8Run", () => {
 						5000,
 						50,
 					),
-					`${fixture.id} command line must be observable before stop`,
+					`${fixture.id} command line must reach its simulated process title before stop`,
+				);
+				const observedCommandLine = execFileSync(
+					"ps",
+					["-o", "command=", "-p", String(child.pid)],
+					{ encoding: "utf-8" },
+				).trim();
+				assert.ok(
+					plugin.commandLineIncludesClusterLauncher(
+						observedCommandLine,
+						{ path: pidfile },
+						version,
+					),
+					`${fixture.id} command line must establish cluster ownership: ${observedCommandLine}`,
 				);
 				writeFileSync(pidfile, `${stalePid}\n${child.pid}`);
 				assert.deepStrictEqual(plugin.collectPidfilePids(cacheDir), [

@@ -2371,7 +2371,7 @@ function getProcessCommandLine(pid) {
   return null;
 }
 
-function commandLineIncludesPath(commandLine, path) {
+function findCommandLinePathMatch(commandLine, path) {
   const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
   const actual = normalizeProcessPath(commandLine);
   let index = actual.indexOf(expected);
@@ -2387,12 +2387,16 @@ function commandLineIncludesPath(commandLine, path) {
       (next === undefined || /[\s"'/:,*;]/.test(next)) &&
       !hasJvmOptionBeforePath
     ) {
-      return true;
+      return { start: index, end: index + expected.length };
     }
     index = actual.indexOf(expected, index + 1);
   }
 
-  return false;
+  return null;
+}
+
+function commandLineIncludesPath(commandLine, path) {
+  return findCommandLinePathMatch(commandLine, path) !== null;
 }
 
 function normalizeProcessPath(value) {
@@ -2458,62 +2462,225 @@ function findCommandLineMatchOutsideQuotes(commandLine, pattern) {
   return null;
 }
 
+function findLastCommandLineMatchOutsideQuotes(commandLine, pattern) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  let lastMatch = null;
+  for (const match of commandLine.matchAll(globalPattern)) {
+    if (
+      match.index !== undefined &&
+      !isInsideQuotedCommandLine(commandLine, match.index)
+    ) {
+      lastMatch = match;
+    }
+  }
+  return lastMatch;
+}
+
+const JAVA_CLASSPATH_OPTIONS = new Set(['-cp', '-classpath', '--class-path']);
+const JAVA_OPTIONS_WITH_ARGUMENTS = new Set([
+  ...JAVA_CLASSPATH_OPTIONS,
+  '-p',
+  '--module-path',
+  '--upgrade-module-path',
+  '--limit-modules',
+  '--add-modules',
+  '--add-exports',
+  '--add-opens',
+  '--add-reads',
+  '--patch-module',
+  '--enable-native-access',
+  '--system',
+]);
+
+function isJavaLaunchModeOption(argument) {
+  return (
+    argument === '-jar' ||
+    argument === '-m' ||
+    argument === '--module' ||
+    argument.startsWith('--module=') ||
+    argument.startsWith('-m=') ||
+    argument === '--source' ||
+    argument.startsWith('--source=')
+  );
+}
+
+function isJavaExecutable(commandLine) {
+  const firstArgument = Array.isArray(commandLine)
+    ? commandLine[0]
+    : (
+        /^\s*(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(commandLine) || []
+      ).slice(1).find(Boolean);
+  if (!firstArgument) {
+    return false;
+  }
+  const executableName = firstArgument
+    .replace(/\\/g, '/')
+    .split('/')
+    .at(-1)
+    .toLowerCase();
+  return /^javaw?(?:\.exe)?$/.test(executableName);
+}
+
+function findJavaClassLaunch(commandLine) {
+  let classpath;
+  for (let index = 1; index < commandLine.length; index += 1) {
+    const argument = commandLine[index];
+    if (JAVA_CLASSPATH_OPTIONS.has(argument)) {
+      classpath = commandLine[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('--class-path=')) {
+      classpath = argument.slice('--class-path='.length);
+      continue;
+    }
+    if (isJavaLaunchModeOption(argument)) {
+      return null;
+    }
+    if (JAVA_OPTIONS_WITH_ARGUMENTS.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      continue;
+    }
+    return { classpath, mainClass: argument };
+  }
+  return null;
+}
+
+function hasEarlierJavaLaunchArgument(commandLine) {
+  const argumentsList = commandLine.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const argument = argumentsList[index].replace(/^(['"])(.*)\1$/, '$2');
+    if (isJavaLaunchModeOption(argument)) {
+      return true;
+    }
+    if (JAVA_OPTIONS_WITH_ARGUMENTS.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function findFirstJavaLaunchArgument(commandLine) {
+  const argumentsList = commandLine.matchAll(/"[^"]*"|'[^']*'|\S+/g);
+  let skipNext = false;
+  for (const match of argumentsList) {
+    const rawArgument = match[0];
+    const argument = rawArgument.replace(/^(['"])(.*)\1$/, '$2');
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (isJavaLaunchModeOption(argument)) {
+      return null;
+    }
+    if (JAVA_OPTIONS_WITH_ARGUMENTS.has(argument)) {
+      skipNext = true;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      continue;
+    }
+    return { argument, index: match.index };
+  }
+  return null;
+}
+
+function matchesJavaMainClass(argument, mainClassPattern) {
+  const match = mainClassPattern.exec(argument);
+  return match !== null && match[0] === argument;
+}
+
 function commandLineIncludesJavaClasspath(
   commandLine,
   classpathPath,
   mainClassPattern,
 ) {
   if (Array.isArray(commandLine)) {
-    const mainClassIndex = commandLine.findIndex(
-      (argument) => !argument.startsWith('-') && mainClassPattern.test(argument),
-    );
-    if (mainClassIndex === -1) {
+    if (
+      commandLine.length === 1 ||
+      /^\s*javaw?(?:\.exe)?\s/i.test(commandLine[0])
+    ) {
+      return commandLineIncludesJavaClasspath(
+        commandLine.join(' '),
+        classpathPath,
+        mainClassPattern,
+      );
+    }
+    if (!isJavaExecutable(commandLine)) {
       return false;
     }
-
-    let classpath;
-    for (let index = 0; index + 1 < mainClassIndex; index += 1) {
-      if (commandLine[index] === '-cp' || commandLine[index] === '-classpath') {
-        classpath = commandLine[index + 1];
-      }
-    }
+    const launch = findJavaClassLaunch(commandLine);
     return Boolean(
-      classpath &&
-        !classpath.startsWith('-') &&
-        commandLineIncludesPath(classpath, classpathPath),
+      launch &&
+        launch.mainClass &&
+        matchesJavaMainClass(launch.mainClass, mainClassPattern) &&
+        launch.classpath &&
+        !launch.classpath.startsWith('-') &&
+        commandLineIncludesPath(launch.classpath, classpathPath),
     );
   }
 
-  const mainClass = findCommandLineMatchOutsideQuotes(
+  if (!isJavaExecutable(commandLine)) {
+    return false;
+  }
+  const classpathOption = findLastCommandLineMatchOutsideQuotes(
     commandLine,
-    mainClassPattern,
+    /(?:^|\s)(?:-cp|-classpath|--class-path)(?:\s+|=)/,
   );
-  const classpathOption = findCommandLineMatchOutsideQuotes(
-    commandLine,
-    /(?:^|\s)-(?:cp|classpath)\s+/,
-  );
+  if (!classpathOption || classpathOption.index === undefined) {
+    return false;
+  }
   if (
-    !mainClass ||
-    !classpathOption ||
-    mainClass.index === undefined ||
-    classpathOption.index === undefined
+    hasEarlierJavaLaunchArgument(
+      commandLine.slice(
+        /^\s*(?:"[^"]*"|'[^']*'|\S+)\s*/.exec(commandLine)?.[0].length || 0,
+        classpathOption.index,
+      ),
+    )
   ) {
     return false;
   }
 
   const classpathStart = classpathOption.index + classpathOption[0].length;
-  const classpathAndOptions = commandLine.slice(classpathStart, mainClass.index);
-  // Flattened BSD ps output loses argv boundaries; a class-looking token after
-  // -D may still be part of its value, so fail closed on that ambiguous region.
-  const hasJvmPropertyBeforeMainClass = findCommandLineMatchOutsideQuotes(
+  const classpathAndOptions = commandLine.slice(classpathStart);
+  const classpathMatch = findCommandLinePathMatch(
     classpathAndOptions,
+    classpathPath,
+  );
+  if (classpathMatch === null) {
+    return false;
+  }
+  const normalizedClasspathAndOptions =
+    normalizeProcessPath(classpathAndOptions);
+  const classpathPrefix = normalizedClasspathAndOptions.slice(
+    0,
+    classpathMatch.start,
+  );
+  if (/\s/.test(classpathPrefix)) {
+    return false;
+  }
+  const argumentsAfterClasspath = normalizedClasspathAndOptions
+    .slice(classpathMatch.end)
+    .replace(/^[/*:;][^\s]*\s*/, '')
+    .replace(/^["']\s*/, '');
+  const launch = findFirstJavaLaunchArgument(argumentsAfterClasspath);
+  if (!launch || !matchesJavaMainClass(launch.argument, mainClassPattern)) {
+    return false;
+  }
+  const hasJvmPropertyBeforeMainClass = findCommandLineMatchOutsideQuotes(
+    argumentsAfterClasspath.slice(0, launch.index),
     /(?:^|\s)-D(?:[^\s=]+)?(?:=|\s|$)/,
   );
-  return Boolean(
-    classpathStart < mainClass.index &&
-      !hasJvmPropertyBeforeMainClass &&
-      commandLineIncludesPath(classpathAndOptions, classpathPath),
-  );
+  return !hasJvmPropertyBeforeMainClass;
 }
 
 function commandLineIncludesConnectorsClasspath(commandLine, installDir) {
