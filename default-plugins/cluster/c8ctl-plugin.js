@@ -21,6 +21,7 @@ import {
   rmSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   readSync,
   statSync,
 } from 'node:fs';
@@ -2371,6 +2372,44 @@ function getProcessCommandLine(pid) {
   return null;
 }
 
+function getProcessExecutablePath(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  const platform = osPlatform();
+  try {
+    if (platform === 'linux') {
+      return readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, '');
+    }
+    if (platform === 'darwin' || platform.endsWith('bsd')) {
+      const output = execFileSync(
+        'lsof',
+        ['-a', '-p', String(pid), '-d', 'txt', '-Fn'],
+        { encoding: 'utf-8', timeout: 3000 },
+      );
+      return /^n(.+)$/m.exec(output)?.[1]?.trim() || null;
+    }
+    if (platform === 'win32') {
+      const output = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+            'if ($p) { $p.ExecutablePath }',
+        ],
+        { encoding: 'utf-8', timeout: 10000 },
+      ).trim();
+      return output || null;
+    }
+  } catch {
+    // Without the OS executable image, command-line text cannot prove ownership.
+  }
+  return null;
+}
+
 function findCommandLinePathMatch(commandLine, path) {
   const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
   const actual = normalizeProcessPath(commandLine);
@@ -2546,25 +2585,25 @@ function isInsideQuotedCommandLine(commandLine, position) {
   let quote = null;
   for (let index = 0; index < position; index += 1) {
     const character = commandLine[index];
-    if (quote) {
-      if (character !== quote) {
-        continue;
-      }
-      let backslashCount = 0;
-      for (
-        let previous = index - 1;
-        previous >= 0 && commandLine[previous] === '\\';
-        previous -= 1
-      ) {
-        backslashCount += 1;
-      }
-      if (backslashCount % 2 === 0) {
-        quote = null;
-      }
-    } else if (
-      (character === '"' || character === "'") &&
-      (index === 0 || /[\s=]/.test(commandLine[index - 1]))
+    if (character !== '"' && character !== "'") {
+      continue;
+    }
+
+    let backslashCount = 0;
+    for (
+      let previous = index - 1;
+      previous >= 0 && commandLine[previous] === '\\';
+      previous -= 1
     ) {
+      backslashCount += 1;
+    }
+    if (backslashCount % 2 !== 0) {
+      continue;
+    }
+
+    if (quote === character) {
+      quote = null;
+    } else if (quote === null) {
       quote = character;
     }
   }
@@ -2642,6 +2681,14 @@ function isJavaExecutable(commandLine) {
     .split('/')
     .at(-1)
     .toLowerCase();
+  return /^javaw?(?:\.exe)?$/.test(executableName);
+}
+
+function isJavaExecutableImagePath(executablePath) {
+  if (typeof executablePath !== 'string') {
+    return false;
+  }
+  const executableName = basename(executablePath.replace(/\\/g, '/')).toLowerCase();
   return /^javaw?(?:\.exe)?$/.test(executableName);
 }
 
@@ -2840,11 +2887,7 @@ export function commandLineIncludesClusterLauncher(commandLine, entry, version) 
       ? installDirName.slice('c8run-'.length)
       : version;
     const componentDir = join(installDir, `${component}-${installedVersion}`);
-    const componentBin = join(
-      componentDir,
-      'bin',
-      executable,
-    );
+    const componentBin = join(componentDir, 'bin', executable);
     if (
       commandLineIncludesArgumentPath(commandLine, componentBin) ||
       (component === 'camunda-zeebe' &&
@@ -2863,22 +2906,63 @@ export function commandLineIncludesClusterLauncher(commandLine, entry, version) 
   });
 }
 
-/**
- * True when `pid` is alive AND, where we captured a start signature for it, that
- * signature still matches — i.e. it is the ORIGINAL recorded process, not an
- * unrelated one that reused the PID after the original exited. A recorded entry
- * with NO signature is trusted (liveness only) ONLY on platforms that cannot
- * fingerprint at all; on a fingerprinting platform our writer never persists a
- * signature-less PID (#568), so a signature-less entry there can only be a
- * stale/legacy/hand-edited `cluster.pids` and is rejected rather than risk
- * signalling a reused, unrelated process. When a signature WAS recorded but the
- * platform cannot reproduce one now (transient `ps` failure), the guard still
- * degrades to liveness only, never inventing a false negative that would strand
- * a real orphan.
- */
-export function recordedPidIsLive(pid, signature) {
-  if (!isPidAlive(pid)) {
+function processExecutableMatchesClusterLauncher(
+  executablePath,
+  commandLine,
+  entry,
+  version,
+) {
+  if (typeof executablePath !== 'string') {
     return false;
+  }
+  const processName = basename(entry.path, '.process');
+  const component =
+    processName === 'camunda' || processName.startsWith('camunda-')
+      ? 'camunda-zeebe'
+      : processName.startsWith('connectors')
+        ? 'connectors'
+        : processName;
+  const installDirs = [dirname(entry.path), dirname(dirname(entry.path))];
+
+  if (isJavaExecutableImagePath(executablePath)) {
+    if (typeof commandLine !== 'string') {
+      return false;
+    }
+    return installDirs.some((installDir) => {
+      const installDirName = basename(installDir);
+      const installedVersion = installDirName.startsWith('c8run-')
+        ? installDirName.slice('c8run-'.length)
+        : version;
+      const componentDir = join(installDir, `${component}-${installedVersion}`);
+      return (
+        (component === 'connectors' &&
+          commandLineIncludesConnectorsClasspath(commandLine, installDir)) ||
+        (component === 'camunda-zeebe' &&
+          commandLineIncludesCamundaClasspath(commandLine, componentDir))
+      );
+    });
+  }
+
+  const actualPath = stripTrailingSlashes(
+    normalizeProcessPath(resolve(executablePath)),
+  );
+  return installDirs.some((installDir) => {
+    const installDirName = basename(installDir);
+    const installedVersion = installDirName.startsWith('c8run-')
+      ? installDirName.slice('c8run-'.length)
+      : version;
+    const componentDir = join(installDir, `${component}-${installedVersion}`);
+    const executable = component === 'camunda-zeebe' ? 'camunda' : component;
+    const expectedPath = stripTrailingSlashes(
+      normalizeProcessPath(resolve(componentDir, 'bin', executable)),
+    );
+    return actualPath === expectedPath;
+  });
+}
+
+function recordedPidStatus(pid, signature) {
+  if (!isPidAlive(pid)) {
+    return 'stale';
   }
   if (!signature) {
     // No signature recorded. On a fingerprinting platform this can only be a
@@ -2887,10 +2971,22 @@ export function recordedPidIsLive(pid, signature) {
     // — refuse it. Only non-fingerprinting platforms keep the liveness-only
     // degrade, since there no recorded PID can ever carry a signature and
     // rejecting would strand every real orphan (#560/#568).
-    return !platformSupportsProcessSignature();
+    return platformSupportsProcessSignature() ? 'stale' : 'live';
   }
   const current = processStartSignature(pid);
-  return current === null || current === signature;
+  if (current === null) {
+    // Unknown identity stays visible to status/stop, but is never signalable.
+    return platformSupportsProcessSignature() ? 'unknown' : 'live';
+  }
+  return current === signature ? 'live' : 'stale';
+}
+
+/**
+ * True only when the PID is alive and its recorded identity is confirmed. An
+ * unavailable identity query is unknown, not proof that the PID was reused.
+ */
+export function recordedPidIsLive(pid, signature) {
+  return recordedPidStatus(pid, signature) === 'live';
 }
 
 /**
@@ -3047,7 +3143,7 @@ function livePidfileEntries(
     if (!signatureChecks.has(key)) {
       signatureChecks.set(
         key,
-        recordedPidIsLive(entry.pid, recordedSignature),
+        recordedPidStatus(entry.pid, recordedSignature) !== 'stale',
       );
     }
     if (signatureChecks.get(key)) {
@@ -3175,10 +3271,15 @@ function hasUnverifiablePidfileOwnership(cacheDir, version, pidfileAttempt) {
     if (pidfileAttempt.get(entry.pid)?.recordedOwnership) {
       continue;
     }
+    const executablePath = getProcessExecutablePath(entry.pid);
     const commandLine = getProcessCommandLine(entry.pid);
     if (
-      !commandLine ||
-      !commandLineIncludesClusterLauncher(commandLine, entry, version)
+      !processExecutableMatchesClusterLauncher(
+        executablePath,
+        commandLine,
+        entry,
+        version,
+      )
     ) {
       return true;
     }
@@ -3349,7 +3450,7 @@ function pidfileSurvivorIsLive(survivor) {
     // but never signal it: a pidfile without a captured identity may be stale.
     return isPidAlive(survivor.pid);
   }
-  return recordedPidIsLive(survivor.pid, survivor.signature);
+  return recordedPidStatus(survivor.pid, survivor.signature) !== 'stale';
 }
 
 function livePidfileSurvivors(record) {
@@ -3519,7 +3620,7 @@ export function liveRecordedPids(cacheDir) {
   }
   const livePids = new Set();
   for (const { pid, signature } of recordedClusterPidSignatures(record).values()) {
-    if (recordedPidIsLive(pid, signature)) {
+    if (recordedPidStatus(pid, signature) !== 'stale') {
       livePids.add(pid);
     }
   }
@@ -3640,7 +3741,7 @@ export function isVersionInstanceRunning(cacheDir, version) {
     record &&
       ((record.version === version &&
         record.pids.some((pid) =>
-          recordedPidIsLive(pid, record.signatures?.[pid]),
+          recordedPidStatus(pid, record.signatures?.[pid]) !== 'stale',
         )) ||
         livePidfileSurvivors(record).some(
           (survivor) => survivor.version === version,
@@ -3686,9 +3787,9 @@ async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {
     }
     await sleep(pollMs);
   }
-  // Confirmed gone once the ORIGINAL recorded process is no longer live — a
-  // signature mismatch (PID reuse) counts as gone: the process we tracked ended.
-  return !recordedPidIsLive(pid, signature);
+  // Only a dead PID or a confirmed signature mismatch proves the original
+  // process is gone; a failed identity query must remain incomplete.
+  return recordedPidStatus(pid, signature) === 'stale';
 }
 
 /**
@@ -4466,7 +4567,7 @@ export async function stopC8Run(
   // when every stopped process identity points to the same version.
   const stoppedVersions = new Set(stoppedVersion ? [stoppedVersion] : []);
   for (const candidate of [...pidfileStopCandidates, ...reaperCandidates]) {
-    if (!recordedPidIsLive(candidate.pid, candidate.signature)) {
+    if (recordedPidStatus(candidate.pid, candidate.signature) === 'stale') {
       stoppedVersions.add(candidate.version);
     }
   }

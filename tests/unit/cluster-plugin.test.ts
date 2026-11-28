@@ -48,6 +48,37 @@ function spawnClusterLauncher(commandLine: string) {
 	});
 }
 
+function mockProcessExecutablePaths(
+	pathsByPid: Record<number, string>,
+	mockBinDir: string,
+) {
+	const originalPlatform = os.platform;
+	const originalPath = process.env.PATH;
+	mkdirSync(mockBinDir, { recursive: true });
+	const pathsFile = join(mockBinDir, "executable-paths.json");
+	writeFileSync(pathsFile, JSON.stringify(pathsByPid));
+	writeFileSync(
+		join(mockBinDir, "lsof"),
+		`#!/usr/bin/env node\nconst { readFileSync } = require("node:fs");\nconst args = process.argv.slice(2);\nconst pid = args[args.indexOf("-p") + 1];\nconst paths = JSON.parse(readFileSync(${JSON.stringify(pathsFile)}, "utf8"));\nif (paths[pid]) process.stdout.write(\`p\${pid}\\nfTXT\\nn\${paths[pid]}\\n\`);\n`,
+		{ mode: 0o755 },
+	);
+	os.platform = () => "darwin";
+	syncBuiltinESMExports();
+	process.env.PATH = originalPath
+		? `${mockBinDir}${delimiter}${originalPath}`
+		: mockBinDir;
+
+	return () => {
+		if (originalPath === undefined) {
+			delete process.env.PATH;
+		} else {
+			process.env.PATH = originalPath;
+		}
+		os.platform = originalPlatform;
+		syncBuiltinESMExports();
+	};
+}
+
 /**
  * Upper bound for obtaining a real process start signature. On Windows each
  * lookup is a blocking `powershell` + CIM call with a 10 s per-call timeout in
@@ -3342,21 +3373,24 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 		writeFileSync(join(installDir, "camunda.process"), String(pid));
 		writeFileSync(join(cacheDir, "cluster.active"), "running");
 		writeFileSync(join(cacheDir, "cluster.version"), "8.9");
+		const restoreProcessExecutablePaths = mockProcessExecutablePaths(
+			{ [pid]: componentMetadata },
+			join(cacheDir, "mock-bin"),
+		);
 		// Fake c8run: signals the process like the real `c8run stop`, or does nothing.
 		writeFileSync(
 			join(installDir, C8RUN_BINARY),
 			`#!/bin/sh\n${killOnStop ? `kill -TERM ${pid}\n` : ""}exit 0\n`,
 			{ mode: 0o755 },
 		);
-		return { cacheDir, dataDirs, slow };
+		return { cacheDir, dataDirs, restoreProcessExecutablePaths, slow };
 	}
 
 	test("stop --purge waits for a slow-shutting-down cluster and then purges", {
 		skip: process.platform === "win32",
 	}, async () => {
-		const { cacheDir, dataDirs, slow } = await setupStopPurgeFixture({
-			killOnStop: true,
-		});
+		const { cacheDir, dataDirs, restoreProcessExecutablePaths, slow } =
+			await setupStopPurgeFixture({ killOnStop: true });
 		const prevCacheDir = process.env.C8RUN_CACHE_DIR;
 		process.env.C8RUN_CACHE_DIR = cacheDir;
 		const restoreExit = mockProcessExit();
@@ -3364,6 +3398,7 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 			await plugin.commands.cluster(["stop", "--purge"]).catch(() => {});
 		} finally {
 			restoreExit();
+			restoreProcessExecutablePaths();
 			if (prevCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
 			else process.env.C8RUN_CACHE_DIR = prevCacheDir;
 			slow.kill("SIGKILL");
@@ -3377,9 +3412,8 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 		skip: process.platform === "win32",
 	}, async () => {
 		// c8run stop does nothing here, so the process stays alive past the timeout.
-		const { cacheDir, dataDirs, slow } = await setupStopPurgeFixture({
-			killOnStop: false,
-		});
+		const { cacheDir, dataDirs, restoreProcessExecutablePaths, slow } =
+			await setupStopPurgeFixture({ killOnStop: false });
 		const prevCacheDir = process.env.C8RUN_CACHE_DIR;
 		const prevWait = process.env.C8CTL_STOP_WAIT_TIMEOUT_MS;
 		process.env.C8RUN_CACHE_DIR = cacheDir;
@@ -3392,6 +3426,7 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 			await plugin.commands.cluster(["stop", "--purge"]).catch(() => {});
 		} finally {
 			restoreExit();
+			restoreProcessExecutablePaths();
 			if (prevCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
 			else process.env.C8RUN_CACHE_DIR = prevCacheDir;
 			if (prevWait === undefined) delete process.env.C8CTL_STOP_WAIT_TIMEOUT_MS;
@@ -3754,9 +3789,14 @@ describe("Cluster Plugin – stopC8Run", () => {
 		mkdirSync(installDir, { recursive: true });
 		const pidfile = join(installDir, "camunda.process");
 		const stoppedMarker = join(tempDir, "live-version-stopped");
-		const child = spawnClusterLauncher(
-			join(installDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
+		const componentLauncher = join(
+			installDir,
+			"camunda-zeebe-8.10.5",
+			"bin",
+			"camunda",
 		);
+		const child = spawnClusterLauncher(componentLauncher);
+		let restoreProcessExecutablePaths: (() => void) | undefined;
 
 		try {
 			await new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -3764,6 +3804,10 @@ describe("Cluster Plugin – stopC8Run", () => {
 				child.once("error", rejectSpawn);
 			});
 			assert.ok(child.pid, "the live version process must have a PID");
+			restoreProcessExecutablePaths = mockProcessExecutablePaths(
+				{ [child.pid]: componentLauncher },
+				join(tempDir, "mock-bin"),
+			);
 			const signature = plugin.processStartSignature(child.pid);
 			assert.ok(signature, "the live version process must have a signature");
 			writeFileSync(pidfile, String(child.pid));
@@ -3799,6 +3843,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.equal(stoppedVersion, liveVersion);
 			assert.equal(existsSync(pidfile), false);
 		} finally {
+			restoreProcessExecutablePaths?.();
 			if (child.pid && plugin.isPidAlive(child.pid)) {
 				try {
 					process.kill(child.pid, "SIGKILL");
@@ -3909,6 +3954,62 @@ describe("Cluster Plugin – stopC8Run", () => {
 			);
 			assert.equal(plugin.isPidAlive(child.pid), true);
 			assert.equal(existsSync(pidfile), true);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	test("does not authorize an untracked pidfile from a caller-controlled launcher argv[0]", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const version = "8.10.1";
+		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+		const pidfile = join(installDir, "camunda.process");
+		const launcherPath = join(
+			installDir,
+			`camunda-zeebe-${version}`,
+			"bin",
+			"camunda",
+		);
+		const stopMarker = join(tempDir, "forged-argv0-stop-called");
+		mkdirSync(installDir, { recursive: true });
+
+		const child = spawnClusterLauncher(launcherPath);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "the stand-in process must have a PID");
+			writeFileSync(pidfile, String(child.pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${stopMarker}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+
+			await assert.rejects(
+				() =>
+					plugin.stopC8Run({ cacheDir: tempDir, version }, false, {
+						timeoutMs: 25,
+					}),
+				/Stop incomplete/,
+			);
+
+			assert.strictEqual(
+				existsSync(stopMarker),
+				false,
+				"a spoofed argv[0] must not authorize c8run to consume the pidfile",
+			);
+			assert.strictEqual(plugin.isPidAlive(child.pid), true);
+			assert.strictEqual(existsSync(pidfile), true);
 		} finally {
 			if (child.pid && plugin.isPidAlive(child.pid)) {
 				try {
@@ -4051,6 +4152,27 @@ describe("Cluster Plugin – stopC8Run", () => {
 			),
 			true,
 		);
+		for (const quote of ['"', "'"]) {
+			const propertyArgument = `-Dfoo:${quote}x -cp ${camundaClasspath}${quote}`;
+			assert.strictEqual(
+				plugin.commandLineIncludesClusterLauncher(
+					`java ${propertyArgument} ${camundaMainClass}`,
+					camundaEntry,
+					version,
+				),
+				false,
+				"flattened JVM properties must not make quoted options look like argv",
+			);
+			assert.strictEqual(
+				plugin.commandLineIncludesClusterLauncher(
+					["java", propertyArgument, camundaMainClass],
+					camundaEntry,
+					version,
+				),
+				false,
+				"the flattened representation must agree with the original argv",
+			);
+		}
 	});
 
 	test("requires a matching Java class launch target", () => {
@@ -4482,6 +4604,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				],
 				{ stdio: "ignore" },
 			);
+			let restoreProcessExecutablePaths: (() => void) | undefined;
 
 			try {
 				await new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -4509,6 +4632,14 @@ describe("Cluster Plugin – stopC8Run", () => {
 						50,
 					),
 					`${fixture.id} command line must reach its simulated process title before stop`,
+				);
+				const executablePath =
+					fixture.kind === "batch"
+						? join(componentDir, "bin", "camunda")
+						: join(cacheDir, "mock-java", "bin", "java");
+				restoreProcessExecutablePaths = mockProcessExecutablePaths(
+					{ [child.pid]: executablePath },
+					join(cacheDir, "mock-bin"),
 				);
 				const observedCommandLine = execFileSync(
 					"ps",
@@ -4559,6 +4690,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				);
 				assert.equal(existsSync(pidfile), false);
 			} finally {
+				restoreProcessExecutablePaths?.();
 				if (child.pid && plugin.isPidAlive(child.pid)) {
 					try {
 						process.kill(child.pid, "SIGKILL");
@@ -4827,7 +4959,11 @@ describe("Cluster Plugin – stopC8Run", () => {
 				/Stop incomplete/,
 			);
 
-			assert.strictEqual(existsSync(pidfile), false);
+			assert.strictEqual(
+				existsSync(pidfile),
+				true,
+				"an unverified launcher must not let c8run consume the pidfile",
+			);
 			assert.strictEqual(plugin.isPidAlive(survivor.pid), true);
 			assert.deepStrictEqual(
 				plugin.readRunningClusterRecord(tempDir)?.pidfileSurvivors,
@@ -5154,6 +5290,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 		const originalPlatform = os.platform;
 		const originalPath = process.env.PATH;
+		let restoreProcessExecutablePaths: (() => void) | undefined;
 
 		try {
 			await new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -5178,6 +5315,17 @@ describe("Cluster Plugin – stopC8Run", () => {
 			process.env.PATH = originalPath
 				? `${mockBinDir}${delimiter}${originalPath}`
 				: mockBinDir;
+			restoreProcessExecutablePaths = mockProcessExecutablePaths(
+				{
+					[replacement.pid]: join(
+						installDir,
+						"camunda-zeebe-8.10.1",
+						"bin",
+						"camunda",
+					),
+				},
+				mockBinDir,
+			);
 
 			const version = "8.10.1";
 			writeFileSync(pidfile, String(replacement.pid));
@@ -5204,6 +5352,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			assert.strictEqual(existsSync(pidfile), false);
 			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
 		} finally {
+			restoreProcessExecutablePaths?.();
 			if (originalPath === undefined) {
 				delete process.env.PATH;
 			} else {
@@ -5349,6 +5498,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 		const originalPlatform = os.platform;
 		const originalPath = process.env.PATH;
+		let restoreProcessExecutablePaths: (() => void) | undefined;
 
 		try {
 			await Promise.all(
@@ -5393,6 +5543,23 @@ describe("Cluster Plugin – stopC8Run", () => {
 			process.env.PATH = originalPath
 				? `${mockBinDir}${delimiter}${originalPath}`
 				: mockBinDir;
+			restoreProcessExecutablePaths = mockProcessExecutablePaths(
+				{
+					[first.pid]: join(
+						firstInstallDir,
+						"camunda-zeebe-8.10.1",
+						"bin",
+						"camunda",
+					),
+					[second.pid]: join(
+						secondInstallDir,
+						"camunda-zeebe-8.10.2",
+						"bin",
+						"camunda",
+					),
+				},
+				mockBinDir,
+			);
 			const originalSecondSignature = plugin.processStartSignature(second.pid);
 			assert.ok(
 				originalSecondSignature,
@@ -5441,6 +5608,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				"the replacement process must not be signalled by the later launcher",
 			);
 		} finally {
+			restoreProcessExecutablePaths?.();
 			if (originalPath === undefined) {
 				delete process.env.PATH;
 			} else {
@@ -5718,6 +5886,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			const child = spawnClusterLauncher(
 				join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
 			);
+			let restoreProcessExecutablePaths: (() => void) | undefined;
 			await new Promise<void>((resolveSpawn, rejectSpawn) => {
 				child.once("spawn", () => resolveSpawn());
 				child.once("error", rejectSpawn);
@@ -5743,6 +5912,17 @@ describe("Cluster Plugin – stopC8Run", () => {
 					`#!/bin/sh\nkill -TERM ${child.pid}\nwhile kill -0 ${child.pid} 2>/dev/null; do sleep 0.05; done\nexit 0\n`,
 					{ mode: 0o755 },
 				);
+				restoreProcessExecutablePaths = mockProcessExecutablePaths(
+					{
+						[child.pid]: join(
+							runningBinaryDir,
+							"camunda-zeebe-8.10.5",
+							"bin",
+							"camunda",
+						),
+					},
+					join(tempDir, "mock-bin"),
+				);
 
 				const stopped = await plugin.stopC8Run({
 					cacheDir: tempDir,
@@ -5764,6 +5944,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 					"an idle version's no-op stop must not be run",
 				);
 			} finally {
+				restoreProcessExecutablePaths?.();
 				if (child.pid && plugin.isPidAlive(child.pid)) {
 					try {
 						process.kill(child.pid, "SIGKILL");
@@ -5807,7 +5988,10 @@ describe("Cluster Plugin – stopC8Run", () => {
 			});
 			assert.ok(child.pid, "spawned child must have a PID");
 			const pid = child.pid;
-			await liveSelfRecord({ version, pid });
+			plugin.writeRunningClusterRecord(
+				tempDir,
+				await liveSelfRecord({ version, pid }),
+			);
 
 			mkdirSync(installDir, { recursive: true });
 			writeFileSync(pidfile, String(pid));
@@ -5962,6 +6146,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			["-e", "setInterval(() => {}, 1e9)"],
 			{ stdio: "ignore" },
 		);
+		let restoreProcessExecutablePaths: (() => void) | undefined;
 
 		try {
 			await Promise.all(
@@ -5979,6 +6164,23 @@ describe("Cluster Plugin – stopC8Run", () => {
 				"second-version process must have a PID",
 			);
 			assert.ok(orphan.pid, "orphan process must have a PID");
+			restoreProcessExecutablePaths = mockProcessExecutablePaths(
+				{
+					[survivor.pid]: join(
+						firstVersionDir,
+						"camunda-zeebe-8.10.1",
+						"bin",
+						"camunda",
+					),
+					[stoppedByNextVersion.pid]: join(
+						secondVersionDir,
+						"camunda-zeebe-8.10.2",
+						"bin",
+						"camunda",
+					),
+				},
+				join(tempDir, "mock-bin"),
+			);
 
 			mkdirSync(firstVersionDir, { recursive: true });
 			mkdirSync(secondVersionDir, { recursive: true });
@@ -6034,6 +6236,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			);
 			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
 		} finally {
+			restoreProcessExecutablePaths?.();
 			for (const child of [survivor, stoppedByNextVersion, orphan]) {
 				if (child.pid && plugin.isPidAlive(child.pid)) {
 					try {
@@ -6064,6 +6267,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			const nextVersion = spawnClusterLauncher(
 				join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
 			);
+			let restoreProcessExecutablePaths: (() => void) | undefined;
 
 			try {
 				await Promise.all(
@@ -6077,6 +6281,23 @@ describe("Cluster Plugin – stopC8Run", () => {
 				);
 				assert.ok(survivor.pid, "first version process must have a PID");
 				assert.ok(nextVersion.pid, "second version process must have a PID");
+				restoreProcessExecutablePaths = mockProcessExecutablePaths(
+					{
+						[survivor.pid]: join(
+							firstVersionDir,
+							"camunda-zeebe-8.10.1",
+							"bin",
+							"camunda",
+						),
+						[nextVersion.pid]: join(
+							secondVersionDir,
+							"camunda-zeebe-8.10.2",
+							"bin",
+							"camunda",
+						),
+					},
+					join(tempDir, "mock-bin"),
+				);
 
 				mkdirSync(firstVersionDir, { recursive: true });
 				mkdirSync(secondVersionDir, { recursive: true });
@@ -6127,6 +6348,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 					"the first version's pidfile-only process must remain alive",
 				);
 			} finally {
+				restoreProcessExecutablePaths?.();
 				for (const child of [survivor, nextVersion]) {
 					if (child.pid && plugin.isPidAlive(child.pid)) {
 						try {
@@ -6165,6 +6387,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 			const releaseSecondStop = join(tempDir, "release-second-stop");
 			let stopError: unknown;
 			let stopPromise: Promise<void> | undefined;
+			let restoreProcessExecutablePaths: (() => void) | undefined;
 
 			try {
 				await Promise.all(
@@ -6179,6 +6402,23 @@ describe("Cluster Plugin – stopC8Run", () => {
 				assert.ok(original.pid, "first version process must have a PID");
 				assert.ok(survivor.pid, "late pidfile process must have a PID");
 				assert.ok(nextVersion.pid, "second version process must have a PID");
+				restoreProcessExecutablePaths = mockProcessExecutablePaths(
+					{
+						[original.pid]: join(
+							firstVersionDir,
+							"camunda-zeebe-8.10.1",
+							"bin",
+							"camunda",
+						),
+						[nextVersion.pid]: join(
+							secondVersionDir,
+							"camunda-zeebe-8.10.2",
+							"bin",
+							"camunda",
+						),
+					},
+					join(tempDir, "mock-bin"),
+				);
 
 				const originalPidfile = join(firstVersionDir, "camunda.process");
 				const latePidfile = join(firstVersionDir, "late.process");
@@ -6249,6 +6489,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 					writeFileSync(releaseSecondStop, "continue");
 				}
 				if (stopPromise) await stopPromise;
+				restoreProcessExecutablePaths?.();
 				for (const child of [original, survivor, nextVersion]) {
 					if (child.pid && plugin.isPidAlive(child.pid)) {
 						try {
@@ -6274,6 +6515,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		const clusterChild = spawnClusterLauncher(
 			join(runningBinaryDir, "camunda-zeebe-8.10.5", "bin", "camunda"),
 		);
+		let restoreProcessExecutablePaths: (() => void) | undefined;
 
 		try {
 			await Promise.all(
@@ -6287,6 +6529,17 @@ describe("Cluster Plugin – stopC8Run", () => {
 			);
 			assert.ok(unrelatedChild.pid, "unrelated child must have a PID");
 			assert.ok(clusterChild.pid, "cluster child must have a PID");
+			restoreProcessExecutablePaths = mockProcessExecutablePaths(
+				{
+					[clusterChild.pid]: join(
+						runningBinaryDir,
+						"camunda-zeebe-8.10.5",
+						"bin",
+						"camunda",
+					),
+				},
+				join(tempDir, "mock-bin"),
+			);
 			const currentSignature = plugin.processStartSignature(unrelatedChild.pid);
 			assert.ok(currentSignature, "unrelated child should have a signature");
 
@@ -6371,6 +6624,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 				"purge readiness must ignore the proven-stale PID",
 			);
 		} finally {
+			restoreProcessExecutablePaths?.();
 			for (const child of [unrelatedChild, clusterChild]) {
 				if (child.pid && plugin.isPidAlive(child.pid)) {
 					try {
@@ -6718,6 +6972,107 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 				true,
 				"where no PID can carry a signature, degrade to liveness-only so a real orphan is never stranded",
 			);
+		}
+	});
+
+	test("does not reap a recorded PID when its current signature cannot be read", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		const originalPlatform = os.platform;
+		const originalPath = process.env.PATH;
+
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			assert.ok(child.pid, "the recorded process must have a PID");
+			const pid = child.pid;
+			const mockBinDir = join(tempDir, "signature-mock-bin");
+			const signatureAvailable = join(tempDir, "signature-available");
+			mkdirSync(mockBinDir, { recursive: true });
+			writeFileSync(
+				join(mockBinDir, "ps"),
+				`#!/bin/sh\nif [ -f "${signatureAvailable}" ]; then\n  printf '%s\\n' 'Mon Jan 1 00:00:00 2020 /cluster'\n  exit 0\nfi\nexit 1\n`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(signatureAvailable, "");
+			os.platform = () => "darwin";
+			syncBuiltinESMExports();
+			process.env.PATH = originalPath
+				? `${mockBinDir}${delimiter}${originalPath}`
+				: mockBinDir;
+
+			const signature = plugin.processStartSignature(pid);
+			assert.ok(signature, "the initial process identity must be captured");
+			const installDir = join(tempDir, "c8run-8.9", "c8run-8.9");
+			const pidfile = join(installDir, "camunda.process");
+			const stopMarker = join(tempDir, "stop-started");
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(pidfile, String(pid));
+			writeFileSync(
+				join(installDir, C8RUN_BINARY),
+				`#!/bin/sh\ntouch "${stopMarker}"\nexit 0\n`,
+				{ mode: 0o755 },
+			);
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [pid],
+				signatures: { [pid]: signature },
+			});
+			rmSync(signatureAvailable);
+
+			assert.strictEqual(plugin.processStartSignature(pid), null);
+			assert.strictEqual(
+				plugin.recordedPidIsLive(pid, signature),
+				false,
+				"an unavailable current signature is not positive identity proof",
+			);
+			assert.deepStrictEqual(
+				plugin.liveRecordedPids(tempDir),
+				[pid],
+				"an unknown identity must remain visible for a later safe retry",
+			);
+			assert.strictEqual(await plugin.reapClusterProcesses(tempDir), 0);
+			assert.strictEqual(plugin.isPidAlive(pid), true);
+			await assert.rejects(
+				() => plugin.stopC8Run({ cacheDir: tempDir, version: "8.9" }),
+				/Stop incomplete/,
+			);
+			assert.deepStrictEqual(
+				plugin.liveRecordedPids(tempDir),
+				[pid],
+				"stop must retain an unknown process instead of reporting success",
+			);
+			assert.strictEqual(existsSync(stopMarker), false);
+			assert.strictEqual(existsSync(pidfile), true);
+
+			writeFileSync(signatureAvailable, "");
+			assert.strictEqual(await plugin.reapClusterProcesses(tempDir), 1);
+			assert.ok(
+				await pollUntil(async () => !plugin.isPidAlive(pid), 5000, 50),
+				"the process may be reaped after its recorded identity is verified",
+			);
+		} finally {
+			if (originalPath === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = originalPath;
+			}
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
 		}
 	});
 
