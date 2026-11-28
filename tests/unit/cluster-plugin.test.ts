@@ -48,6 +48,26 @@ function spawnClusterLauncher(commandLine: string) {
 	});
 }
 
+function spawnShellLauncher(scriptPath: string) {
+	mkdirSync(dirname(scriptPath), { recursive: true });
+	if (process.platform === "win32") {
+		const batchPath = `${scriptPath}.bat`;
+		writeFileSync(batchPath, "@echo off\r\nset /p line=\r\n");
+		return spawn(
+			process.env.ComSpec ?? "cmd.exe",
+			["/d", "/s", "/c", `""${batchPath}""`],
+			{ stdio: ["pipe", "ignore", "ignore"] },
+		);
+	}
+
+	writeFileSync(
+		scriptPath,
+		"#!/bin/sh\nwhile IFS= read -r line; do :; done\n",
+		{ mode: 0o755 },
+	);
+	return spawn(scriptPath, [], { stdio: ["pipe", "ignore", "ignore"] });
+}
+
 function mockProcessExecutablePaths(
 	pathsByPid: Record<number, string>,
 	mockBinDir: string,
@@ -896,6 +916,7 @@ describe("Cluster Plugin – purgeInstalledVersion", () => {
 		assert.doesNotThrow(() =>
 			plugin.purgeInstalledVersion(config, { reason: "as requested" }),
 		);
+
 		assert.strictEqual(
 			existsSync(installDir),
 			false,
@@ -4021,6 +4042,77 @@ describe("Cluster Plugin – stopC8Run", () => {
 		}
 	});
 
+	test("requires interpreter command lines to name the launcher after argv[0]", () => {
+		const version = "8.10.1";
+		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+		const pidfile = join(installDir, "connectors.process");
+		const launcherPath = join(
+			installDir,
+			`connectors-${version}`,
+			"bin",
+			"connectors",
+		);
+		const componentPath =
+			process.platform === "win32" ? `${launcherPath}.bat` : launcherPath;
+		const interpreterPath =
+			process.platform === "win32"
+				? "C:\\Windows\\System32\\cmd.exe"
+				: "/bin/sh";
+		const entry = { path: pidfile };
+		const interpreterOption = process.platform === "win32" ? "/c" : "-c";
+
+		assert.strictEqual(
+			plugin.processExecutableMatchesClusterLauncher(
+				interpreterPath,
+				[componentPath, interpreterOption, "echo forged"],
+				entry,
+				version,
+			),
+			false,
+			"a forged argv[0] must not prove the interpreter is running the launcher",
+		);
+		assert.strictEqual(
+			plugin.processExecutableMatchesClusterLauncher(
+				interpreterPath,
+				`"${componentPath}" ${interpreterOption} "echo forged"`,
+				entry,
+				version,
+			),
+			false,
+			"a flattened forged argv[0] must not prove the interpreter is running the launcher",
+		);
+
+		const actualCommandLine =
+			process.platform === "win32"
+				? [interpreterPath, "/d", "/s", "/c", `"${componentPath}"`]
+				: [interpreterPath, componentPath];
+		const actualFlattenedCommandLine =
+			process.platform === "win32"
+				? `${interpreterPath} /d /s /c "${componentPath}"`
+				: `${interpreterPath} "${componentPath}"`;
+
+		assert.strictEqual(
+			plugin.processExecutableMatchesClusterLauncher(
+				interpreterPath,
+				actualCommandLine,
+				entry,
+				version,
+			),
+			true,
+			"an exact component script entrypoint remains valid",
+		);
+		assert.strictEqual(
+			plugin.processExecutableMatchesClusterLauncher(
+				interpreterPath,
+				actualFlattenedCommandLine,
+				entry,
+				version,
+			),
+			true,
+			"the flattened exact component script entrypoint remains valid",
+		);
+	});
+
 	test("recognizes Camunda JVM descendants only with the distribution classpath", () => {
 		const version = "8.10.1";
 		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
@@ -4111,6 +4203,66 @@ describe("Cluster Plugin – stopC8Run", () => {
 		);
 	});
 
+	test("preserves Java main-class case while normalizing Windows paths", () => {
+		const originalPlatform = os.platform;
+		try {
+			os.platform = () => "win32";
+			syncBuiltinESMExports();
+
+			const version = "8.10.1";
+			const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+			const entry = { path: join(installDir, "connectors.process") };
+			const classpath = join(installDir, "*").toUpperCase();
+
+			for (const mainClass of [
+				"io.camunda.connector.runtime.app.ConnectorRuntimeApplication",
+				"org.springframework.boot.loader.launch.PropertiesLauncher",
+			]) {
+				assert.strictEqual(
+					plugin.commandLineIncludesClusterLauncher(
+						`java -cp "${classpath}" ${mainClass}`,
+						entry,
+						version,
+					),
+					true,
+					`${mainClass} must retain its case during Windows path normalization`,
+				);
+			}
+		} finally {
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+		}
+	});
+
+	test("preserves launch parsing when Windows path normalization expands Unicode", () => {
+		const originalPlatform = os.platform;
+		try {
+			os.platform = () => "win32";
+			syncBuiltinESMExports();
+
+			const version = "8.10.1";
+			const installDir = join(
+				tempDir,
+				`cache-\u0130\u0130\u0130`,
+				`c8run-${version}`,
+			);
+			const entry = { path: join(installDir, "connectors.process") };
+			const classpath = join(installDir, "*").toUpperCase();
+
+			assert.strictEqual(
+				plugin.commandLineIncludesClusterLauncher(
+					`java -cp "${classpath}" io.camunda.connector.runtime.app.ConnectorRuntimeApplication`,
+					entry,
+					version,
+				),
+				true,
+			);
+		} finally {
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+		}
+	});
+
 	test("rejects class-name lookalikes embedded in flattened JVM properties", () => {
 		const version = "8.10.1";
 		const installDir = join(
@@ -4171,6 +4323,28 @@ describe("Cluster Plugin – stopC8Run", () => {
 				),
 				false,
 				"the flattened representation must agree with the original argv",
+			);
+		}
+		for (const fixture of [
+			{
+				entry: camundaEntry,
+				classpath: camundaClasspath,
+				mainClass: camundaMainClass,
+			},
+			{
+				entry: connectorsEntry,
+				classpath: connectorsClasspath,
+				mainClass: connectorsMainClass,
+			},
+		]) {
+			assert.strictEqual(
+				plugin.commandLineIncludesClusterLauncher(
+					`java -cp /opt/worker.jar:/-Dloader.path:${fixture.classpath} ${fixture.mainClass}`,
+					fixture.entry,
+					version,
+				),
+				false,
+				"a distribution path embedded in flattened JVM property text is not classpath evidence",
 			);
 		}
 	});
@@ -4438,6 +4612,141 @@ describe("Cluster Plugin – stopC8Run", () => {
 				version,
 			),
 			true,
+		);
+	});
+
+	test("accepts Linux argv arrays for Java process ownership", () => {
+		const version = "8.10.1";
+		const installDir = join(
+			tempDir,
+			"cache with spaces",
+			`c8run-${version}`,
+			`c8run-${version}`,
+		);
+		const componentDir = join(installDir, `camunda-zeebe-${version}`);
+		const javaExecutable = join(
+			tempDir,
+			"java with spaces",
+			"bin",
+			process.platform === "win32" ? "java.exe" : "java",
+		);
+		const cases = [
+			{
+				entry: { path: join(installDir, "camunda.process") },
+				classpath: join(componentDir, "lib", "*"),
+				mainClass: "io.camunda.application.StandaloneCamunda",
+			},
+			{
+				entry: { path: join(installDir, "connectors.process") },
+				classpath: join(installDir, "*"),
+				mainClass:
+					"io.camunda.connector.runtime.app.ConnectorRuntimeApplication",
+			},
+		];
+
+		for (const fixture of cases) {
+			const commandLine = [
+				javaExecutable,
+				"-cp",
+				fixture.classpath,
+				fixture.mainClass,
+			];
+			assert.strictEqual(
+				plugin.processExecutableMatchesClusterLauncher(
+					javaExecutable,
+					commandLine,
+					fixture.entry,
+					version,
+				),
+				true,
+			);
+		}
+	});
+
+	test("requires a supported interpreter and exact component script entrypoint", () => {
+		const version = "8.10.1";
+		const installDir = join(tempDir, `c8run-${version}`, `c8run-${version}`);
+		const componentBin = join(
+			installDir,
+			`camunda-zeebe-${version}`,
+			"bin",
+			"camunda",
+		);
+		const entry = { path: join(installDir, "camunda.process") };
+		const windows = process.platform === "win32";
+		const interpreter = windows
+			? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe")
+			: "/bin/sh";
+		const scriptPath = windows ? `${componentBin}.bat` : componentBin;
+		const commandLine = windows
+			? [interpreter, "/d", "/s", "/c", `"${scriptPath}"`]
+			: [interpreter, componentBin];
+
+		assert.strictEqual(
+			plugin.processExecutableMatchesClusterLauncher(
+				interpreter,
+				commandLine,
+				entry,
+				version,
+			),
+			true,
+		);
+		assert.strictEqual(
+			plugin.processExecutableMatchesClusterLauncher(
+				process.execPath,
+				[componentBin, "-e", "setInterval(() => {}, 1e9)"],
+				entry,
+				version,
+			),
+			false,
+			"a forged argv[0] must not make Node look like a component interpreter",
+		);
+		const originalPlatform = os.platform;
+		try {
+			os.platform = () => "win32";
+			syncBuiltinESMExports();
+			assert.strictEqual(
+				plugin.processExecutableMatchesClusterLauncher(
+					"C:\\Windows\\System32\\cmd.exe",
+					[
+						"C:\\Windows\\System32\\cmd.exe",
+						"/d",
+						"/s",
+						"/c",
+						`"${componentBin}.bat"`,
+					],
+					entry,
+					version,
+				),
+				true,
+			);
+			assert.strictEqual(
+				plugin.processExecutableMatchesClusterLauncher(
+					"C:\\Windows\\System32\\cmd.exe",
+					[
+						"C:\\Windows\\System32\\cmd.exe",
+						"/d",
+						"/s",
+						"/c",
+						`"${componentBin}-unrelated.bat"`,
+					],
+					entry,
+					version,
+				),
+				false,
+			);
+		} finally {
+			os.platform = originalPlatform;
+			syncBuiltinESMExports();
+		}
+		assert.strictEqual(
+			plugin.processExecutableMatchesClusterLauncher(
+				interpreter,
+				[interpreter, `${componentBin}-unrelated`],
+				entry,
+				version,
+			),
+			false,
 		);
 	});
 
@@ -6135,10 +6444,10 @@ describe("Cluster Plugin – stopC8Run", () => {
 	}, async () => {
 		const firstVersionDir = join(tempDir, "c8run-8.10.1", "c8run-8.10.1");
 		const secondVersionDir = join(tempDir, "c8run-8.10.2", "c8run-8.10.2");
-		const survivor = spawnClusterLauncher(
+		const survivor = spawnShellLauncher(
 			join(firstVersionDir, "camunda-zeebe-8.10.1", "bin", "camunda"),
 		);
-		const stoppedByNextVersion = spawnClusterLauncher(
+		const stoppedByNextVersion = spawnShellLauncher(
 			join(secondVersionDir, "camunda-zeebe-8.10.2", "bin", "camunda"),
 		);
 		const orphan = spawn(
@@ -6146,7 +6455,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 			["-e", "setInterval(() => {}, 1e9)"],
 			{ stdio: "ignore" },
 		);
-		let restoreProcessExecutablePaths: (() => void) | undefined;
 
 		try {
 			await Promise.all(
@@ -6164,23 +6472,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 				"second-version process must have a PID",
 			);
 			assert.ok(orphan.pid, "orphan process must have a PID");
-			restoreProcessExecutablePaths = mockProcessExecutablePaths(
-				{
-					[survivor.pid]: join(
-						firstVersionDir,
-						"camunda-zeebe-8.10.1",
-						"bin",
-						"camunda",
-					),
-					[stoppedByNextVersion.pid]: join(
-						secondVersionDir,
-						"camunda-zeebe-8.10.2",
-						"bin",
-						"camunda",
-					),
-				},
-				join(tempDir, "mock-bin"),
-			);
 
 			mkdirSync(firstVersionDir, { recursive: true });
 			mkdirSync(secondVersionDir, { recursive: true });
@@ -6236,7 +6527,6 @@ describe("Cluster Plugin – stopC8Run", () => {
 			);
 			assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
 		} finally {
-			restoreProcessExecutablePaths?.();
 			for (const child of [survivor, stoppedByNextVersion, orphan]) {
 				if (child.pid && plugin.isPidAlive(child.pid)) {
 					try {

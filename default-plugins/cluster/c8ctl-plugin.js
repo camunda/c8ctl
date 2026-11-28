@@ -2434,6 +2434,20 @@ function findCommandLinePathMatch(commandLine, path) {
   return null;
 }
 
+function originalOffsetForNormalizedProcessPath(value, normalizedOffset) {
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (normalizeProcessPath(value.slice(0, middle)).length < normalizedOffset) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
 function commandLineIncludesPath(commandLine, path) {
   return findCommandLinePathMatch(commandLine, path) !== null;
 }
@@ -2520,7 +2534,11 @@ function commandLineStartsWithScriptPath(commandLine, expected) {
   return false;
 }
 
-function commandLineIncludesArgumentPath(commandLine, path) {
+function commandLineIncludesArgumentPath(
+  commandLine,
+  path,
+  { allowArgv0 = true } = {},
+) {
   const expected = stripTrailingSlashes(normalizeProcessPath(resolve(path)));
   if (Array.isArray(commandLine)) {
     if (
@@ -2529,7 +2547,10 @@ function commandLineIncludesArgumentPath(commandLine, path) {
     ) {
       return false;
     }
-    if (commandLineArgumentMatchesPath(commandLine[0], expected)) {
+    if (
+      allowArgv0 &&
+      commandLineArgumentMatchesPath(commandLine[0], expected)
+    ) {
       return true;
     }
 
@@ -2558,14 +2579,17 @@ function commandLineIncludesArgumentPath(commandLine, path) {
     return false;
   }
 
-  if (commandLineStartsWithPath(commandLine, expected)) {
+  if (allowArgv0 && commandLineStartsWithPath(commandLine, expected)) {
     return true;
   }
   const firstArgument = readCommandLineArgument(commandLine);
   if (!firstArgument) {
     return false;
   }
-  if (commandLineArgumentMatchesPath(firstArgument.argument, expected)) {
+  if (
+    allowArgv0 &&
+    commandLineArgumentMatchesPath(firstArgument.argument, expected)
+  ) {
     return true;
   }
 
@@ -2579,6 +2603,21 @@ function commandLineIncludesArgumentPath(commandLine, path) {
     return commandLineStartsWithScriptPath(remainder, expected);
   }
   return false;
+}
+
+function componentLauncherPathMatches(
+  commandLine,
+  componentBin,
+  { allowArgv0 = true } = {},
+) {
+  return (
+    commandLineIncludesArgumentPath(commandLine, componentBin, {
+      allowArgv0,
+    }) ||
+    commandLineIncludesArgumentPath(commandLine, `${componentBin}.bat`, {
+      allowArgv0,
+    })
+  );
 }
 
 function isInsideQuotedCommandLine(commandLine, position) {
@@ -2690,6 +2729,17 @@ function isJavaExecutableImagePath(executablePath) {
   }
   const executableName = basename(executablePath.replace(/\\/g, '/')).toLowerCase();
   return /^javaw?(?:\.exe)?$/.test(executableName);
+}
+
+function isSupportedScriptInterpreterImagePath(executablePath) {
+  if (typeof executablePath !== 'string') {
+    return false;
+  }
+  const executableName = basename(executablePath.replace(/\\/g, '/')).toLowerCase();
+  if (osPlatform() === 'win32') {
+    return executableName === 'cmd' || executableName === 'cmd.exe';
+  }
+  return ['sh', 'bash', 'dash', 'zsh', 'ksh'].includes(executableName);
 }
 
 function findJavaClassLaunch(commandLine) {
@@ -2835,11 +2885,19 @@ function commandLineIncludesJavaClasspath(
     0,
     classpathMatch.start,
   );
-  if (/\s/.test(classpathPrefix)) {
+  if (
+    /\s/.test(classpathPrefix) ||
+    /(?:^|[\s"'/:;])\/?-D[^/\s:=;]+[:=]/i.test(classpathPrefix)
+  ) {
     return false;
   }
-  const argumentsAfterClasspath = normalizedClasspathAndOptions
-    .slice(classpathMatch.end)
+  const argumentsAfterClasspath = classpathAndOptions
+    .slice(
+      originalOffsetForNormalizedProcessPath(
+        classpathAndOptions,
+        classpathMatch.end,
+      ),
+    )
     .replace(/^[/*:;][^\s]*\s*/, '')
     .replace(/^["']\s*/, '');
   const launch = findFirstJavaLaunchArgument(argumentsAfterClasspath);
@@ -2888,11 +2946,7 @@ export function commandLineIncludesClusterLauncher(commandLine, entry, version) 
       : version;
     const componentDir = join(installDir, `${component}-${installedVersion}`);
     const componentBin = join(componentDir, 'bin', executable);
-    if (
-      commandLineIncludesArgumentPath(commandLine, componentBin) ||
-      (component === 'camunda-zeebe' &&
-        commandLineIncludesArgumentPath(commandLine, `${componentBin}.bat`))
-    ) {
+    if (componentLauncherPathMatches(commandLine, componentBin)) {
       return true;
     }
 
@@ -2906,7 +2960,7 @@ export function commandLineIncludesClusterLauncher(commandLine, entry, version) 
   });
 }
 
-function processExecutableMatchesClusterLauncher(
+export function processExecutableMatchesClusterLauncher(
   executablePath,
   commandLine,
   entry,
@@ -2925,7 +2979,7 @@ function processExecutableMatchesClusterLauncher(
   const installDirs = [dirname(entry.path), dirname(dirname(entry.path))];
 
   if (isJavaExecutableImagePath(executablePath)) {
-    if (typeof commandLine !== 'string') {
+    if (typeof commandLine !== 'string' && !Array.isArray(commandLine)) {
       return false;
     }
     return installDirs.some((installDir) => {
@@ -2939,6 +2993,25 @@ function processExecutableMatchesClusterLauncher(
           commandLineIncludesConnectorsClasspath(commandLine, installDir)) ||
         (component === 'camunda-zeebe' &&
           commandLineIncludesCamundaClasspath(commandLine, componentDir))
+      );
+    });
+  }
+
+  if (isSupportedScriptInterpreterImagePath(executablePath)) {
+    if (typeof commandLine !== 'string' && !Array.isArray(commandLine)) {
+      return false;
+    }
+    return installDirs.some((installDir) => {
+      const installDirName = basename(installDir);
+      const installedVersion = installDirName.startsWith('c8run-')
+        ? installDirName.slice('c8run-'.length)
+        : version;
+      const componentDir = join(installDir, `${component}-${installedVersion}`);
+      const executable = component === 'camunda-zeebe' ? 'camunda' : component;
+      return componentLauncherPathMatches(
+        commandLine,
+        join(componentDir, 'bin', executable),
+        { allowArgv0: false },
       );
     });
   }
